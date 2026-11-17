@@ -1,0 +1,258 @@
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import axe from "axe-core";
+import { MemoryRouter, useNavigate } from "react-router";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { AppRoutes } from "./App";
+import { signIn, signOut, signedInEmail } from "./auth";
+
+vi.mock("./auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./auth")>()),
+  signedInEmail: vi.fn(() => null),
+  signOut: vi.fn(async () => {}),
+  addPasskey: vi.fn(async () => {}),
+  signIn: vi.fn(async () => {}),
+}));
+
+const MANIFEST = { id: "ds-1", title: "Lake levels", "archive:access": "public" };
+const NAME = "Invented Research Cooperative";
+
+/** The dataset routes get a dataset; search waits forever, since its heading needs no answer. */
+async function answer(url: string): Promise<Response> {
+  const path = new URL(url, "https://site").pathname;
+  if (path === "/api/datasets/ds-1") {
+    return Response.json({
+      id: "ds-1",
+      title: "Lake levels",
+      access: "public",
+      currentVersion: 2,
+      prefix: "open/ds-1/2/",
+      manifest: MANIFEST,
+      files: [],
+    });
+  }
+  if (path === "/api/datasets/ds-1/versions/2") {
+    return Response.json({ version: 2, prefix: "open/ds-1/2/", manifest: MANIFEST, files: [] });
+  }
+  if (path === "/api/datasets/ds-1/versions") {
+    return Response.json({ versions: [{ version: 2, prefix: "open/ds-1/2/" }] });
+  }
+  if (path.startsWith("/api/datasets/")) return Response.json({}, { status: 404 });
+  if (path === "/api/search") return Response.json({ total: 0, rows: [], facets: {} });
+  return new Promise(() => {});
+}
+
+beforeEach(() => {
+  vi.stubGlobal("fetch", vi.fn(answer));
+  vi.mocked(signedInEmail).mockReturnValue(null);
+  sessionStorage.clear();
+});
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+/** A link the test presses to navigate inside the app, as a reader following a link would. */
+function GoTo() {
+  const navigate = useNavigate();
+  return (
+    <button type="button" data-testid="go" onClick={(event) => navigate(event.currentTarget.value)}>
+      go
+    </button>
+  );
+}
+
+function renderAt(path: string) {
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <AppRoutes />
+      <GoTo />
+    </MemoryRouter>,
+  );
+}
+
+test.each([
+  ["/", "Search the archive", `Search · ${NAME}`],
+  ["/datasets/ds-1", "Lake levels", `Lake levels · ${NAME}`],
+  ["/datasets/ds-1/v2", "Lake levels", `Lake levels · ${NAME}`],
+  ["/datasets/missing", "Dataset not found", `Not found · ${NAME}`],
+  ["/about", "About the archive", `About · ${NAME}`],
+  ["/privacy", "Privacy", `Privacy · ${NAME}`],
+  ["/sign-in", "Sign in", `Sign in · ${NAME}`],
+  ["/nowhere", "Page not found", `Not found · ${NAME}`],
+  ["/datasets/ds-1/latest", "Page not found", `Not found · ${NAME}`],
+])("%s renders its heading and title", async (path, heading, title) => {
+  renderAt(path);
+
+  expect(await screen.findByRole("heading", { level: 1, name: heading })).toBeDefined();
+  await waitFor(() => expect(document.title).toBe(title));
+});
+
+test("the masthead shows the archive's name, Browse and About the archive; the footer the publisher", () => {
+  renderAt("/");
+
+  const banner = screen.getByRole("banner");
+  expect(banner.textContent).toContain(NAME);
+  expect(screen.getByRole("link", { name: "Browse" }).getAttribute("href")).toBe("/");
+  expect(screen.getByRole("link", { name: "About the archive" }).getAttribute("href")).toBe(
+    "/about",
+  );
+  expect(screen.getByRole("contentinfo").textContent).toContain(NAME);
+});
+
+test("the footer links to the privacy page", () => {
+  renderAt("/");
+
+  const footer = within(screen.getByRole("contentinfo"));
+  expect(footer.getByRole("link", { name: "Privacy" }).getAttribute("href")).toBe("/privacy");
+});
+
+test("the masthead shows the brand's logo", () => {
+  renderAt("/");
+
+  const logo = screen.getByRole("banner").querySelector("img");
+  expect(logo?.getAttribute("src")).toMatch(/^\/brand\/logo-[0-9a-f]{8}\.svg$/);
+  expect(logo?.getAttribute("alt")).toBe("");
+});
+
+test("the about page shows the intro and the contact", async () => {
+  renderAt("/about");
+
+  await screen.findByRole("heading", { level: 1, name: "About the archive" });
+  expect(screen.getByText(/shares the data behind its field studies/)).toBeDefined();
+  const main = within(screen.getByRole("main"));
+  expect(main.getByRole("link", { name: "archive-admin@example.org" }).getAttribute("href")).toBe(
+    "mailto:archive-admin@example.org",
+  );
+});
+
+test("the skip link leads the page and reaches main", () => {
+  renderAt("/");
+
+  const links = screen.getAllByRole("link");
+  expect(links[0]?.textContent).toBe("Skip to content");
+  const target = links[0]?.getAttribute("href")?.slice(1) ?? "";
+  const main = document.getElementById(target);
+  expect(main?.tagName).toBe("MAIN");
+  expect(main?.getAttribute("tabindex")).toBe("-1");
+});
+
+test("after navigating, focus is on the new page's h1", async () => {
+  renderAt("/");
+  await screen.findByRole("heading", { level: 1, name: "Search the archive" });
+  expect(document.activeElement).toBe(document.body);
+
+  const go = screen.getByTestId("go") as HTMLButtonElement;
+  go.value = "/datasets/ds-1";
+  act(() => go.click());
+
+  const heading = await screen.findByRole("heading", { level: 1, name: "Lake levels" });
+  await waitFor(() => expect(document.activeElement).toBe(heading));
+
+  go.value = "/about";
+  fireEvent.click(go);
+  const about = await screen.findByRole("heading", { level: 1, name: "About the archive" });
+  await waitFor(() => expect(document.activeElement).toBe(about));
+});
+
+test.each(["/", "/datasets/ds-1", "/about", "/privacy", "/nowhere", "/datasets/missing"])(
+  "an axe check of %s finds no violations",
+  async (path) => {
+    const { container } = renderAt(path);
+    await screen.findByRole("heading", { level: 1 });
+    await waitFor(() => expect(screen.queryByText(/Loading/)).toBeNull());
+
+    const results = await axe.run(container);
+    expect(results.violations).toEqual([]);
+  },
+);
+
+test("signed in, one Account button opens a menu naming the reader, with Account and Sign out", async () => {
+  vi.mocked(signedInEmail).mockReturnValue("reader@example.org");
+  renderAt("/");
+
+  const banner = within(screen.getByRole("banner"));
+  const trigger = banner.getByRole("button", { name: /Account/ });
+  expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  expect(banner.queryByRole("menuitem", { name: "Sign out" })).toBeNull();
+
+  fireEvent.click(trigger);
+  expect(trigger.getAttribute("aria-expanded")).toBe("true");
+  const menu = within(banner.getByRole("menu"));
+  expect(menu.getByText("reader@example.org")).toBeDefined();
+  expect(menu.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+    "Account",
+    "Sign out",
+  ]);
+  expect(menu.queryByRole("menuitem", { name: "Add a passkey" })).toBeNull();
+  fireEvent.click(menu.getByRole("menuitem", { name: "Account" }));
+  expect(await screen.findByRole("heading", { level: 1, name: "Account" })).toBeDefined();
+  expect(banner.queryByRole("menu")).toBeNull();
+
+  fireEvent.click(trigger);
+  fireEvent.click(within(banner.getByRole("menu")).getByRole("menuitem", { name: "Sign out" }));
+  expect(signOut).toHaveBeenCalled();
+});
+
+test("the account menu closes on Escape and returns focus to its button", () => {
+  vi.mocked(signedInEmail).mockReturnValue("reader@example.org");
+  renderAt("/");
+  const trigger = within(screen.getByRole("banner")).getByRole("button", { name: /Account/ });
+
+  fireEvent.click(trigger);
+  fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+
+  expect(screen.queryByRole("menu")).toBeNull();
+  expect(document.activeElement).toBe(trigger);
+});
+
+test("signed out, the header offers Sign in in the same place, coming back to this page", () => {
+  renderAt("/about");
+
+  const banner = within(screen.getByRole("banner"));
+  expect(banner.queryByRole("button", { name: /Account/ })).toBeNull();
+  fireEvent.click(banner.getByRole("button", { name: "Sign in" }));
+  expect(signIn).toHaveBeenCalledWith("/about");
+});
+
+test("the phone's Menu button opens a panel with every item, closes on Escape and returns focus", () => {
+  vi.mocked(signedInEmail).mockReturnValue("reader@example.org");
+  renderAt("/about");
+
+  const button = within(screen.getByRole("banner")).getByRole("button", { name: "Menu" });
+  expect(button.getAttribute("aria-expanded")).toBe("false");
+  expect(screen.queryByRole("navigation", { name: "Menu" })).toBeNull();
+
+  fireEvent.click(button);
+  expect(button.getAttribute("aria-expanded")).toBe("true");
+  expect(button.textContent).toBe("Close");
+  const panel = within(screen.getByRole("navigation", { name: "Menu" }));
+  expect(panel.getAllByRole("link").map((link) => link.textContent)).toEqual([
+    "Browse",
+    "About the archive",
+    "Account",
+  ]);
+  expect(panel.getByRole("link", { name: "About the archive" }).getAttribute("aria-current")).toBe(
+    "page",
+  );
+  expect(panel.getByText("reader@example.org")).toBeDefined();
+  expect(panel.getByRole("button", { name: "Sign out" })).toBeDefined();
+
+  fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+  expect(screen.queryByRole("navigation", { name: "Menu" })).toBeNull();
+  expect(document.activeElement).toBe(button);
+
+  fireEvent.click(button);
+  fireEvent.click(button);
+  expect(screen.queryByRole("navigation", { name: "Menu" })).toBeNull();
+  expect(document.activeElement).toBe(button);
+});
+
+test("signed out, the phone's menu panel ends with Sign in", () => {
+  renderAt("/about");
+
+  fireEvent.click(within(screen.getByRole("banner")).getByRole("button", { name: "Menu" }));
+  const panel = within(screen.getByRole("navigation", { name: "Menu" }));
+  fireEvent.click(panel.getByRole("button", { name: "Sign in" }));
+  expect(signIn).toHaveBeenCalledWith("/about");
+});

@@ -1,0 +1,290 @@
+"""The package manifest, `datapackage.json`, and its `archive:` additions."""
+
+import re
+from datetime import date, datetime
+from typing import Literal, Self
+
+from pydantic import Field as PydanticField
+from pydantic import NonNegativeInt, field_validator, model_validator
+
+from archive_contract._base import ArchiveModel
+from archive_contract.resources import Resource
+from archive_contract.rights import License, RightsStatus, rights_stated
+
+AccessLevel = Literal["public", "limited", "restricted", "description-only"]
+
+CORE_FIELDS: tuple[str, ...] = ("title", "description", "creator", "rights", "resources")
+"""Required before a package can be published, in the order `missing_core_fields` lists them."""
+
+RECOMMENDED_FIELDS: tuple[str, ...] = (
+    "keywords",
+    "contributors",
+    "archive:temporalCoverage",
+    "archive:spatialCoverage",
+    "archive:relatedIdentifiers",
+    "archive:funding",
+    "archive:methods",
+)
+"""Recommended fields, any of which a profile can promote to required."""
+
+MIN_DESCRIPTION_LENGTH = 50
+
+_VERSION = re.compile(r"[1-9][0-9]*")
+
+ORCID_PREFIX = "https://orcid.org/"
+_ORCID = re.compile(r"[0-9]{4}-[0-9]{4}-[0-9]{4}-[0-9]{3}[0-9X]")
+_ROR = re.compile(r"https://ror\.org/0[0-9a-z]{6}[0-9]{2}")
+
+
+def orcid_check_digit(digits: str) -> str:
+    """The ISO 7064 MOD 11-2 check character of an ORCID iD's first fifteen digits."""
+    total = 0
+    for digit in digits:
+        total = (total + int(digit)) * 2
+    result = (12 - total % 11) % 11
+    return "X" if result == 10 else str(result)
+
+
+def bare_orcid(value: str) -> str:
+    """An ORCID iD, bare or as its orcid.org address, as the bare iD; ValueError if not one."""
+    value = value.strip()
+    for prefix in (ORCID_PREFIX, "http://orcid.org/"):
+        if value.startswith(prefix):
+            value = value[len(prefix) :]
+    if not _ORCID.fullmatch(value):
+        raise ValueError("an ORCID iD is four groups of four digits, such as 0000-0002-1825-0097")
+    digits = value.replace("-", "")
+    if orcid_check_digit(digits[:15]) != digits[15]:
+        raise ValueError(f"{value} is not an ORCID iD: its check digit is wrong")
+    return value
+
+
+class Contributor(ArchiveModel):
+    """A Frictionless v2 contributor. A creator is a contributor with the `creator` role."""
+
+    title: str | None = None
+    given_name: str | None = PydanticField(default=None, alias="givenName")
+    family_name: str | None = PydanticField(default=None, alias="familyName")
+    organization: str | None = None
+    organization_id: str | None = PydanticField(default=None, alias="organizationId")
+    """The organization's ROR address, `https://ror.org/<id>`."""
+    orcid: str | None = None
+    """The person's ORCID iD, bare: `0000-0002-1825-0097`."""
+    email: str | None = None
+    path: str | None = None
+    roles: list[str] | None = None
+
+    @field_validator("orcid")
+    @classmethod
+    def _valid_orcid(cls, value: str | None) -> str | None:
+        return None if value is None else bare_orcid(value)
+
+    @field_validator("organization_id")
+    @classmethod
+    def _ror_address(cls, value: str | None) -> str | None:
+        if value is not None and not _ROR.fullmatch(value):
+            raise ValueError("organizationId is a ROR address, such as https://ror.org/05dxps055")
+        return value
+
+    def orcid_url(self) -> str | None:
+        """The ORCID iD as its orcid.org address, when there is one."""
+        return f"{ORCID_PREFIX}{self.orcid}" if self.orcid else None
+
+    def is_creator(self) -> bool:
+        return "creator" in (self.roles or [])
+
+
+class TemporalCoverage(ArchiveModel):
+    """When the data covers: a start, and an end date, `end: "unknown"` or `ongoing`.
+
+    `end: "unknown"` is for data that stopped at a date nobody recorded.
+    """
+
+    start: date
+    end: date | Literal["unknown"] | None = None
+    ongoing: bool = False
+
+    @model_validator(mode="after")
+    def _end_or_ongoing(self) -> Self:
+        if self.ongoing and self.end is not None:
+            raise ValueError("temporal coverage has an end or is ongoing, not both")
+        if not self.ongoing and self.end is None:
+            raise ValueError("temporal coverage needs an end date, end unknown or ongoing true")
+        if isinstance(self.end, date) and self.end < self.start:
+            raise ValueError("temporal coverage ends before it starts")
+        return self
+
+
+class SpatialCoverage(ArchiveModel):
+    """Where the data covers, as a WGS 84 bounding box: west, south, east, north.
+
+    West may be greater than east for a box that crosses the antimeridian.
+    """
+
+    bbox: tuple[float, float, float, float]
+    description: str | None = None
+
+    @field_validator("bbox")
+    @classmethod
+    def _bbox_in_range(
+        cls, bbox: tuple[float, float, float, float]
+    ) -> tuple[float, float, float, float]:
+        west, south, east, north = bbox
+        if not (-180 <= west <= 180 and -180 <= east <= 180):
+            raise ValueError("longitudes must be between -180 and 180")
+        if not (-90 <= south <= 90 and -90 <= north <= 90):
+            raise ValueError("latitudes must be between -90 and 90")
+        if south > north:
+            raise ValueError("south must not be above north")
+        return bbox
+
+
+class RelatedIdentifier(ArchiveModel):
+    """A DataCite related identifier, such as a paper the data supplements."""
+
+    identifier: str
+    identifier_type: str = PydanticField(alias="identifierType")
+    relation_type: str = PydanticField(alias="relationType")
+
+
+class Funding(ArchiveModel):
+    funder: str
+    award_number: str | None = PydanticField(default=None, alias="awardNumber")
+    award_title: str | None = PydanticField(default=None, alias="awardTitle")
+    award_uri: str | None = PydanticField(default=None, alias="awardUri")
+
+
+class LegacyIdentifier(ArchiveModel):
+    """An identifier the data had elsewhere, such as an EML package id."""
+
+    scheme: str
+    value: str
+
+
+class MetadataEdit(ArchiveModel):
+    """One in-place metadata edit of the current version."""
+
+    when: datetime
+    who: str
+    fields: list[str]
+    note: str | None = None
+    """What was corrected, in the editor's words. Every new edit carries one; history written
+    before the note existed has none."""
+
+
+class ValidationVerdict(ArchiveModel):
+    """Whether the package is structurally valid, by which contract version, and when."""
+
+    valid: bool
+    contract_version: str = PydanticField(alias="contractVersion")
+    checked_at: datetime = PydanticField(alias="checkedAt")
+
+
+class CheckCount(ArchiveModel):
+    """How many of the checks that applied passed."""
+
+    passed: NonNegativeInt
+    applicable: NonNegativeInt
+
+    @model_validator(mode="after")
+    def _passed_within_applicable(self) -> Self:
+        if self.passed > self.applicable:
+            raise ValueError("more checks passed than applied")
+        return self
+
+
+class QualityVerdict(ArchiveModel):
+    """The counts of findings by severity from the last audit, and the completeness score.
+
+    `score` is the share of checks passed, as a whole percent rounded down; `find`,
+    `understand` and `trust` count the checks for each of the three questions.
+    """
+
+    errors: NonNegativeInt
+    warnings: NonNegativeInt
+    notes: NonNegativeInt
+    audited_at: datetime = PydanticField(alias="auditedAt")
+    score: int | None = PydanticField(default=None, ge=0, le=100)
+    find: CheckCount | None = None
+    understand: CheckCount | None = None
+    trust: CheckCount | None = None
+
+
+class Manifest(ArchiveModel):
+    """A package's `datapackage.json`: a Frictionless v2 Data Package with `archive:` additions.
+
+    The core fields are optional here so a package can be built and audited before it is
+    complete; `missing_core_fields` lists the ones still absent.
+    """
+
+    profile_url: str | None = PydanticField(default=None, alias="$schema")
+    id: str | None = None
+    name: str | None = None
+    version: str | None = None
+    title: str | None = None
+    description: str | None = None
+    homepage: str | None = None
+    image: str | None = None
+    created: str | None = None
+    keywords: list[str] | None = None
+    contributors: list[Contributor] | None = None
+    licenses: list[License] | None = None
+    sources: list[dict[str, object]] | None = None
+    resources: list[Resource] = PydanticField(default_factory=list)
+
+    project: str | None = PydanticField(default=None, alias="archive:project")
+    access: AccessLevel | None = PydanticField(default=None, alias="archive:access")
+    rights_status: RightsStatus | None = PydanticField(default=None, alias="archive:rightsStatus")
+    temporal_coverage: TemporalCoverage | None = PydanticField(
+        default=None, alias="archive:temporalCoverage"
+    )
+    spatial_coverage: SpatialCoverage | None = PydanticField(
+        default=None, alias="archive:spatialCoverage"
+    )
+    related_identifiers: list[RelatedIdentifier] | None = PydanticField(
+        default=None, alias="archive:relatedIdentifiers"
+    )
+    funding: list[Funding] | None = PydanticField(default=None, alias="archive:funding")
+    methods: str | None = PydanticField(default=None, alias="archive:methods")
+    citation: str | None = PydanticField(default=None, alias="archive:citation")
+    purpose: str | None = PydanticField(default=None, alias="archive:purpose")
+    legacy_identifiers: list[LegacyIdentifier] | None = PydanticField(
+        default=None, alias="archive:legacyIdentifiers"
+    )
+    metadata_history: list[MetadataEdit] | None = PydanticField(
+        default=None, alias="archive:metadataHistory"
+    )
+    validation: ValidationVerdict | None = PydanticField(default=None, alias="archive:validation")
+    quality: QualityVerdict | None = PydanticField(default=None, alias="archive:quality")
+    embargo_until: date | None = PydanticField(default=None, alias="archive:embargoUntil")
+    """The day the package's files become available; until then only its description is."""
+    published: datetime | None = PydanticField(default=None, alias="archive:published")
+    """When the package was published, in UTC. Only publish writes it."""
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def _integer_string_version(cls, value: object) -> object:
+        if isinstance(value, int) and not isinstance(value, bool):
+            value = str(value)
+        if isinstance(value, str) and not _VERSION.fullmatch(value):
+            raise ValueError("version is a whole number from 1 up, written as a string")
+        return value
+
+    def resource(self, name: str) -> Resource | None:
+        return next((r for r in self.resources if r.name == name), None)
+
+
+def missing_core_fields(manifest: Manifest) -> list[str]:
+    """The core fields a manifest still lacks, as ids from `CORE_FIELDS`."""
+    missing: list[str] = []
+    if not (manifest.title or "").strip():
+        missing.append("title")
+    if len((manifest.description or "").strip()) < MIN_DESCRIPTION_LENGTH:
+        missing.append("description")
+    if not any(c.is_creator() for c in manifest.contributors or []):
+        missing.append("creator")
+    if not rights_stated(manifest.licenses, manifest.rights_status):
+        missing.append("rights")
+    if not any(r.description or r.title for r in manifest.resources):
+        missing.append("resources")
+    return missing

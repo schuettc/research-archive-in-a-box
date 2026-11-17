@@ -1,0 +1,2833 @@
+/*
+ * The Reading room look. The brand's properties (--brand, its shades and --font-heading) are
+ * set again after this file from the archive config's brand block, at build time.
+ */
+:root {
+  --brand: #24395f;
+  --brand-ink: #ffffff;
+  --brand-hover: #1f3051;
+  --brand-active: #192843;
+  --accent: #8a4d12;
+  --paper: #fbf9f5;
+  --ink: #1d1f23;
+  --muted: #555b64;
+  --rule: #ddd6c9;
+  --soft: #f3efe7;
+  --field: #8c857a;
+  --focus: var(--brand);
+  --open: #256029;
+  --restricted: #8a3b00;
+  --danger: #a40e26;
+  --font-heading: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --font-body:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --radius: 3px;
+  --measure: 70ch;
+  --gap: 1rem;
+  /* A control's least height: 36 px on a desktop, 44 px on a phone. */
+  --tap: 2.25rem;
+  /* The status badges' fills and edges, mixed from the status colours above. */
+  --wait-bg: color-mix(in srgb, var(--accent) 9%, #fff);
+  --wait-line: color-mix(in srgb, var(--accent) 35%, #fff);
+  --ok-bg: color-mix(in srgb, var(--open) 10%, #fff);
+  --ok-line: color-mix(in srgb, var(--open) 38%, #fff);
+  --no-bg: color-mix(in srgb, var(--danger) 9%, #fff);
+  --no-line: color-mix(in srgb, var(--danger) 35%, #fff);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* Every view keeps the same frame: the scrollbar's gutter is always reserved, and the footer sits
+   at the bottom of the window on short pages, so changing views never shifts text. */
+html {
+  -webkit-text-size-adjust: 100%;
+  scrollbar-gutter: stable;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 16px/1.6 var(--font-body);
+}
+
+a {
+  color: var(--brand);
+  text-underline-offset: 0.18em;
+  text-decoration-thickness: 1px;
+}
+
+a:hover {
+  text-decoration-thickness: 2px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--ink);
+}
+
+h1 {
+  font-size: 2.35rem;
+  margin: 0.25rem 0 0.75rem;
+}
+
+h1:focus {
+  outline: none;
+}
+
+/* The h1 takes focus on navigation only so a screen reader announces the new page; it shows no ring. */
+h1:focus-visible {
+  outline: none;
+}
+
+code {
+  font:
+    0.9em/1.4 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  overflow-wrap: anywhere;
+}
+
+p,
+li,
+dd {
+  overflow-wrap: break-word;
+}
+
+.skip-link {
+  position: absolute;
+  left: 1rem;
+  top: -10rem;
+  z-index: 10;
+  padding: 0.6rem 1rem;
+  background: var(--brand);
+  color: var(--brand-ink);
+  font-weight: 600;
+  border-radius: var(--radius);
+}
+
+.skip-link:focus {
+  top: 0.75rem;
+}
+
+/* Masthead and footer */
+
+.masthead {
+  border-top: 6px solid var(--brand);
+  border-bottom: 1px solid var(--rule);
+  background: #fff;
+}
+
+.masthead .inner,
+.footer .inner {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 1.1rem 1.5rem;
+}
+
+.masthead .inner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  flex-wrap: wrap;
+}
+
+.mark {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  text-decoration: none;
+  color: var(--ink);
+}
+
+.mark img {
+  flex: none;
+  display: block;
+}
+
+.mark .name {
+  font: 600 1.3rem/1.15 var(--font-heading);
+}
+
+/* The nav keeps one width whatever areas the reader's groups add, and lists the public links
+   first in their own slot, so Browse, About and the Account button never move. */
+.masthead .nav {
+  margin-left: auto;
+  width: 30rem;
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem 1.5rem;
+  font-size: 0.95rem;
+}
+
+.nav-public,
+.nav-areas {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem 1.5rem;
+}
+
+.masthead .nav a {
+  color: var(--ink);
+  white-space: nowrap;
+  text-decoration: none;
+  padding: 0.25rem 0;
+  border-bottom: 2px solid transparent;
+}
+
+.masthead .nav a:hover,
+.masthead .nav a[aria-current="page"] {
+  border-bottom-color: var(--brand);
+}
+
+main {
+  display: block;
+  flex: 1 0 auto;
+  width: 100%;
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 2.5rem 1.5rem 4rem;
+}
+
+main:focus {
+  outline: none;
+}
+
+.footer {
+  border-top: 1px solid var(--rule);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.footer .inner {
+  padding: 1.5rem;
+}
+
+/* Text */
+
+.prose,
+.lede {
+  max-width: var(--measure);
+}
+
+.lede {
+  font: 1.15rem/1.6 var(--font-heading);
+  color: #33373d;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.missing {
+  color: #6b6157;
+  font-style: italic;
+}
+
+.small {
+  font-size: 0.85rem;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.note {
+  max-width: var(--measure);
+  padding: 0.75rem 1rem;
+  border-left: 4px solid var(--brand);
+  background: #fff;
+  box-shadow: 0 0 0 1px var(--rule);
+}
+
+/* Buttons: one primary style, a quieter one for the rest */
+
+button,
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-height: var(--tap);
+  font: 600 0.95rem/1.2 var(--font-body);
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--field);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--ink);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+button:hover,
+.button:hover {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+
+.primary {
+  border-color: var(--brand);
+  background: var(--brand);
+  color: var(--brand-ink);
+}
+
+.primary:hover {
+  background: var(--brand-hover);
+  border-color: var(--brand-hover);
+  color: var(--brand-ink);
+}
+
+.primary:active {
+  background: var(--brand-active);
+}
+
+/* A button that can't be pressed yet reads as plain grey on white, primary or not, so its
+   label stays legible (the brand fill with grey text was unreadable). */
+button:disabled,
+button:disabled:hover,
+.primary:disabled,
+.primary:disabled:hover {
+  cursor: default;
+  background: #fff;
+  color: var(--muted);
+  border-color: var(--rule);
+}
+
+.link-button {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--brand);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+/* Form fields */
+
+input[type="search"],
+input[type="text"],
+select,
+textarea {
+  font: inherit;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--field);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--ink);
+}
+
+/* A field in use shows a soft ring in the brand colour, not the heavier ring buttons and links get. */
+input[type="search"]:focus-visible,
+input[type="text"]:focus-visible,
+input[type="email"]:focus-visible,
+input[type="password"]:focus-visible,
+input[type="number"]:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 22%, transparent);
+}
+
+/* Selects draw their own chevron, inset from the edge, so they match across browsers. */
+select {
+  appearance: none;
+  padding-right: 2.4rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%23555b64' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.85rem center;
+  background-size: 12px 8px;
+}
+
+input[type="checkbox"] {
+  accent-color: var(--brand);
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+}
+
+/* Small-caps labels and access labels */
+
+.label {
+  font-variant: small-caps;
+  text-transform: lowercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.access {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.5;
+  padding: 0.05rem 0.45rem;
+  border: 1px solid currentColor;
+  border-radius: var(--radius);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.access.open {
+  color: var(--open);
+}
+
+.access.restricted {
+  color: var(--restricted);
+}
+
+/* Sections */
+
+section.block {
+  margin-top: 2.5rem;
+}
+
+section.block > h2 {
+  font-size: 1.5rem;
+  margin: 0 0 1rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+/* The phone's Menu button and its panel show only at phone width. */
+.menu-button,
+.menu-panel {
+  display: none;
+}
+
+/* Where a page sits, above its title. */
+.trail {
+  margin: 0 0 0.35rem;
+  font-size: 0.92rem;
+  color: var(--muted);
+}
+
+.trail ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.1rem 0.45rem;
+}
+
+.trail li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+/* The page's own step takes the rest of the row, wrapping inside it rather than below. */
+.trail li:last-child {
+  flex: 1 1 10rem;
+}
+
+.trail li + li::before {
+  content: "\203A";
+  color: var(--field);
+}
+
+.trail a {
+  display: inline-flex;
+  align-items: center;
+}
+
+.trail [aria-current] {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+/* The id under a title, in small type. */
+.id-line {
+  margin: -0.4rem 0 0.7rem;
+  font:
+    0.85rem/1.4 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* One status badge: words, a colour by kind and a dot, so it never relies on colour alone. */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font: 600 0.82rem/1.3 var(--font-body);
+  padding: 0.2rem 0.6rem;
+  border-radius: 99px;
+  background: var(--soft);
+  border: 1px solid var(--rule);
+  color: var(--ink);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.badge::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.65;
+}
+
+.badge.neutral {
+  color: var(--muted);
+}
+
+.badge.wait {
+  background: var(--wait-bg);
+  border-color: var(--wait-line);
+  color: var(--accent);
+}
+
+.badge.ok {
+  background: var(--ok-bg);
+  border-color: var(--ok-line);
+  color: var(--open);
+}
+
+.badge.no {
+  background: var(--no-bg);
+  border-color: var(--no-line);
+  color: var(--danger);
+}
+
+.status-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 1rem;
+  margin: 0 0 0.4rem;
+}
+
+/* One callout box: the review decision, the submission draft and the dataset access notice.
+   A problem takes a red edge, a finished decision a green one. */
+.callout {
+  max-width: var(--measure);
+  margin: 1.25rem 0;
+  padding: 1rem 1.25rem;
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-left: 4px solid var(--brand);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+.callout > :first-child {
+  margin-top: 0;
+}
+
+.callout > :last-child {
+  margin-bottom: 0;
+}
+
+.callout p {
+  margin: 0 0 0.6rem;
+}
+
+.callout .actions {
+  margin-top: 0.75rem;
+}
+
+.callout.failed {
+  border-left-color: var(--danger);
+}
+
+.callout.failed .lead {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.callout.done {
+  border-left-color: var(--open);
+}
+
+/* One empty state (a sentence and the next action) and one loading line. */
+.empty {
+  max-width: var(--measure);
+  padding: 1.5rem 0;
+}
+
+.empty p {
+  margin: 0 0 0.25rem;
+}
+
+.empty .lead {
+  font-weight: 600;
+}
+
+.empty .actions {
+  margin-top: 0.9rem;
+}
+
+.loading {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 1rem 0;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.loading::before {
+  content: "";
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid var(--rule);
+  border-top-color: var(--brand);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading::before {
+    animation: none;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* A page's heading with its main action beside it. */
+.page-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.page-head h1 {
+  margin-bottom: 0.25rem;
+}
+
+.page-head p {
+  margin: 0;
+}
+
+.gate-can {
+  margin-top: 0.9rem;
+}
+
+.callout .gate-can + .actions {
+  margin-top: 0.25rem;
+}
+
+/* A file whose upload stopped. */
+.stopped {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+/* Wide tables and their phone cards: the table on a desktop, labelled cards on a phone. */
+.cards {
+  display: none;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem;
+  margin: 0 0 0.75rem;
+}
+
+.card-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.3rem 0.75rem;
+  margin: 0;
+}
+
+.card-title a {
+  font-weight: 600;
+  font-size: 1.05rem;
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+}
+
+.card .sub,
+.title-cell .sub {
+  display: block;
+  font:
+    0.8rem/1.4 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.title-cell a {
+  font-weight: 600;
+}
+
+.card dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.2rem 0.9rem;
+  margin: 0.6rem 0 0;
+  font-size: 0.92rem;
+}
+
+.card dt {
+  font-variant: small-caps;
+  text-transform: lowercase;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.card dd {
+  margin: 0;
+}
+
+/* Search */
+
+.search .lede {
+  margin: 0 0 1.5rem;
+}
+
+.search-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  max-width: 44rem;
+  margin: 0 0 2.5rem;
+}
+
+.search-form label {
+  flex-basis: 100%;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.search-form input {
+  flex: 1;
+  min-width: 0;
+  font-size: 1.05rem;
+  padding: 0.7rem 0.9rem;
+}
+
+.search-form button {
+  padding: 0.7rem 1.4rem;
+}
+
+.filters-toggle {
+  display: none;
+}
+
+.search-layout {
+  display: grid;
+  grid-template-columns: 14rem minmax(0, 1fr);
+  gap: 3.5rem;
+}
+
+.facet-group {
+  border: 0;
+  padding: 0;
+  margin: 0 0 1.75rem;
+  min-width: 0;
+}
+
+.facet-group legend {
+  padding: 0;
+  margin-bottom: 0.6rem;
+  font-weight: 600;
+  font-variant: small-caps;
+  text-transform: lowercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+.facet {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.facet .count {
+  margin-left: auto;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+}
+
+.facet.none {
+  color: var(--muted);
+}
+
+.year-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  font-size: 0.95rem;
+}
+
+.year-row label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.year-row input {
+  width: 4.5rem;
+  padding: 0.35rem 0.5rem;
+}
+
+.hint {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.hint:empty {
+  display: none;
+}
+
+.results-head {
+  margin: 0;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--ink);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.results-head strong {
+  color: var(--ink);
+}
+
+.entry {
+  padding: 1.5rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.entry h2 {
+  font-size: 1.4rem;
+  margin: 0.4rem 0 0.35rem;
+}
+
+.entry h2 a {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.entry h2 a:hover {
+  color: var(--brand);
+  text-decoration: underline;
+}
+
+.entry .by {
+  margin: 0 0 0.5rem;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  max-width: 42rem;
+  margin: 0 0 0.6rem;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.1rem;
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.meta b {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.none .actions,
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.pager {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  padding-top: 1.5rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+@media (max-width: 40rem) {
+  .search-form button {
+    flex-basis: 100%;
+  }
+
+  .search-form {
+    margin-bottom: 1rem;
+  }
+
+  .filters-toggle {
+    display: inline-flex;
+    margin-bottom: 1rem;
+  }
+
+  .search-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .filters {
+    display: none;
+  }
+
+  .filters.open {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 1.25rem;
+    margin-bottom: 1rem;
+  }
+
+  .filters .facet-group:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+/* The dataset page */
+
+/* The dataset page: its head across the top, Files with Cite and Versions beside them, then
+   Columns and About. On a phone the four stack in that order. */
+.ds-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 18rem;
+  grid-template-areas:
+    "head head"
+    "files side"
+    "rest rest";
+  gap: 0 3.5rem;
+  align-items: start;
+}
+
+.ds-head {
+  grid-area: head;
+  min-width: 0;
+}
+
+.ds-files {
+  grid-area: files;
+  min-width: 0;
+}
+
+.ds-rest {
+  grid-area: rest;
+  min-width: 0;
+}
+
+.ds-meta {
+  margin: 0 0 1rem;
+  color: var(--muted);
+}
+
+.dataset .lede {
+  margin: 1.25rem 0 1rem;
+}
+
+.callout .access {
+  margin-right: 0.25rem;
+}
+
+.summary-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+
+.summary {
+  flex: 1 1 16rem;
+  margin: 0;
+  font-size: 0.92rem;
+  color: var(--muted);
+}
+
+.files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--ink);
+}
+
+.file {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.2rem 1.5rem;
+  padding: 0.9rem 0;
+  border-bottom: 1px solid var(--rule);
+  align-items: start;
+}
+
+.file > * {
+  grid-column: 1;
+}
+
+.file-head {
+  margin: 0;
+}
+
+.file-title {
+  font-weight: 600;
+}
+
+.file-head .label {
+  margin-left: 0.3rem;
+}
+
+.file .file-action {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  justify-self: end;
+  text-align: right;
+}
+
+.file-about {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.file-path {
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.file-note {
+  display: inline-block;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.locked {
+  white-space: nowrap;
+}
+
+.button.download {
+  min-height: 2rem;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.members {
+  font-size: 0.88rem;
+  margin-top: 0.3rem;
+}
+
+.members summary {
+  cursor: pointer;
+  color: var(--brand);
+}
+
+.members ul {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.members li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.75rem;
+}
+
+/* The usage question is a modal dialog: it overlays the page, so opening it moves nothing. */
+.usage {
+  width: min(32rem, calc(100vw - 2rem));
+  margin: auto;
+  padding: 1.5rem 1.6rem;
+  background: #fff;
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: 0 16px 48px rgb(0 0 0 / 0.2);
+}
+
+.usage::backdrop {
+  background: rgb(20 24 32 / 0.45);
+}
+
+.usage-started {
+  margin: 0 0 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent-ink, var(--muted));
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.usage-thanks {
+  margin: 0 0 1rem;
+}
+
+.usage h2 {
+  font-size: 1.2rem;
+  margin: 0 0 0.3rem;
+}
+
+.usage .hint {
+  margin: 0 0 1rem;
+  font-size: 0.92rem;
+}
+
+.usage-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.field.wide {
+  grid-column: 1 / -1;
+}
+
+.field .muted {
+  font-weight: 400;
+}
+
+.field select,
+.field textarea {
+  width: 100%;
+  font-weight: 400;
+  font-size: 1rem;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+.dataset details > summary {
+  cursor: pointer;
+}
+
+.dataset details[id^="columns-"] {
+  margin-bottom: 1.5rem;
+}
+
+.dataset details[id^="columns-"] > summary h3 {
+  display: inline;
+  font-size: 1.15rem;
+  margin: 0;
+}
+
+.table-scroll {
+  overflow-x: auto;
+  margin-top: 0.6rem;
+}
+
+table.cols {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+table.cols th,
+table.cols td {
+  text-align: left;
+  vertical-align: top;
+  padding: 0.55rem 0.75rem 0.55rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+table.cols thead th {
+  font-variant: small-caps;
+  text-transform: lowercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  border-bottom: 1px solid var(--ink);
+  font-size: 1rem;
+}
+
+table.cols tbody th {
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.facts {
+  margin: 0;
+}
+
+.facts > div {
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 1fr);
+  gap: 1rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px dotted var(--rule);
+}
+
+.facts dt {
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.facts dd {
+  margin: 0;
+  max-width: var(--measure);
+}
+
+.facts dd ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.facts a {
+  overflow-wrap: anywhere;
+}
+
+.coverage p {
+  margin: 0 0 0.5rem;
+}
+
+.coverage svg {
+  display: block;
+  width: 100%;
+  max-width: 22rem;
+  height: auto;
+  margin-bottom: 0.25rem;
+}
+
+.coverage .frame {
+  fill: #fff;
+  stroke: var(--field);
+  stroke-width: 1;
+}
+
+.coverage .graticule line {
+  stroke: var(--rule);
+  stroke-width: 0.6;
+}
+
+.coverage .area {
+  fill: var(--brand);
+  stroke: var(--brand);
+  stroke-width: 1;
+}
+
+.coverage .ring {
+  fill: none;
+  stroke: var(--brand);
+  stroke-width: 1.5;
+}
+
+.ds-side {
+  grid-area: side;
+  min-width: 0;
+  margin-top: 2.5rem;
+  display: grid;
+  gap: 1.25rem;
+}
+
+.panel {
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 1.1rem 1.2rem;
+}
+
+.panel h2 {
+  font-size: 1.05rem;
+  margin: 0 0 0.6rem;
+}
+
+.citation {
+  border-left: 4px solid var(--accent);
+  padding: 0.25rem 0 0.25rem 0.9rem;
+}
+
+.citation > p:first-child {
+  font: 0.98rem/1.55 var(--font-heading);
+  margin: 0 0 0.6rem;
+}
+
+/* The address breaks only after its slashes (and its id's hyphens), never mid-word. */
+.citation .url {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+/* Copy, BibTeX and RIS in one row under the citation. */
+.cite-formats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.cite-formats .button,
+.cite-formats button {
+  min-height: 2rem;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.88rem;
+}
+
+.copied {
+  color: var(--open);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.versions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.92rem;
+  display: grid;
+  gap: 0.3rem;
+}
+
+/* The account slot keeps one width whether it holds Sign in or Account, so signing in or out
+   never moves the nav beside it. */
+.account {
+  position: relative;
+  flex: none;
+  width: 7.5rem;
+  display: flex;
+  justify-content: flex-end;
+  margin-left: 1.5rem;
+}
+
+.account-button {
+  font: inherit;
+  font-size: 0.92rem;
+  padding: 0.35rem 0.8rem;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.account-button:hover,
+.account-button[aria-expanded="true"] {
+  border-color: var(--brand);
+}
+
+.account-menu {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  z-index: 10;
+  min-width: 15rem;
+  padding: 0.4rem;
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.12);
+}
+
+.account-who {
+  margin: 0;
+  padding: 0.5rem 0.6rem 0.6rem;
+  border-bottom: 1px solid var(--rule);
+  font-size: 0.85rem;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.account-who strong {
+  display: block;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.account-menu [role="menuitem"] {
+  display: block;
+  width: 100%;
+  margin-top: 0.25rem;
+  padding: 0.5rem 0.6rem;
+  border: 0;
+  border-radius: calc(var(--radius) - 2px);
+  background: none;
+  font: inherit;
+  font-size: 0.92rem;
+  text-align: left;
+  text-decoration: none;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.account-menu [role="menuitem"]:hover,
+.account-menu [role="menuitem"]:focus-visible {
+  background: var(--soft);
+}
+
+/* Submissions: the contributor's and curator's pages */
+
+.page-actions {
+  margin: 0 0 1.5rem;
+}
+
+.status-line {
+  margin: 0 0 0.35rem;
+  font: 600 1.3rem/1.35 var(--font-heading);
+}
+
+.problem {
+  max-width: var(--measure);
+  margin: 1rem 0 0;
+  padding: 0.6rem 0.9rem;
+  border-left: 4px solid var(--danger);
+  background: #fff;
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.curator-note {
+  margin: 0.25rem 0 0;
+  white-space: pre-wrap;
+}
+
+.note .label {
+  margin: 0;
+}
+
+.note > p:first-child {
+  margin-top: 0;
+}
+
+.note .actions {
+  margin-top: 0.75rem;
+}
+
+.dropzone {
+  max-width: 44rem;
+  padding: 1.5rem;
+  border: 2px dashed var(--field);
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.dropzone.over {
+  border-color: var(--brand);
+  background: var(--soft);
+}
+
+.dropzone > p:first-child {
+  margin-top: 0;
+}
+
+.dropzone .choose:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.package {
+  max-width: 44rem;
+}
+
+.overall {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1.25rem 0 0.5rem;
+  font-weight: 600;
+}
+
+.overall progress {
+  flex: 1;
+}
+
+progress {
+  accent-color: var(--brand);
+  height: 0.75rem;
+}
+
+.uploads {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.88rem;
+}
+
+.uploads li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 8rem;
+  gap: 1rem;
+  align-items: center;
+  padding: 0.2rem 0;
+}
+
+.uploads progress {
+  width: 100%;
+}
+
+table.listing tbody th {
+  font-weight: 600;
+}
+
+.checks-summary {
+  margin: 0 0 1rem;
+}
+
+.finding-group h3 {
+  font-size: 1.15rem;
+  margin: 1.5rem 0 0.5rem;
+}
+
+.finding-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-width: var(--measure);
+}
+
+.finding {
+  padding: 0.7rem 0 0.7rem 0.9rem;
+  border-left: 4px solid var(--field);
+  margin-bottom: 0.6rem;
+  background: #fff;
+  box-shadow: 0 0 0 1px var(--rule);
+}
+
+.severity-error .finding {
+  border-left-color: var(--danger);
+}
+
+.severity-warning .finding {
+  border-left-color: var(--restricted);
+}
+
+.finding p {
+  margin: 0 0.9rem 0.2rem 0;
+}
+
+.finding-message {
+  font-weight: 600;
+}
+
+.finding-meta {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.rule-id {
+  margin-left: 0.6rem;
+  font-size: 0.8rem;
+}
+
+.finding-fix {
+  font-size: 0.92rem;
+}
+
+/* The box beside a finding fixed by typing: the field's description or its unit. */
+.field-editor {
+  margin: 0.5rem 0.9rem 0.2rem 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.field-editor label {
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.field-editor textarea,
+.field-editor input[type="text"] {
+  width: 100%;
+  font: inherit;
+}
+
+.field-editor input[type="text"] {
+  max-width: 16rem;
+}
+
+.field-editor .actions {
+  margin: 0.15rem 0 0;
+}
+
+.pre-checks {
+  margin: 1.5rem 0 0.5rem;
+}
+
+.pre-checks h2 {
+  font-size: 1.25rem;
+  margin: 0 0 0.35rem;
+}
+
+.saved {
+  color: var(--open);
+  font-weight: 600;
+}
+
+.history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-width: var(--measure);
+}
+
+.history li {
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 1fr);
+  gap: 1rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px dotted var(--rule);
+  font-size: 0.95rem;
+}
+
+.history time {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.history-note {
+  display: block;
+  margin-top: 0.2rem;
+  font-style: italic;
+}
+
+.tag {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.5;
+  padding: 0.05rem 0.45rem;
+  border: 1px solid currentColor;
+  border-radius: var(--radius);
+  vertical-align: middle;
+  font-family: var(--font-body);
+}
+
+.tag.stale {
+  color: var(--restricted);
+}
+
+.tag.arrived {
+  color: var(--accent);
+}
+
+.queue-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.queue-tabs a {
+  padding: 0.5rem 0.9rem;
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.9rem;
+  text-decoration: none;
+  border-bottom: 3px solid transparent;
+}
+
+.queue-tabs a[aria-current="page"] {
+  color: var(--ink);
+  border-bottom-color: var(--brand);
+}
+
+.queue-tabs .count {
+  display: inline-block;
+  min-width: 1.4rem;
+  margin-left: 0.4rem;
+  padding: 0 0.4rem;
+  border-radius: 0.7rem;
+  background: var(--soft);
+  color: var(--ink);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.queue-tabs a[aria-current="page"] .count {
+  background: var(--brand);
+  color: var(--brand-ink);
+}
+
+.queue-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.9rem;
+  margin: 0.9rem 0 0.25rem;
+}
+
+.queue-bar input[type="search"] {
+  width: 17rem;
+  max-width: 100%;
+  font-weight: 400;
+  font-size: 1rem;
+}
+
+.queue-bar .chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.queue-bar .chip {
+  min-height: 0;
+  padding: 0.25rem 0.65rem;
+  font-size: 0.85rem;
+  font-weight: 400;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--field);
+  border-radius: 0.9rem;
+}
+
+.queue-bar .chip[aria-pressed="true"],
+.queue-bar .chip[aria-pressed="true"]:hover {
+  color: var(--brand-ink);
+  background: var(--brand);
+  border-color: var(--brand);
+}
+
+/* The Sort by select stands in for the sortable headings on a phone only. */
+.sort-by {
+  display: none;
+}
+
+/* Whether the last read of the queue answered. */
+.queue-live {
+  margin: 0 0 0 auto;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* A sortable heading reads as the heading, its button filling it. */
+table.queue th .sort {
+  min-height: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+table.queue th[aria-sort] {
+  color: var(--ink);
+}
+
+table.queue th .sort .arrow {
+  margin-left: 0.2rem;
+  font-size: 0.65rem;
+}
+
+table.queue tr.arrived > * {
+  background: #fff6e3;
+}
+
+.queue-id {
+  display: block;
+  font-weight: 400;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+table.queue td,
+table.queue th {
+  white-space: normal;
+}
+
+.decision {
+  margin: 1.25rem 0 0;
+}
+
+/* The heading's rule already sits above the held files, and their rows are compact. */
+.files.held {
+  border-top: 0;
+}
+
+.held .file {
+  padding: 0.55rem 0;
+  align-items: center;
+}
+
+.held .file-action {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.preview {
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.preview table.cols {
+  min-width: 0;
+}
+
+.preview td {
+  white-space: nowrap;
+}
+
+/* The admin's review policy */
+
+.policy {
+  max-width: 52rem;
+}
+
+.policy .block:first-child {
+  margin-top: 1.5rem;
+}
+
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 2.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* The switch reads as one: a track whose knob sits right when on. */
+.switch input[role="switch"] {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 2.75rem;
+  height: 1.5rem;
+  margin: 0;
+  border-radius: 1rem;
+  background: var(--field);
+  cursor: pointer;
+}
+
+.switch input[role="switch"]::after {
+  content: "";
+  position: absolute;
+  top: 0.2rem;
+  left: 0.2rem;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.switch input[role="switch"]:checked {
+  background: var(--brand);
+}
+
+.switch input[role="switch"]:checked::after {
+  left: auto;
+  right: 0.2rem;
+}
+
+.settings-tabs {
+  margin-bottom: 1.5rem;
+}
+
+.rule {
+  margin: 0 0 1rem;
+  padding: 1rem 1.2rem 0.5rem;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: #fff;
+  min-width: 0;
+}
+
+.rule > legend {
+  padding: 0 0.4rem;
+  font: 600 1.05rem/1.2 var(--font-heading);
+}
+
+.rule-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.25rem;
+}
+
+.choices {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.choices > legend {
+  padding: 0;
+  margin-bottom: 0.4rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.choices .hint {
+  margin-top: 0.2rem;
+}
+
+.rule-fields {
+  display: grid;
+  gap: 0.75rem;
+  align-content: start;
+}
+
+.field input[type="text"],
+.field input[type="email"],
+.field input[type="number"],
+.field input[type="password"] {
+  width: 100%;
+  font: inherit;
+  font-weight: 400;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--field);
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.rule-actions {
+  margin-top: 0.75rem;
+}
+
+.rule-actions button {
+  min-height: 2rem;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.88rem;
+}
+
+.theme {
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.theme .actions {
+  margin-top: 0.4rem;
+}
+
+.add-theme,
+.timing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 1rem;
+}
+
+.add-theme .field,
+.timing .field {
+  flex: 0 1 16rem;
+}
+
+.save-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--rule);
+}
+
+.save-row p {
+  margin: 0;
+  flex: 1 1 20rem;
+}
+
+.saved {
+  color: var(--open);
+  font-weight: 600;
+}
+
+/* The account page: each passkey's Remove sits at the end of its row, and a long name wraps
+   rather than widening the table on a phone. */
+/* Four short columns fit a phone, unlike the wider listings that scroll sideways there. */
+table.cols.passkeys {
+  min-width: 0;
+}
+
+table.passkeys th {
+  /* Holds the Remove column's hidden label inside the table's scroll box. */
+  position: relative;
+}
+
+table.passkeys tbody th {
+  white-space: normal;
+}
+
+table.passkeys td.row-action {
+  padding-right: 0;
+  text-align: right;
+  vertical-align: middle;
+}
+
+table.passkeys td.row-action button {
+  min-height: 2rem;
+  padding: 0.3rem 0.8rem;
+}
+
+/* The People tab: each row's roles as tags, its status badge free to wrap, and its actions
+   together at the row's end. */
+table.people .tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+table.people .tag {
+  margin: 0;
+}
+
+table.people .badge {
+  white-space: normal;
+}
+
+table.people td.row-actions {
+  padding-right: 0;
+  text-align: right;
+  white-space: nowrap;
+}
+
+table.people td.row-actions button {
+  min-height: 2rem;
+  margin-left: 0.4rem;
+  padding: 0.3rem 0.8rem;
+}
+
+/* A change that takes something away, such as Disable, reads in red. */
+button.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+button.primary.danger:not(:disabled),
+button.primary.danger:not(:disabled):hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+/* The Access requests tab: each waiting request a card, the person's reason quoted, its
+   decisions at the end. */
+.requests {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.7rem;
+}
+
+.request {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.5rem 1rem;
+  padding: 0.9rem 1rem;
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+
+.request-body {
+  flex: 1 1 15rem;
+  min-width: 0;
+}
+
+.request-body p {
+  margin: 0;
+}
+
+.request .reason {
+  margin: 0.4rem 0;
+  padding: 0.4rem 0.6rem;
+  background: var(--soft);
+  border-left: 3px solid var(--rule);
+  white-space: pre-wrap;
+}
+
+.request .actions {
+  margin: 0;
+}
+
+/* Questions and confirmations are modal dialogs: they overlay the page, so opening one moves
+   nothing on it. */
+.modal {
+  width: min(32rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  margin: auto;
+  padding: 1.5rem 1.6rem;
+  background: #fff;
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  box-shadow: 0 16px 48px rgb(0 0 0 / 0.2);
+}
+
+.modal.wide {
+  width: min(48rem, calc(100vw - 2rem));
+}
+
+.modal::backdrop {
+  background: rgb(20 24 32 / 0.45);
+}
+
+.modal h2 {
+  font-size: 1.25rem;
+  margin: 0 0 0.75rem;
+}
+
+.modal .dropzone,
+.modal .package {
+  max-width: none;
+}
+
+.password-form,
+.sign-in-form {
+  display: grid;
+  gap: 0.9rem;
+}
+
+/* A grid's items' margins don't collapse, so a paragraph's own margins would add to the gap. */
+.password-form > p,
+.password-form .hint,
+.password-form .problem,
+.password-form .actions,
+.sign-in-form > p,
+.sign-in-form > h2 {
+  margin: 0;
+}
+
+.password-form .hint,
+.sign-in-form .hint {
+  margin-top: -0.5rem;
+}
+
+/* The sign-in page: one column the width of its fields, the same on every step, the form in a
+   card with room below it. */
+.sign-in {
+  max-width: 26rem;
+}
+
+.sign-in .sign-in-form {
+  padding: 1.25rem 1.4rem;
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+
+.sign-in-form > h2 {
+  font-size: 1.25rem;
+}
+
+.sign-in-who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.sign-in-form .actions {
+  align-items: center;
+}
+
+@media (max-width: 51rem) {
+  .ds-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2rem;
+  }
+
+  .ds-grid {
+    grid-template-areas:
+      "head"
+      "files"
+      "side"
+      "rest";
+  }
+
+  .ds-side {
+    margin-top: 2rem;
+  }
+}
+
+@media (max-width: 40rem) {
+  .rule-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .history li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .uploads li {
+    grid-template-columns: minmax(0, 1fr) 5rem;
+  }
+
+  .file {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 1rem;
+    margin-top: 0.75rem;
+    background: #fff;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+  }
+
+  .files {
+    border-top: 0;
+  }
+
+  .file .file-action {
+    grid-column: 1;
+    grid-row: auto;
+    order: 10;
+    justify-self: stretch;
+    text-align: left;
+    margin-top: 0.5rem;
+  }
+
+  .file .file-action .button.download {
+    width: 100%;
+    min-height: var(--tap);
+  }
+
+  .usage-fields {
+    grid-template-columns: 1fr;
+  }
+
+  table.cols {
+    min-width: 40rem;
+  }
+
+  .table-scroll {
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    background: #fff;
+    padding: 0 0.5rem;
+  }
+
+  .facts > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.1rem;
+  }
+}
+
+/* Phone width, last so it wins over the rules above: one header row, labelled cards for
+   wide tables, and every control at least 44 px tall. */
+@media (max-width: 40rem) {
+  :root {
+    --tap: 2.75rem;
+  }
+}
+
+/* The one-row header with a Menu button takes over below the width the desktop nav and the
+   Account button need side by side (about 688 px), not only on a phone. */
+@media (max-width: 44rem) {
+  /* On a phone the header is one row: the logo and name, and the Menu button. */
+  .masthead .inner {
+    padding: 0.55rem 1rem;
+    min-height: calc(64px - 7px);
+    flex-wrap: nowrap;
+  }
+
+  .mark {
+    min-width: 0;
+    min-height: var(--tap);
+  }
+
+  .mark img {
+    width: 36px;
+    height: 36px;
+  }
+
+  .mark .name {
+    font-size: 1.05rem;
+  }
+
+  .masthead .nav,
+  .masthead .account {
+    display: none;
+  }
+
+  .menu-button {
+    display: inline-flex;
+    margin-left: auto;
+    flex: none;
+  }
+
+  .menu-button[aria-expanded="true"] {
+    border-color: var(--brand);
+    background: var(--soft);
+  }
+
+  .menu-panel {
+    display: block;
+    background: #fff;
+    border-top: 1px solid var(--rule);
+    padding: 0.25rem 1rem 1rem;
+    box-shadow: 0 8px 16px rgb(0 0 0 / 0.06);
+  }
+
+  .menu-panel a,
+  .menu-panel button {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    width: 100%;
+    min-height: 3rem;
+    padding: 0 0.25rem;
+    border: 0;
+    border-bottom: 1px solid var(--soft);
+    border-radius: 0;
+    background: none;
+    color: var(--ink);
+    text-decoration: none;
+    font: 400 1.05rem var(--font-body);
+  }
+
+  .menu-panel a[aria-current="page"] {
+    font-weight: 700;
+    box-shadow: inset 4px 0 0 var(--brand);
+    padding-left: 0.75rem;
+  }
+
+  .menu-panel .who {
+    margin: 0.9rem 0 0.1rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+  }
+
+  .menu-panel .who strong {
+    display: block;
+    color: var(--ink);
+  }
+
+  .menu-panel button.primary {
+    justify-content: center;
+    margin-top: 0.9rem;
+    border: 1px solid var(--brand);
+    border-radius: var(--radius);
+    background: var(--brand);
+    color: var(--brand-ink);
+    font-weight: 600;
+  }
+}
+
+@media (max-width: 40rem) {
+  main {
+    padding: 1.5rem 1rem 3rem;
+  }
+
+  h1 {
+    font-size: 1.85rem;
+  }
+
+  .footer .inner {
+    padding: 1.25rem 1rem;
+  }
+
+  /* Every control is at least 44 px tall at phone width. */
+  input[type="search"],
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="number"],
+  select {
+    min-height: var(--tap);
+  }
+
+  .link-button,
+  .trail a,
+  .members summary,
+  .versions a,
+  .title-cell a,
+  .dataset details > summary {
+    min-height: var(--tap);
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .button.download,
+  .rule-actions button,
+  table.passkeys td.row-action button {
+    min-height: var(--tap);
+  }
+
+  .callout {
+    padding: 0.9rem 1rem;
+  }
+
+  .callout .actions .button,
+  .callout .actions button {
+    flex: 1 1 auto;
+  }
+
+  .desk {
+    display: none !important;
+  }
+
+  /* A listing table becomes labelled cards: each row a card, each cell its column's name. */
+  table.to-cards,
+  table.to-cards tbody,
+  table.to-cards tr,
+  table.to-cards td,
+  table.to-cards tbody th {
+    display: block;
+  }
+
+  table.to-cards,
+  table.cols.to-cards {
+    min-width: 0;
+  }
+
+  /* Each card labels its own fields, and the Sort by select replaces the sortable headings, so the
+     header row goes entirely: hidden but focusable sort buttons would take Tab stops. */
+  table.to-cards thead {
+    display: none;
+  }
+
+  table.to-cards td[data-label] a {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--tap);
+  }
+
+  table.to-cards tr {
+    background: #fff;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    padding: 0.6rem 1rem 0.75rem;
+    margin: 0 0 0.75rem;
+  }
+
+  table.to-cards td,
+  table.to-cards tbody th {
+    display: grid;
+    grid-template-columns: 7.5rem minmax(0, 1fr);
+    gap: 0.9rem;
+    align-items: baseline;
+    justify-items: start;
+    padding: 0.15rem 0;
+    border: 0;
+    font-size: 0.92rem;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  table.to-cards td[data-label]::before,
+  table.to-cards tbody th[data-label]::before {
+    content: attr(data-label);
+    font-variant: small-caps;
+    text-transform: lowercase;
+    letter-spacing: 0.05em;
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  /* The title leads the card, unlabelled. */
+  table.to-cards .title-cell {
+    display: block;
+    padding-bottom: 0.3rem;
+    font-size: 1rem;
+  }
+
+  table.to-cards .title-cell::before {
+    display: none;
+  }
+
+  table.to-cards .title-cell a {
+    max-width: 100%;
+    font-size: 1.05rem;
+    overflow-wrap: anywhere;
+  }
+
+  table.to-cards.people td.row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding-top: 0.5rem;
+    white-space: normal;
+  }
+
+  table.to-cards.people td.row-actions button {
+    min-height: var(--tap);
+    margin: 0;
+  }
+
+  /* The queue on a phone: its tabs in one row that scrolls sideways, then the search, the
+     chips and Sort by stacked. */
+  .queue-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin: 0 -1rem;
+    padding: 0 1rem;
+  }
+
+  .queue-tabs a {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--tap);
+    white-space: nowrap;
+  }
+
+  .queue-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .queue-bar input[type="search"] {
+    width: 100%;
+  }
+
+  .queue-bar .chip {
+    min-height: var(--tap);
+    padding: 0.25rem 0.9rem;
+  }
+
+  .sort-by {
+    display: flex;
+  }
+
+  .queue-live {
+    margin: 0;
+  }
+
+  .held .file-action button,
+  .members li button {
+    min-height: var(--tap);
+  }
+
+  .cards {
+    display: block;
+  }
+
+  /* An empty cell has nothing to label. */
+  table.to-cards td:empty {
+    display: none;
+  }
+
+  /* The columns' cards need no sideways scroll box. */
+  .table-scroll.cards-on-phone {
+    overflow: visible;
+    padding: 0;
+    border: 0;
+    background: none;
+  }
+
+  .filters.open .facet {
+    min-height: var(--tap);
+  }
+
+  .sign-in .sign-in-form {
+    padding: 1rem;
+  }
+}
+
+/* The dataset page's DOI, under the meta line. */
+.doi {
+  margin: -0.5rem 0 1rem;
+  font:
+    0.85rem/1.4 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+}
+
+.doi a {
+  overflow-wrap: anywhere;
+}
+
+/* Under the dataset's meta line, for curators and admins: Correct details and Withdraw. */
+.curator-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  max-width: var(--measure);
+  margin: 1rem 0;
+  padding: 0.6rem 0.9rem;
+  background: var(--soft);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  font-size: 0.9rem;
+}
+
+.curator-bar p {
+  margin: 0;
+  flex: 1 1 14rem;
+  color: var(--muted);
+}
+
+.curator-bar .button,
+.curator-bar button {
+  min-height: 2rem;
+  padding: 0.3rem 0.8rem;
+  font-size: 0.88rem;
+}
+
+/* A field's problem, under it. */
+.field-error {
+  margin: 0.3rem 0 0;
+  color: var(--danger);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+/* Correct details: one column of fields, a row per creator and per grant. */
+.edit-form {
+  display: grid;
+  gap: 1rem;
+  max-width: 44rem;
+}
+
+.edit-form .field-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.edit-form input[type="text"],
+.edit-form textarea {
+  width: 100%;
+  font-size: 1rem;
+}
+
+.edit-form fieldset {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.edit-form legend {
+  margin-bottom: 0.4rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.edit-form .row-add,
+.edit-form .row-remove {
+  margin: 0;
+}
+
+.edit-form .actions {
+  margin-top: 0.5rem;
+}
+
+.creator-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.3fr);
+  gap: 0.6rem;
+  align-items: start;
+  padding: 0.75rem;
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+
+.creator-row .row-remove {
+  grid-column: 1 / -1;
+}
+
+/* Settings, Downloads: the months to show and the CSV, then a count per month. */
+.range {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem 1.5rem;
+  margin: 1rem 0;
+}
+
+.range .months {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+}
+
+.range .months > legend {
+  width: 100%;
+}
+
+table.downloads .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A withdrawn dataset's page: one column, its title muted, the meta line after the citation. */
+.dataset.withdrawn {
+  max-width: var(--measure);
+}
+
+.dataset.withdrawn h1 {
+  color: var(--muted);
+}
+
+.dataset.withdrawn .ds-meta {
+  margin-top: 1rem;
+}
+
+/* A creator's ORCID iD after their name: the green iD mark, then the iD. */
+.orcid {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  text-decoration: none;
+}
+
+.orcid i {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  background: #a6ce39;
+  /* Dark on the ORCID green: white on it is 1.8:1, this is about 9.5:1. */
+  color: #1a1a1a;
+  font: 700 0.55rem/1 var(--font-body);
+  font-style: normal;
+}
+
+/* Corrections: the date, then the fields and the note. */
+.corrections {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-width: var(--measure);
+  font-size: 0.9rem;
+}
+
+.corrections li {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  gap: 0.75rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px dotted var(--rule);
+}
+
+.corrections time {
+  color: var(--muted);
+}
+
+@media (max-width: 40rem) {
+  .cite-formats .button,
+  .cite-formats button {
+    flex: 1;
+    min-height: var(--tap);
+  }
+
+  .orcid {
+    min-height: var(--tap);
+  }
+
+  /* About's links (a licence, an affiliation) are tap targets too. */
+  .facts dd a {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--tap);
+  }
+
+  .curator-bar .button,
+  .curator-bar button {
+    flex: 1;
+    min-height: var(--tap);
+  }
+
+  .corrections li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .creator-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .edit-form .link-button {
+    min-height: var(--tap);
+  }
+
+  .range .months .facet {
+    min-height: var(--tap);
+  }
+
+  table.downloads .num {
+    text-align: left;
+  }
+}

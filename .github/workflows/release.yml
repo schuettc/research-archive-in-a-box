@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions: {}
+
+jobs:
+  # The tag's push also starts CI on the tagged commit: wait for that run, and go on only when
+  # it passed, so a release never names a commit whose checks failed.
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      actions: read
+    steps:
+      - name: Wait for CI to pass on the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          while true; do
+            run="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$SHA&event=push" \
+              --jq "[.workflow_runs[] | select(.head_branch == env.TAG)] | max_by(.id) // empty | \"\(.status) \(.conclusion) \(.html_url)\"")"
+            if [ -z "$run" ]; then
+              echo "no CI run for $TAG yet"
+            else
+              read -r status conclusion url <<< "$run"
+              if [ "$status" = completed ]; then
+                if [ "$conclusion" = success ]; then
+                  echo "CI passed on $SHA: $url"
+                  exit 0
+                fi
+                echo "::error::CI ended $conclusion on $SHA, so no release: $url"
+                exit 1
+              fi
+              echo "CI is $status on $SHA: $url"
+            fi
+            sleep 30
+          done
+
+  release:
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

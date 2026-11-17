@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "cruise": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/schuettc/research-in-a-box@v0.1.0#subdirectory=packages/agent",
+        "archive-mcp"
+      ]
+    }
+  }
+}
