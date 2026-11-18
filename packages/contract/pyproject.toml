@@ -1,7 +1,7 @@
 [project]
 name = "archive-contract"
 version = "0.1.0"
-description = "The research-in-a-box archive contract: Pydantic models for an archive package."
+description = "The research-archive-in-a-box archive contract: Pydantic models for an archive package."
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2",

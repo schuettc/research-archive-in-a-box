@@ -1,6 +1,6 @@
 ---
 name: deploy-archive
-description: For the person running a research archive from a fork of research-in-a-box. Use to set up a deployment of the fork in their own AWS account (prerequisites, archive.yaml, connecting GitHub Actions to AWS, the first deploy, the first admin, the seed dataset and a smoke test), to update the fork from upstream and redeploy, or to tear a stage down.
+description: For the person running a research archive from a fork of research-archive-in-a-box. Use to set up a deployment of the fork in their own AWS account (prerequisites, archive.yaml, connecting GitHub Actions to AWS, the first deploy, the first admin, the seed dataset and a smoke test), to update the fork from upstream and redeploy, or to tear a stage down.
 ---
 
 # Deploy the archive
@@ -39,7 +39,7 @@ Check each, say what is missing and how to install it, and go no further until a
   Note the region: `aws configure get region`.
 - gh is signed in: `gh auth status`.
 - The clone's `origin` is their own fork on GitHub: `git remote get-url origin` must not be
-  `schuettc/research-in-a-box`. Note `<owner>/<name>` from it.
+  `schuettc/research-archive-in-a-box`. Note `<owner>/<name>` from it.
 - Actions is on for the fork: `gh api repos/<owner>/<name>/actions/permissions --jq .enabled` is
   `true`. If not, they turn it on under the fork's Settings → Actions.
 
@@ -337,7 +337,7 @@ With a domain, that is the name: check that `curl -sSI https://<name>/` answers 
 1. Add upstream if it is missing, and fetch it:
 
    ```
-   git remote get-url upstream || git remote add upstream https://github.com/schuettc/research-in-a-box.git
+   git remote get-url upstream || git remote add upstream https://github.com/schuettc/research-archive-in-a-box.git
    git fetch upstream
    ```
 

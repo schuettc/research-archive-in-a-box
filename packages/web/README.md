@@ -1,4 +1,4 @@
-# @research-in-a-box/web
+# @research-archive-in-a-box/web
 
 The web app is the archive's site: a React app built with Vite and served by CloudFront. A reader searches the catalog, opens a dataset's page and downloads its files; a contributor submits a package; a curator works through the review queue; an admin manages people, access requests and downloads under Settings.
 

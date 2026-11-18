@@ -208,7 +208,7 @@ def build(session: Session) -> MCPServer:
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="archive-mcp",
-        description="The research-in-a-box MCP server, over stdio. Claude Code starts it "
+        description="The research-archive-in-a-box MCP server, over stdio. Claude Code starts it "
         "from the plugin; there is nothing to run by hand.",
     )
     parser.add_argument("--version", action="version", version=f"archive-mcp {__version__}")

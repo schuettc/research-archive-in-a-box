@@ -33,7 +33,7 @@ test("the default app makes one stack per stage of the committed archive.yaml, w
   expect(assembly.stacks.map((s) => s.stackName).sort()).toEqual(stages.map(stackName).sort());
   for (const stage of stages) {
     expect(assembly.getStackByName(stackName(stage)).tags).toEqual({
-      Repo: "schuettc/research-in-a-box",
+      Repo: "schuettc/research-archive-in-a-box",
     });
   }
 });
@@ -49,7 +49,7 @@ test("a second stage makes a second stack", () => {
     "ResearchArchive-prod",
   ]);
   expect(assembly.getStackByName(stackName("dev")).tags).toEqual({
-    Repo: "schuettc/research-in-a-box",
+    Repo: "schuettc/research-archive-in-a-box",
   });
 });
 

@@ -1,6 +1,6 @@
 ---
 name: find-data
-description: Finds datasets in the person's research-in-a-box archive, shows one with its columns, license and citation, and downloads the files they name. Use when someone asks what data the archive holds, looks for data on a topic, place or period, wants to cite a dataset, or asks to download its files. Public data needs no sign-in.
+description: Finds datasets in the person's research-archive-in-a-box archive, shows one with its columns, license and citation, and downloads the files they name. Use when someone asks what data the archive holds, looks for data on a topic, place or period, wants to cite a dataset, or asks to download its files. Public data needs no sign-in.
 ---
 
 # Find data

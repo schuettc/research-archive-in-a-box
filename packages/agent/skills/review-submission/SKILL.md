@@ -1,6 +1,6 @@
 ---
 name: review-submission
-description: Helps a curator review submissions waiting in their research-in-a-box archive, reading each one's metadata and files, summarising what it is and the judgment calls no rule can make, and drafting a decision and note that is sent only with the curator's yes. Use when a curator asks what is waiting for review, wants to review, approve, reject or request changes on a submission. Needs an account in the curator group.
+description: Helps a curator review submissions waiting in their research-archive-in-a-box archive, reading each one's metadata and files, summarising what it is and the judgment calls no rule can make, and drafting a decision and note that is sent only with the curator's yes. Use when a curator asks what is waiting for review, wants to review, approve, reject or request changes on a submission. Needs an account in the curator group.
 ---
 
 # Review a submission

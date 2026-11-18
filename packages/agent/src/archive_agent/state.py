@@ -15,9 +15,9 @@ from archive_client.signin import AuthConfig, Tokens, sign_in
 
 
 def config_file() -> Path:
-    """`archive.json` under `$XDG_CONFIG_HOME/research-in-a-box`, else `~/.config/...`."""
+    """`archive.json` under `$XDG_CONFIG_HOME/research-archive-in-a-box`, else `~/.config/...`."""
     base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
-    return Path(base) / "research-in-a-box" / "archive.json"
+    return Path(base) / "research-archive-in-a-box" / "archive.json"
 
 
 def _saved() -> dict[str, Any]:

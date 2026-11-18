@@ -390,6 +390,10 @@ Many published CSV files start with lines of notes before the header row, each b
 
 Older data often writes a number such as `-9999` or `-99.99` where a value is missing; that number is a **placeholder**. `cruise diagnose` warns about one with `values.placeholder`, "Column canopy_cover has 1 value that looks like a placeholder for no value." If the number really means "no value", declare it in the table's schema in `datapackage.json` with `missingValues`, next to `fields`: `"missingValues": ["", "-9999"]`. Each entry is the text exactly as it appears in the file. The list replaces the default, which is `[""]` (an empty cell), so keep `""` in it. `cruise set` has no target for `missingValues`, so edit it by hand, then run any `cruise set` so the checksums match again.
 
+### A column that describes another
+
+A column whose values qualify another column's, such as each temperature's uncertainty, says so with `archive:ancillaryOf`, naming the other column and a role: `"archive:ancillaryOf": { "field": "water_temp_c", "role": "uncertainty" }`. The roles are `uncertainty`, `detection-limit` and `quality-flag`; [Terms](../terms.md) explains each and how the archive's EML export records it.
+
 ## Profiles and the archive's own rules
 
 A **profile** is a named set of extra required fields. The kit ships two: `core`, which every package meets (a title, a description, a creator, rights and at least one described resource), and `ecology`, which also requires when and where the data was collected and how (`archive:temporalCoverage`, `archive:spatialCoverage` and `archive:methods`). An archive picks its profiles in `archive.yaml` (see [the archive.yaml reference](archive-yaml.md#profiles)), and its submissions are checked against them.

@@ -1,6 +1,6 @@
-# research-in-a-box
+# research-archive-in-a-box
 
-research-in-a-box is a kit for running a research data archive: a place where a research group publishes its datasets so that other people can find, cite and download them. A field station, for example, can use it to check its plot data on a laptop, submit it to its own archive in its own AWS account, have a curator review it, and publish it at a stable address with a search page, a citation and, if it wants, a DOI (a Digital Object Identifier, a permanent link such as `https://doi.org/10.1234/abcd` that keeps resolving even if the archive moves).
+research-archive-in-a-box is a kit for running a research data archive: a place where a research group publishes its datasets so that other people can find, cite and download them. A field station, for example, can use it to check its plot data on a laptop, submit it to its own archive in its own AWS account, have a curator review it, and publish it at a stable address with a search page, a citation and, if it wants, a DOI (a Digital Object Identifier, a permanent link such as `https://doi.org/10.1234/abcd` that keeps resolving even if the archive moves).
 
 ![The search page of an example archive, the Invented Research Cooperative: its introduction, a search box, filters by access, licence and format, and two published datasets.](docs/images/reading-room.png)
 
@@ -15,7 +15,7 @@ A dataset travels as a package. A package is a plain folder holding the data fil
 `cruise` is the kit's command-line tool. It runs on your own machine, with no account and no network, and tells you what a package is missing before anyone else sees it. Install it with [uv](https://docs.astral.sh/uv/), at a release tag:
 
 ```
-uv tool install "git+https://github.com/schuettc/research-in-a-box@v0.1.0#subdirectory=packages/tool"
+uv tool install "git+https://github.com/schuettc/research-archive-in-a-box@v0.1.1#subdirectory=packages/tool"
 cruise --version
 ```
 
@@ -59,14 +59,14 @@ Once it runs, people use it through the web app by role. A reader searches and d
 The `cruise` plugin lets Claude Code work with an archive for you: find and download its data, check and fix a package with the archive's own rules, submit it, and review submissions as a curator. Nothing is written to a manifest or sent to the archive without your yes. It needs uv. In Claude Code:
 
 ```
-/plugin marketplace add schuettc/research-in-a-box
-/plugin install cruise@research-in-a-box
+/plugin marketplace add schuettc/research-archive-in-a-box
+/plugin install cruise@research-archive-in-a-box
 ```
 
 On Claude Code 2.1.275 or later, one line does both:
 
 ```
-/plugin install cruise --marketplace schuettc/research-in-a-box
+/plugin install cruise --marketplace schuettc/research-archive-in-a-box
 ```
 
 The plugin's MCP server (a small program Claude Code starts to give it the archive's tools; here `archive-mcp`, in `packages/agent`) runs on your own machine and signs in on the archive's own sign-in page, which it opens in your browser. Its skills, `find-data`, `submit-dataset` and `review-submission`, ask for your archive's address the first time they need it.

@@ -15,7 +15,7 @@ members = [
     "archive-contract",
     "cruise",
     "femc",
-    "research-in-a-box",
+    "research-archive-in-a-box",
 ]
 
 [[package]]
@@ -1678,7 +1678,7 @@ wheels = [
 ]
 
 [[package]]
-name = "research-in-a-box"
+name = "research-archive-in-a-box"
 version = "0.1.0"
 source = { virtual = "." }
 

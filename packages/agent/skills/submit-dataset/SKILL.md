@@ -1,6 +1,6 @@
 ---
 name: submit-dataset
-description: Checks a local dataset package with the archive's own rules, drafts fixes for what it finds, applies only the ones the person approves, and submits the package to their research-in-a-box archive for review. Use when someone wants to check, fix, finish or submit a dataset package (a folder with datapackage.json), or asks about a submission's status or a curator's requested changes. Submitting needs an account in the contributor group.
+description: Checks a local dataset package with the archive's own rules, drafts fixes for what it finds, applies only the ones the person approves, and submits the package to their research-archive-in-a-box archive for review. Use when someone wants to check, fix, finish or submit a dataset package (a folder with datapackage.json), or asks about a submission's status or a curator's requested changes. Submitting needs an account in the contributor group.
 ---
 
 # Submit a dataset

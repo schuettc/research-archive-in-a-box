@@ -99,7 +99,7 @@ test("the stack outputs the role's ARN and carries the Repo tag", () => {
   const stack = app.synth().getStackByName(DEPLOY_STACK_NAME);
 
   expect(Object.keys(template.findOutputs("DeployRoleArn"))).toEqual(["DeployRoleArn"]);
-  expect(stack.tags).toEqual({ Repo: "schuettc/research-in-a-box" });
+  expect(stack.tags).toEqual({ Repo: "schuettc/research-archive-in-a-box" });
 });
 
 test("synth fails with a clear message without githubRepo", () => {
