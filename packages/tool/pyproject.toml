@@ -1,7 +1,7 @@
 [project]
 name = "cruise"
 version = "0.1.0"
-description = "The research-in-a-box local tool."
+description = "The research-archive-in-a-box local tool."
 requires-python = ">=3.12"
 dependencies = [
     "archive-contract",

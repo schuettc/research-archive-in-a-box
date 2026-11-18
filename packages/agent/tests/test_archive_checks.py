@@ -43,7 +43,7 @@ def test_connect_keeps_the_archives_checks_with_its_url(archive: Any, config_hom
 
     answer = server.connect(Session(), archive.url)
 
-    saved = json.loads((config_home / "research-in-a-box" / "archive.json").read_text())
+    saved = json.loads((config_home / "research-archive-in-a-box" / "archive.json").read_text())
     assert saved == {"url": archive.url, "checks": ECOLOGY}
     assert answer["checks"] == ECOLOGY
 
@@ -121,7 +121,7 @@ def test_an_archive_without_the_file_gets_core_rules_and_says_so(
     archive: Any, no_methods: Path, config_home: Path
 ) -> None:
     answer = server.connect(Session(), archive.url)
-    saved = json.loads((config_home / "research-in-a-box" / "archive.json").read_text())
+    saved = json.loads((config_home / "research-archive-in-a-box" / "archive.json").read_text())
 
     result = local.diagnose(str(no_methods))
 

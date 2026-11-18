@@ -1,7 +1,7 @@
 [project]
 name = "archive-client"
 version = "0.1.0"
-description = "The research-in-a-box archive client: browser sign-in to an archive."
+description = "The research-archive-in-a-box archive client: browser sign-in to an archive."
 requires-python = ">=3.12"
 dependencies = []
 

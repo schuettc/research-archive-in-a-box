@@ -171,7 +171,7 @@ def test_a_related_column_is_an_attribute_annotation() -> None:
     assert prop is not None and value is not None
     assert (prop.get("label"), prop.text) == (
         "ancillaryOf",
-        "https://research-in-a-box.org/terms/ancillaryOf",
+        "https://github.com/schuettc/research-archive-in-a-box/blob/main/docs/terms.md#ancillaryof",
     )
     assert value.get("label") == "uncertainty:water_temp_c"
 

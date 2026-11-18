@@ -4,7 +4,7 @@ A vulnerability is a flaw that lets someone do what the archive should refuse th
 
 ## Reporting one
 
-Report it privately through GitHub's private vulnerability reporting: on the repository's **Security** tab, choose **Report a vulnerability**, or open [the form](https://github.com/schuettc/research-in-a-box/security/advisories/new) directly. Only the maintainers see the report, and the fix is discussed there until it is released.
+Report it privately through GitHub's private vulnerability reporting: on the repository's **Security** tab, choose **Report a vulnerability**, or open [the form](https://github.com/schuettc/research-archive-in-a-box/security/advisories/new) directly. Only the maintainers see the report, and the fix is discussed there until it is released.
 
 Please don't open a public issue, pull request or discussion for a vulnerability, since that tells everyone how to use it before archives running the kit can update.
 

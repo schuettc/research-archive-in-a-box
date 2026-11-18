@@ -7,8 +7,8 @@ Who uses it: a researcher finding or submitting data, and a curator reviewing su
 Its one command installs the plugin, in Claude Code:
 
 ```
-/plugin marketplace add schuettc/research-in-a-box
-/plugin install cruise@research-in-a-box
+/plugin marketplace add schuettc/research-archive-in-a-box
+/plugin install cruise@research-archive-in-a-box
 ```
 
 Claude Code then starts `archive-mcp` itself, as `.mcp.json` says; there is nothing to run by hand.

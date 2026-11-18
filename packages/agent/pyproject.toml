@@ -1,7 +1,7 @@
 [project]
 name = "archive-agent"
 version = "0.1.0"
-description = "The research-in-a-box MCP server and Claude Code plugin."
+description = "The research-archive-in-a-box MCP server and Claude Code plugin."
 requires-python = ">=3.12"
 dependencies = [
     "archive-client",

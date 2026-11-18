@@ -22,7 +22,7 @@ the dataset's page, and only then go live. Registering sends `PUT /dois/{id}`, w
 [update docs](https://support.datacite.org/docs/updating-metadata-with-the-rest-api) say creates
 the DOI when the name is free, rather than `POST /dois`; so the first thing to check on the test
 system is that one publish registers its DOI. Please report problems in the repo's
-[issues](https://github.com/schuettc/research-in-a-box/issues).
+[issues](https://github.com/schuettc/research-archive-in-a-box/issues).
 
 ## Turning it on
 

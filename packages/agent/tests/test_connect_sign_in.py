@@ -23,7 +23,7 @@ def jwt(claims: dict[str, Any]) -> str:
 
 
 def test_the_saved_file_follows_xdg_config_home(config_home: Path) -> None:
-    assert state.config_file() == config_home / "research-in-a-box" / "archive.json"
+    assert state.config_file() == config_home / "research-archive-in-a-box" / "archive.json"
 
 
 def test_connect_checks_the_archive_answers_then_saves_its_url(
@@ -34,7 +34,7 @@ def test_connect_checks_the_archive_answers_then_saves_its_url(
     answer = server.connect(session, archive.url + "/")
 
     assert answer["url"] == archive.url
-    saved = json.loads((config_home / "research-in-a-box" / "archive.json").read_text())
+    saved = json.loads((config_home / "research-archive-in-a-box" / "archive.json").read_text())
     assert saved == {"url": archive.url}
     assert Session().url() == archive.url
     assert [(s.method, s.path) for s in archive.seen] == [
@@ -51,7 +51,7 @@ def test_connect_saves_nothing_when_the_archive_cant_be_reached(config_home: Pat
     with pytest.raises(Unreachable):
         server.connect(Session(), closed)
 
-    assert not (config_home / "research-in-a-box" / "archive.json").exists()
+    assert not (config_home / "research-archive-in-a-box" / "archive.json").exists()
 
 
 def test_connect_refuses_a_site_that_isnt_an_archive(stub: Any, config_home: Path) -> None:
@@ -60,7 +60,7 @@ def test_connect_refuses_a_site_that_isnt_an_archive(stub: Any, config_home: Pat
     with pytest.raises(Refused, match="research archive"):
         server.connect(Session(), stub.url)
 
-    assert not (config_home / "research-in-a-box" / "archive.json").exists()
+    assert not (config_home / "research-archive-in-a-box" / "archive.json").exists()
 
 
 def test_connect_refuses_an_address_that_isnt_a_web_address(config_home: Path) -> None:

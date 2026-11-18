@@ -47,7 +47,7 @@ export function createApp(configPath: string = process.env.ARCHIVE_CONFIG ?? ARC
       certificate,
     });
   }
-  Tags.of(app).add("Repo", "schuettc/research-in-a-box");
+  Tags.of(app).add("Repo", "schuettc/research-archive-in-a-box");
   return app;
 }
 

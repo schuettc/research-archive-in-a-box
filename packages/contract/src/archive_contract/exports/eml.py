@@ -41,7 +41,7 @@ from archive_contract.resources import MemberFile, Resource
 from archive_contract.validate import readable_member
 
 EML_NAMESPACE = "https://eml.ecoinformatics.org/eml-2.2.0"
-SYSTEM = "research-in-a-box"
+SYSTEM = "research-archive-in-a-box"
 TABLE_SCHEMA_TYPES = "https://datapackage.org/standard/table-schema/"
 UNDOCUMENTED_CODES = "Codes with no documented code list."
 NO_DEFINITION = "No definition was given for this column."
@@ -51,7 +51,9 @@ END_UNKNOWN = "The end of data collection is unknown."
 PROJECT_KEYWORDS = "keywords"
 UNKNOWN_GEOMETRY = "MultiGeometry"
 ANCILLARY_OF = "ancillaryOf"
-ANCILLARY_OF_URI = "https://research-in-a-box.org/terms/ancillaryOf"
+ANCILLARY_OF_URI = (
+    "https://github.com/schuettc/research-archive-in-a-box/blob/main/docs/terms.md#ancillaryof"
+)
 ORCID_DIRECTORY = "https://orcid.org"
 
 SHAPE_GEOMETRIES: dict[int, str] = {

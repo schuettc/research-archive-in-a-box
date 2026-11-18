@@ -1,7 +1,7 @@
 [project]
 name = "archive-backend"
 version = "0.1.0"
-description = "The research-in-a-box backend Lambda code."
+description = "The research-archive-in-a-box backend Lambda code."
 requires-python = ">=3.12"
 dependencies = [
     "archive-contract",

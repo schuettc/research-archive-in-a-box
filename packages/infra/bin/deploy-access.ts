@@ -74,7 +74,7 @@ export function createDeployAccessApp(
     existingProvider: oidcProvider === "existing",
     subPrefix: subPrefix as string | undefined,
   });
-  Tags.of(app).add("Repo", "schuettc/research-in-a-box");
+  Tags.of(app).add("Repo", "schuettc/research-archive-in-a-box");
   return app;
 }
 
