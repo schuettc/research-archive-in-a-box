@@ -68,6 +68,9 @@ def diagnose(session: Session, folder: str) -> dict[str, Any]:
         "findings": [f.dump() for f in result.findings],
         "verdict": verdict(*counts(result.findings)),
     }
+    archive = session.known()
+    if archive is not None:
+        answer["archive"] = archive
     if used is not None:
         answer["checks"] = used
     if note is not None:

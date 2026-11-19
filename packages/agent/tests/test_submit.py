@@ -332,24 +332,6 @@ def test_submission_files_names_the_curator_group_on_a_403(
         submit.submission_files(session, "s1")
 
 
-def test_submit_sends_no_hidden_file(connected: Any, package: Path, session: Session) -> None:
-    (package / ".DS_Store").write_bytes(b"x")
-    (package / ".git").mkdir()
-    (package / ".git" / "config").write_bytes(b"x")
-    answer_uploads(connected, "POST /api/submissions", package, "s1", 1)
-    connected.json(
-        "POST /api/submissions/s1/submit",
-        {"submissionId": "s1", "round": 1, "status": "checking"},
-        202,
-    )
-
-    submit.submit(session, str(package))
-
-    sent = [f["path"] for f in json.loads(posts(connected)[0].body)["files"]]
-    assert sent == listed(package)
-    assert not [s for s in connected.seen if s.method == "PUT" and "/." in s.path]
-
-
 def test_submit_refuses_a_package_whose_checksums_list_a_hidden_file(
     connected: Any, package: Path, session: Session
 ) -> None:

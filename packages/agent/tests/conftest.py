@@ -27,6 +27,7 @@ class Answer:
     status: int
     body: bytes
     content_type: str = "application/json"
+    location: str | None = None
 
 
 @dataclass
@@ -39,6 +40,9 @@ class Stub:
 
     def json(self, route: str, body: Any, status: int = 200) -> None:
         self.routes[route] = Answer(status, json.dumps(body).encode())
+
+    def redirect(self, route: str, location: str) -> None:
+        self.routes[route] = Answer(302, b"", location=location)
 
     def raw(self, route: str, body: bytes, status: int = 200) -> None:
         self.routes[route] = Answer(status, body, "application/octet-stream")
@@ -73,6 +77,8 @@ def _serve() -> Iterator[Stub]:
             self.send_response(answer.status)
             self.send_header("Content-Type", answer.content_type)
             self.send_header("Content-Length", str(len(answer.body)))
+            if answer.location is not None:
+                self.send_header("Location", answer.location)
             self.end_headers()
             self.wfile.write(answer.body)
 

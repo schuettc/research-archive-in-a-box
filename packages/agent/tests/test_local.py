@@ -41,6 +41,15 @@ def test_diagnose_answers_the_json_cruise_prints_with_the_verdict(package: Path)
     assert answer["verdict"] == "publishable, with 4 warnings"
 
 
+def test_diagnose_names_the_windows_archive_even_when_it_publishes_no_checks(
+    package: Path,
+) -> None:
+    answer = local.diagnose(Session(address="https://a.example"), str(package))
+
+    assert answer["archive"] == "https://a.example"
+    assert "checks" not in answer
+
+
 def test_diagnose_refuses_a_folder_that_isnt_there(tmp_path: Path) -> None:
     with pytest.raises(LocalError, match="no folder"):
         local.diagnose(Session(), str(tmp_path / "missing"))

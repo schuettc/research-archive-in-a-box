@@ -31,6 +31,18 @@ def _message(body: bytes) -> str:
     return text[:500]
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuses every redirect, so the answer comes back as the 30x it is."""
+
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
+_SIGNED = urllib.request.build_opener(_NoRedirect)
+"""Opens a request that carries a token: urllib would copy the header to wherever a redirect
+points, so such a request follows none."""
+
+
 class Archive:
     """Calls one archive, sending the ID token when signed in to it. A token another archive
     issued is never sent.
@@ -72,11 +84,19 @@ class Archive:
         raise SignedOut(f"Your sign-in to {self.url} expired. {SIGN_IN_AGAIN}")
 
     def _open(self, request: urllib.request.Request, group: str | None) -> bytes:
+        signed = request.has_header("Authorization")
+        opener = _SIGNED.open if signed else urllib.request.urlopen
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with opener(request, timeout=self.timeout) as response:
                 body: bytes = response.read()
                 return body
         except urllib.error.HTTPError as exc:
+            if signed and 300 <= exc.code < 400:
+                raise Refused(
+                    f"{self.url} redirected a signed-in request to "
+                    f"{exc.headers.get('Location')}, so it wasn't followed: your sign-in goes "
+                    "only to the archive that issued it."
+                ) from exc
             message = _message(exc.read())
             if exc.code == 401:
                 raise SignedOut(

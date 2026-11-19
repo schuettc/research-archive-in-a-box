@@ -110,3 +110,21 @@ def test_a_token_is_never_sent_to_another_address(stub: Any, other: Any, tokens:
 
     Archive(other.url, tokens).get("/api/search")
     assert "authorization" not in other.seen[0].headers
+
+
+def test_a_redirect_never_carries_the_token_to_another_host(
+    stub: Any, other: Any, tokens: Tokens
+) -> None:
+    stub.redirect("GET /api/submissions", other.url + "/api/submissions")
+    other.json("GET /api/submissions", {"submissions": []})
+
+    with pytest.raises(Refused, match="redirected"):
+        Archive(stub.url, tokens).get("/api/submissions", signed_in=True)
+    assert other.seen == []
+
+
+def test_a_request_with_no_token_still_follows_a_redirect(stub: Any, other: Any) -> None:
+    stub.redirect("GET /data/a.csv", other.url + "/a.csv")
+    other.raw("GET /a.csv", b"a,b\n")
+
+    assert Archive(stub.url).fetch("/data/a.csv") == b"a,b\n"

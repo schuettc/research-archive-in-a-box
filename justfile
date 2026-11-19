@@ -320,7 +320,7 @@ add-curator stage email userId:
 # caller's AWS_PROFILE and region. Set INGEST_E2E_REVIEWER to your curator user id to receive
 # the reminder; the reminder run leaves one submission waiting, and the next day's run checks it.
 ingest-e2e stage:
-    uv run python scripts/ingest_e2e.py {{stage}}
+    uv run --all-packages --frozen python scripts/ingest_e2e.py {{stage}}
 
 # Install archive-backend, its workspace packages (the contract and cruise) and its locked
 # dependencies as arm64 Lambda wheels, without Docker

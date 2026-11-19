@@ -40,7 +40,7 @@ anything to the archive without the person's yes.** The tools come from the
    and say they don't block publishing.
 5. **Submit only with the person's yes.** Say what will happen and where: every file in
    `checksums.sha256` is uploaded and the package goes to review at the archive this window
-   is on (`diagnose` answers it as `checks.archive`; name it). Hidden files and folders
+   is on (`diagnose` answers it as `archive`; name it). Hidden files and folders
    (names starting with a dot, such as `.DS_Store` or `.git/`) are never part of a package:
    they are not listed, checked or uploaded. Call `sign_in` if needed (say first that it
    opens the browser), then `submit` with the folder. Show the submission id, its status and
