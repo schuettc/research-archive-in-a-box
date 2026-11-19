@@ -21,6 +21,8 @@ let extraFindings: Finding[] = [];
 let checked: Record<string, unknown>[] = [];
 /** The limit the archive publishes in `/archive-checks.json`. */
 let maxPackageGiB = 9;
+/** Whether `/archive-checks.json` can be read. */
+let checksReadable = true;
 /** Whether the sample's dataset is already in the catalog. */
 let published = false;
 
@@ -41,10 +43,12 @@ beforeEach(() => {
   extraFindings = [];
   checked = [];
   maxPackageGiB = 9;
+  checksReadable = true;
   published = false;
   fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     const path = new URL(url, "https://site").pathname;
     if (path === "/archive-checks.json") {
+      if (!checksReadable) return Response.json({}, { status: 503 });
       return Response.json({ profiles: ["core"], required: [], maxPackageGiB });
     }
     if (path === "/api/checks" && init?.method === "POST") {
@@ -393,5 +397,38 @@ test("a folder over the archive's limit is refused before anything is hashed or 
   expect(alert.textContent).toMatch(
     /^This package's files total .+, more than the 0 GiB this archive takes\.$/,
   );
+  expect(created).toBeNull();
+});
+
+test("a folder chosen while the archive's limit can't be read is not checked, and says to try again", async () => {
+  checksReadable = false;
+  renderSubmit();
+  choose(sampleFiles());
+
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toBe("The archive can't be reached. Try again.");
+  expect(screen.queryByText(/Packages up to/)).toBeNull();
+  expect(screen.queryByRole("button", { name: "Upload and submit" })).toBeNull();
+  expect(checked).toEqual([]);
+  expect(created).toBeNull();
+
+  checksReadable = true;
+  choose(sampleFiles());
+
+  expect(await screen.findByText("New dataset")).toBeDefined();
+});
+
+test("a folder over a limit of several GiB is refused with the message that names the limit", async () => {
+  maxPackageGiB = 2;
+  renderSubmit();
+  const large = sampleFiles();
+  Object.defineProperty(large[0], "size", { value: 3 * 1024 ** 3 });
+  choose(large);
+
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toMatch(
+    /^This package's files total 3\.2 GB, more than the 2 GiB this archive takes\.$/,
+  );
+  expect(checked).toEqual([]);
   expect(created).toBeNull();
 });
