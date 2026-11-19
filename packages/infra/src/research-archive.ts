@@ -1,3 +1,4 @@
+import { extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CfnOutput, Stack } from "aws-cdk-lib";
 import type * as apigateway from "aws-cdk-lib/aws-apigateway";
@@ -246,6 +247,9 @@ export class ResearchArchive extends Construct {
       stagingBucket: this.stagingBucket,
       restApi: this.api,
       brandColor: brand.primaryColor,
+      faviconExt: props.config.brand?.favicon
+        ? extname(props.config.brand.favicon).toLowerCase()
+        : undefined,
       domain:
         this.domain && props.certificate
           ? { ...this.domain, certificate: props.certificate }

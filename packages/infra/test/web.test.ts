@@ -387,6 +387,7 @@ test("the no-cache deployment writes auth-config.json, archive-checks.json and r
     "/auth-config.json",
     "/archive-checks.json",
     "/brand/logo.*",
+    "/brand/favicon.*",
     "/robots.txt",
   ]);
   expect(site?.SourceObjectKeys).toHaveLength(4);
@@ -436,7 +437,7 @@ test("archive-checks.json holds exactly the config's profiles and required field
   ]);
 });
 
-test("brand files go immutable only under their content-hashed names; the stable logo is no-cache", () => {
+test("brand files go immutable only under their content-hashed names; the stable logo and favicon are no-cache", () => {
   const asset = vi.spyOn(s3deploy.Source, "asset");
   archive();
   // deploySite calls Source.asset on the web build twice: SiteAssets (immutable) first, then Site
@@ -452,6 +453,7 @@ test("brand files go immutable only under their content-hashed names; the stable
     "brand/logo-0a1b2c3d.svg",
     "brand/favicon-4e5f6a7b.svg",
     "brand/logo.svg",
+    "brand/favicon.svg",
   ];
   for (const file of files) {
     mkdirSync(dirname(join(build, file)), { recursive: true });
@@ -471,7 +473,7 @@ test("brand files go immutable only under their content-hashed names; the stable
     "brand/favicon-4e5f6a7b.svg",
     "brand/logo-0a1b2c3d.svg",
   ]);
-  expect(sent[1]).toEqual(["app.js", "brand/logo.svg", "index.html"]);
+  expect(sent[1]).toEqual(["app.js", "brand/favicon.svg", "brand/logo.svg", "index.html"]);
 });
 
 // The site function as it stood before custom domains: a stage with none must keep it exactly.
@@ -510,6 +512,28 @@ function runSite(code: string, request: Json): Json {
 
 test("with no domain the site function is exactly today's", () => {
   expect(siteFunction(archive())).toBe(SITE_REWRITE_BEFORE_DOMAINS);
+});
+
+const FAVICON = "examples/brand/favicon.svg";
+
+test("with a brand favicon, /favicon.ico reads its stable copy; with none it is left alone", () => {
+  const code = siteFunction(archive({ brand: { favicon: FAVICON } }));
+
+  expect(rewrite(code, "/favicon.ico")).toBe("/brand/favicon.svg");
+  expect(rewrite(code, "/about")).toBe("/index.html");
+  expect(rewrite(siteFunction(archive()), "/favicon.ico")).toBe("/favicon.ico");
+});
+
+test("with a domain and a brand favicon, /favicon.ico on the name reads its stable copy", () => {
+  const on = (code: string) =>
+    runSite(code, {
+      uri: "/favicon.ico",
+      headers: { host: { value: "data.example.org" } },
+      querystring: {},
+    }).uri;
+
+  expect(on(siteFunction(domainArchive("prod", { favicon: FAVICON })))).toBe("/brand/favicon.svg");
+  expect(on(siteFunction(domainArchive()))).toBe("/favicon.ico");
 });
 
 test("with a domain, pages on CloudFront's address move permanently to the name, query and all", () => {

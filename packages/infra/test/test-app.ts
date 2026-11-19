@@ -16,11 +16,11 @@ export const TEST_DOMAIN = { name: "data.example.org", hostedZoneId: "Z012345678
 
 /**
  * A stage with TEST_DOMAIN and an imported certificate, as bin/app.ts would build it; with
- * `email: "ses"`, it also sends its account emails through SES.
+ * `email: "ses"`, it also sends its account emails through SES; with `favicon`, its brand has that favicon.
  */
 export function domainArchive(
   stage = "prod",
-  options: { email?: "ses" } = {},
+  options: { email?: "ses"; favicon?: string } = {},
 ): {
   stack: Stack;
   archive: ResearchArchive;
@@ -35,6 +35,7 @@ export function domainArchive(
   const archive = new ResearchArchive(stack, "Archive", {
     config: {
       publisher: "P",
+      ...(options.favicon ? { brand: { favicon: options.favicon } } : {}),
       infrastructure: {
         alertEmail: "a@example.org",
         stages: [

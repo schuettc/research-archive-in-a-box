@@ -38,6 +38,8 @@ export interface WebProps {
   readonly restApi: apigateway.RestApi;
   /** The brand's primary colour, lower-case `#rrggbb`, as the static dataset pages write it. */
   readonly brandColor: string;
+  /** The brand favicon's extension with its dot (`.svg`), when the brand has one: /favicon.ico serves it. */
+  readonly faviconExt?: string;
   /** The stage's own domain: the distribution answers on it with the certificate, and gets aliases. */
   readonly domain?: {
     readonly name: string;
@@ -65,11 +67,12 @@ function pageStyleHash(color: string): string {
 }
 
 // /datasets/<id> and /datasets/<id>/ read the dataset's own page, /datasets/<id>/v<n> and
-// /datasets/<id>/v<n>/ that version's page; any other extensionless path is the app's.
+// /datasets/<id>/v<n>/ that version's page; any other extensionless path is the app's. With a brand
+// favicon, /favicon.ico reads its stable copy brand/favicon.<ext>.
 const SITE_REWRITE = `function handler(event) {
   var request = event.request;
   var uri = request.uri;
-  /*REDIRECT*/var dataset = uri.match(/^\\/datasets\\/([^\\/.]+)\\/?$/);
+  /*REDIRECT*//*FAVICON*/var dataset = uri.match(/^\\/datasets\\/([^\\/.]+)\\/?$/);
   var version = uri.match(/^\\/datasets\\/([^\\/.]+)\\/(v[0-9]+)\\/?$/);
   if (dataset) {
     request.uri = "/datasets/" + dataset[1] + "/index.html";
@@ -86,10 +89,19 @@ const SITE_REWRITE = `function handler(event) {
 /**
  * The site function. With the stage's domain, a request for the site's pages on any other host
  * (CloudFront's own address) gets a 301 to the same path and query on the domain, so old links
- * land and readers cite and sign in on the name; with none, the function is exactly as it was.
+ * land and readers cite and sign in on the name. With neither a domain nor a favicon, the
+ * function is exactly as it was.
  */
-function siteRewrite(domain?: string): string {
-  if (!domain) return SITE_REWRITE.replace("/*REDIRECT*/", "");
+function siteRewrite(domain?: string, faviconExt?: string): string {
+  const favicon = faviconExt
+    ? `if (uri === "/favicon.ico") {
+    request.uri = "/brand/favicon${faviconExt}";
+    return request;
+  }
+  `
+    : "";
+  const code = SITE_REWRITE.replace("/*FAVICON*/", favicon);
+  if (!domain) return code.replace("/*REDIRECT*/", "");
   const redirect = `var host = request.headers.host ? request.headers.host.value.toLowerCase() : "";
   if (host !== "${domain}") {
     var query = [];
@@ -108,7 +120,7 @@ function siteRewrite(domain?: string): string {
     };
   }
   `;
-  return SITE_REWRITE.replace("/*REDIRECT*/", redirect);
+  return code.replace("/*REDIRECT*/", redirect);
 }
 
 // /data/<datasetId>/<version>/<path> reads open/<datasetId>/<version>/<path>.
@@ -216,7 +228,9 @@ export class Web extends Construct {
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
         cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
         responseHeadersPolicy: siteHeaders,
-        functionAssociations: [viewerRequest("SiteRewrite", siteRewrite(props.domain?.name))],
+        functionAssociations: [
+          viewerRequest("SiteRewrite", siteRewrite(props.domain?.name, props.faviconExt)),
+        ],
       },
       additionalBehaviors: {
         "/data/*": {
@@ -288,9 +302,10 @@ export class Web extends Construct {
    * derived bucket's `site/`. Pruning is off in both deployments: catalog.json and datasets/ share the folder.
    * The hashed assets (the brand's logo and favicon among them, named by their content) cache
    * for a year and go first; index.html, app.js, auth-config.json, archive-checks.json and
-   * brand/logo.<ext>, the stable logo the static dataset pages name, are no-cache and
-   * invalidated, so a release, a rebrand or a change of profiles reaches readers at once. Both
-   * use gitignore matching, which can re-include brand/logo.<ext> after `/*`.
+   * brand/logo.<ext> and brand/favicon.<ext>, the stable copies the static dataset pages and
+   * /favicon.ico name, are no-cache and invalidated, so a release, a rebrand or a change of
+   * profiles reaches readers at once. Both use gitignore matching, which can re-include them
+   * after `/*`.
    */
   deploySite(authConfig: AuthConfig, checks: ArchiveChecks): void {
     if (!existsSync(WEB_BUILD)) {
@@ -299,7 +314,7 @@ export class Web extends Construct {
     const assets = new s3deploy.BucketDeployment(this, "SiteAssets", {
       sources: [
         s3deploy.Source.asset(WEB_BUILD, {
-          exclude: ["/index.html", "/app.js", "/brand/logo.*"],
+          exclude: ["/index.html", "/app.js", "/brand/logo.*", "/brand/favicon.*"],
           ignoreMode: IgnoreMode.GIT,
         }),
       ],
@@ -311,7 +326,15 @@ export class Web extends Construct {
     const site = new s3deploy.BucketDeployment(this, "Site", {
       sources: [
         s3deploy.Source.asset(WEB_BUILD, {
-          exclude: ["/*", "!/index.html", "!/app.js", "!/brand/", "/brand/*", "!/brand/logo.*"],
+          exclude: [
+            "/*",
+            "!/index.html",
+            "!/app.js",
+            "!/brand/",
+            "/brand/*",
+            "!/brand/logo.*",
+            "!/brand/favicon.*",
+          ],
           ignoreMode: IgnoreMode.GIT,
         }),
         s3deploy.Source.jsonData("auth-config.json", { ...authConfig }),
@@ -332,6 +355,7 @@ export class Web extends Construct {
         "/auth-config.json",
         "/archive-checks.json",
         "/brand/logo.*",
+        "/brand/favicon.*",
         "/robots.txt",
       ],
     });
