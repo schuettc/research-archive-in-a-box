@@ -3,17 +3,20 @@
 Structure only: the manifest parses, every reference points at something that exists, every
 listed file has its size and hash recorded and they match, and `checksums.sha256` matches the
 files. A vector resource's `archive:attributes` must name the columns of its `.dbf`, read
-from the header alone. Quality is the audit's business, not this module's.
+from the header alone. A CSV table's header row must hold its schema's field names, in order.
+Quality is the audit's business, not this module's.
 
 Symlinks are refused wherever they appear and never followed, so nothing outside the package
 is read or hashed.
 """
 
+import csv
 import hashlib
 import json
 import os
 import struct
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -106,6 +109,14 @@ def _safe(path: str) -> bool:
 def readable_member(root: Path, path: str) -> bool:
     """Whether `path` stays inside the package at `root` with no symlink on the way."""
     return _safe(path) and _symlink_in(root, path) is None
+
+
+def is_csv_table(resource: Resource) -> bool:
+    """Whether the resource is read as a CSV table: its `format` says csv, or it states no
+    format and its one path ends in `.csv`. A format that is stated and not csv is not."""
+    if resource.format is not None:
+        return resource.format.lower() == "csv"
+    return isinstance(resource.path, str) and resource.path.lower().endswith(".csv")
 
 
 def _digest(path: Path, algorithm: str) -> str:
@@ -294,6 +305,87 @@ def _check_attributes(root: Path, manifest: Manifest) -> list[Finding]:
     return findings
 
 
+def _header_row(file: Path, dialect: dict[str, Any]) -> list[str] | None:
+    """The file's first row, or None when it can't be read here.
+
+    A file that is not UTF-8, or a delimiter or quote character the `csv` module refuses (it
+    takes exactly one character), is left to the table reader, which reports what it can't read.
+    """
+    try:
+        with file.open(encoding="utf-8-sig", newline="") as stream:
+            reader = csv.reader(
+                stream,
+                delimiter=str(dialect.get("delimiter", ",")),
+                quotechar=str(dialect.get("quoteChar", '"')),
+            )
+            return next(reader, [])
+    except (UnicodeDecodeError, csv.Error, TypeError, ValueError, OSError):
+        return None
+
+
+def _check_headers(root: Path, manifest: Manifest) -> list[Finding]:
+    """A CSV table's header row against its schema's field names, exactly and in order.
+
+    One finding per resource, for the first difference. A table whose dialect says it has no
+    header row is not compared. A byte order mark before the first name is not part of it.
+    """
+    findings: list[Finding] = []
+    for resource in manifest.resources:
+        schema = resource.table_schema
+        path = resource.path
+        if schema is None or not schema.fields or not is_csv_table(resource):
+            continue
+        if not isinstance(path, str) or not readable_member(root, path):
+            continue
+        if not (root / path).is_file():
+            continue
+        dialect = resource.dialect or {}
+        if not bool(dialect.get("header", True)):
+            continue
+        header = _header_row(root / path, dialect)
+        if header is None:
+            continue
+        declared = schema.field_names()
+        k, n = len(header), len(declared)
+        differs = next((i for i in range(min(k, n)) if header[i] != declared[i]), None)
+        if differs is not None:
+            findings.append(
+                _error(
+                    "header-mismatch",
+                    f"{path}: column {differs + 1} is named {header[differs]!r} in the file's "
+                    f"header row, but the manifest names it {declared[differs]!r}",
+                    resource=resource.name,
+                    field=declared[differs],
+                    path=path,
+                    values=[header[differs], declared[differs]],
+                )
+            )
+        elif k < n:
+            findings.append(
+                _error(
+                    "header-mismatch",
+                    f"{path}: the header row has {k} columns, but the manifest describes {n}; "
+                    f"the file has no column for {declared[k]!r}",
+                    resource=resource.name,
+                    field=declared[k],
+                    path=path,
+                    values=[k, n],
+                )
+            )
+        elif k > n:
+            findings.append(
+                _error(
+                    "header-mismatch",
+                    f"{path}: the header row has {k} columns, but the manifest describes {n}; "
+                    f"the manifest has no field for the file's column {header[n]!r}",
+                    resource=resource.name,
+                    path=path,
+                    values=[k, n],
+                )
+            )
+    return findings
+
+
 def _check_references(manifest: Manifest) -> list[Finding]:
     findings: list[Finding] = []
     by_name = {r.name: r for r in manifest.resources}
@@ -314,6 +406,17 @@ def _check_references(manifest: Manifest) -> list[Finding]:
         if schema is None:
             continue
         own_fields = set(schema.field_names())
+        key_names = schema.primary_key
+        for field in [key_names] if isinstance(key_names, str) else list(key_names or []):
+            if field not in own_fields:
+                findings.append(
+                    _error(
+                        "primary-key",
+                        f"primary key uses {field!r}, which is not a field of this table",
+                        resource=resource.name,
+                        field=field,
+                    )
+                )
         for key in schema.foreign_keys or []:
             local = key.field_names()
             for field in local:
@@ -329,6 +432,17 @@ def _check_references(manifest: Manifest) -> list[Finding]:
             ref_name = key.reference.resource or resource.name
             target = by_name.get(ref_name)
             field_label = ", ".join(local)
+            pointed = key.reference.field_names()
+            if len(local) != len(pointed):
+                findings.append(
+                    _error(
+                        "foreign-key",
+                        f"foreign key on {field_label} names {len(local)} fields but points "
+                        f"at {len(pointed)}",
+                        resource=resource.name,
+                        field=local[0] if local else None,
+                    )
+                )
             if target is None:
                 findings.append(
                     _error(
@@ -431,6 +545,7 @@ def validate_package(path: Path) -> list[Finding]:
         _check_references(manifest)
         + _check_files(path, manifest)
         + _check_attributes(path, manifest)
+        + _check_headers(path, manifest)
         + _check_checksums(path)
     )
     return _once_per_symlink(findings)
