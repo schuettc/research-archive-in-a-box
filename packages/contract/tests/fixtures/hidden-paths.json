@@ -1,0 +1,19 @@
+{
+  "cases": [
+    { "path": ".DS_Store", "hidden": true },
+    { "path": "data/.DS_Store", "hidden": true },
+    { "path": ".git/config", "hidden": true },
+    { "path": "data/.cache/readings.csv", "hidden": true },
+    { "path": "docs/.gitkeep", "hidden": true },
+    { "path": "./data/a.csv", "hidden": true },
+    { "path": "../a.csv", "hidden": true },
+    { "path": "datapackage.json", "hidden": false },
+    { "path": "checksums.sha256", "hidden": false },
+    { "path": "data/a.csv", "hidden": false },
+    { "path": "data/a.b.csv", "hidden": false },
+    { "path": "data/trailing.", "hidden": false },
+    { "path": "data/a..b/c.csv", "hidden": false },
+    { "path": "data/_readings.csv", "hidden": false },
+    { "path": "_build/make.py", "hidden": false }
+  ]
+}

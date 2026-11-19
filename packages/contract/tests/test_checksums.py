@@ -56,3 +56,17 @@ def test_checksums_text_hashes_replaced_content_instead_of_the_file_on_disk(
         f"{hashlib.sha256(b'added\n').hexdigest()}  b.txt\n"
     )
     assert (tmp_path / "a.txt").read_bytes() == b"old\n"
+
+
+def test_checksums_leave_out_hidden_files_and_folders(tmp_path: Path) -> None:
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "a.csv").write_bytes(b"a\n")
+    (tmp_path / ".DS_Store").write_bytes(b"x")
+    (tmp_path / "data" / ".DS_Store").write_bytes(b"x")
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "config").write_bytes(b"x")
+
+    write_checksums(tmp_path)
+
+    digest = hashlib.sha256(b"a\n").hexdigest()
+    assert (tmp_path / "checksums.sha256").read_text() == f"{digest}  data/a.csv\n"
