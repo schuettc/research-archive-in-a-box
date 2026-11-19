@@ -279,13 +279,17 @@ export class Web extends Construct {
     }
 
     // Origin access control grants CloudFront the whole archive bucket; restricted data is
-    // reached only through the API's short-lived links, so CloudFront is denied it outright.
+    // reached only through the API's short-lived links, and publishing/ holds versions that are
+    // not live yet, so CloudFront is denied both outright.
     props.archiveBucket.addToResourcePolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.DENY,
         principals: [new iam.ServicePrincipal("cloudfront.amazonaws.com")],
         actions: ["s3:GetObject"],
-        resources: [props.archiveBucket.arnForObjects("restricted/*")],
+        resources: [
+          props.archiveBucket.arnForObjects("restricted/*"),
+          props.archiveBucket.arnForObjects("publishing/*"),
+        ],
       }),
     );
     // Without s3:ListBucket S3 answers 403 for a missing key, so both buckets grant it and a

@@ -113,26 +113,37 @@ export class Ingest extends Construct {
     fn.addToRolePolicy(
       allow(["s3:ListBucket"], [staging.bucketArn], { StringLike: { "s3:prefix": "held/*" } }),
     );
-    // Publish writes each file, then reads the manifest it just wrote for the page.
+    // Publish keeps a version's files and zips under publishing/, which nothing serves or
+    // lists, until its move step: it copies and zips there, reads them to move them, and deletes
+    // each once moved (a delete marker). A zip too large for one PUT is written there in parts.
+    fn.addToRolePolicy(
+      allow(
+        ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload"],
+        objects(archive.archiveBucket, "publishing/"),
+      ),
+    );
+    // The move writes each file to its public folder; later steps read the manifest there for
+    // the catalog and the page.
     fn.addToRolePolicy(
       allow(
         ["s3:PutObject", "s3:GetObject"],
         objects(archive.archiveBucket, "open/", "restricted/"),
       ),
     );
-    // A zip too large for one PUT is written in parts; an upload that fails is aborted.
+    // A zip too large for one copy is moved in parts, and the DOI path rewrites one in parts
+    // where it is; either is aborted when it fails.
     fn.addToRolePolicy(
       allow(["s3:AbortMultipartUpload"], objects(archive.archiveBucket, "open/", "restricted/")),
     );
-    // The page step HEADs each zip to see whether it changed; without list rights S3 answers a
-    // missing key with 403 instead of 404.
+    // The zips step HEADs each zip to see whether it changed; without list rights S3 answers a
+    // missing key with 403 instead of 404. The move lists the version's private folder.
     fn.addToRolePolicy(
       allow(["s3:ListBucket"], [archive.archiveBucket.bucketArn], {
-        StringLike: { "s3:prefix": ["open/*", "restricted/*"] },
+        StringLike: { "s3:prefix": ["open/*", "restricted/*", "publishing/*"] },
       }),
     );
-    // A publish that fails before its version is live hides the folder it copied, and a later
-    // publish that takes over its claim does the same. The bucket is versioned, so the delete
+    // A publish that fails before its version is live hides what it moved to the public folder,
+    // and a later publish that takes over its claim does the same. The bucket is versioned, so the delete
     // adds a delete marker: no right to delete a version or to bypass Object Lock.
     fn.addToRolePolicy(
       allow(["s3:DeleteObject"], objects(archive.archiveBucket, "open/", "restricted/")),

@@ -97,7 +97,30 @@ test("the ingest may abort a multipart upload in the archive bucket", () => {
   const resources = JSON.stringify(aborts.map((s) => s.Resource));
 
   expect(resources).toContain(archiveId);
-  expect(resources.match(/"\/[^"]*"/g)?.sort()).toEqual(['"/open/*"', '"/restricted/*"']);
+  // publishing/ too: a zip too large for one PUT is written there in parts before the move.
+  expect(resources.match(/"\/[^"]*"/g)?.sort()).toEqual([
+    '"/open/*"',
+    '"/publishing/*"',
+    '"/restricted/*"',
+  ]);
+});
+
+test("the ingest may get, put and delete under the archive's private publishing/ folder, in one statement", () => {
+  const archiveId = logicalId(archive.archiveBucket);
+  const staged = statements(INGEST).filter((s) =>
+    JSON.stringify(s.Resource).includes("/publishing/*"),
+  );
+
+  expect(staged).toHaveLength(1);
+  expect(actions(staged[0]!).sort()).toEqual([
+    "s3:AbortMultipartUpload",
+    "s3:DeleteObject",
+    "s3:GetObject",
+    "s3:PutObject",
+  ]);
+  const resources = JSON.stringify(staged[0]!.Resource);
+  expect(resources).toContain(archiveId);
+  expect(resources.match(/"\/[^"]*"/g)).toEqual(['"/publishing/*"']);
 });
 
 test("it is invoked through a live alias, which the IngestFunction output names", () => {
@@ -343,7 +366,7 @@ test("the ingest writes only the archive's open/ and restricted/ and the derived
   }
 });
 
-test("the ingest may list the archive's open/ and restricted/, so a missing zip HEADs as 404, not 403", () => {
+test("the ingest may list the archive's open/, restricted/ and publishing/, so a missing zip HEADs as 404, not 403", () => {
   const archiveId = logicalId(archive.archiveBucket);
   const lists = statements(INGEST).filter(
     (s) => actions(s).includes("s3:ListBucket") && JSON.stringify(s.Resource).includes(archiveId),
@@ -353,7 +376,7 @@ test("the ingest may list the archive's open/ and restricted/, so a missing zip 
   expect(actions(lists[0]!)).toEqual(["s3:ListBucket"]);
   expect(JSON.stringify(lists[0]!.Resource)).not.toContain("/*");
   expect(lists[0]!.Condition).toEqual({
-    StringLike: { "s3:prefix": ["open/*", "restricted/*"] },
+    StringLike: { "s3:prefix": ["open/*", "restricted/*", "publishing/*"] },
   });
 });
 
@@ -410,15 +433,18 @@ test("the ingest may put and delete the dataset item it claims", () => {
   }
 });
 
-test("the ingest may delete only under the archive's open/ and restricted/, and no object version", () => {
+test("the ingest may delete only under the archive's open/, restricted/ and publishing/, and no object version", () => {
   const archiveId = logicalId(archive.archiveBucket);
   const all = statements(INGEST).filter((s) => JSON.stringify(s.Resource).includes(archiveId));
   const deletes = all.filter((s) => actions(s).includes("s3:DeleteObject"));
 
-  expect(deletes).toHaveLength(1);
-  expect(actions(deletes[0]!)).toEqual(["s3:DeleteObject"]);
-  const resources = JSON.stringify(deletes[0]!.Resource);
-  expect(resources.match(/"\/[^"]*"/g)?.sort()).toEqual(['"/open/*"', '"/restricted/*"']);
+  expect(deletes).toHaveLength(2);
+  const resources = JSON.stringify(deletes.map((s) => s.Resource));
+  expect(resources.match(/"\/[^"]*"/g)?.sort()).toEqual([
+    '"/open/*"',
+    '"/publishing/*"',
+    '"/restricted/*"',
+  ]);
   // A delete adds a delete marker; the stored version and its Object Lock retention stay.
   const granted = all.flatMap(actions);
   expect(granted).not.toContain("s3:DeleteObjectVersion");
