@@ -326,6 +326,41 @@ def _scan_findings(tags: dict[str, str]) -> list[Finding]:
     ]
 
 
+def _size_findings(c: Clients, env: Env, sid: str, round: int, gib: int) -> list[Finding]:
+    """What the round's stored objects weigh against what the submission declared: a finding for
+    each file whose stored size differs, and one when the stored files total more than the
+    archive's limit. The upload link signs a file's SHA-256 and not its size, so the API's check
+    of the declared total holds only for a client that declares true sizes."""
+    files = (_submission(c, sid).get("files") or {}).get(str(round)) or []
+    findings: list[Finding] = []
+    total = 0
+    for entry in files:
+        path, declared = str(entry["path"]), int(entry["size"])
+        head = c.s3.head_object(Bucket=env.staging_bucket, Key=_incoming(sid, round, path))
+        stored = int(head["ContentLength"])
+        total += stored
+        if stored != declared:
+            findings.append(
+                Finding(
+                    rule_id="upload.size",
+                    severity="error",
+                    message=f"{path} is {stored:,} bytes as uploaded, not the {declared:,} bytes "
+                    "the submission declared.",
+                    target=Target(path=path),
+                )
+            )
+    if total > gib * 1024**3:
+        findings.append(
+            Finding(
+                rule_id="upload.total",
+                severity="error",
+                message=f"The package's files total {total:,} bytes as uploaded, more than the "
+                f"{gib} GiB ({gib * 1024**3:,} bytes) this archive takes.",
+            )
+        )
+    return findings
+
+
 def _download(c: Clients, env: Env, sid: str, round: int, paths: list[str], into: Path) -> None:
     for path in paths:
         target = into / path
@@ -388,12 +423,17 @@ def _check(
     paths: list[str],
     tags: dict[str, str],
 ) -> dict[str, Any]:
-    """Diagnose the round (unless the scan blocked it), store the report, block on an error."""
+    """Diagnose the round (unless the scan blocked it, or its stored files are not the sizes
+    declared or total more than the archive takes: then nothing is downloaded), store the
+    report, block on an error."""
     report: dict[str, Any] = {"round": round, "validation": None, "quality": None}
     findings = _scan_findings(tags)
     facts = _facts({})
+    config = None
     if not findings:
         config = read_archive_config(c.ssm, env.archive_config_parameter)
+        findings = _size_findings(c, env, sid, round, config.submissions.max_package_gib)
+    if config is not None and not findings:
         with tempfile.TemporaryDirectory(prefix="ingest-") as tmp:
             folder = Path(tmp)
             _download(c, env, sid, round, paths, folder)

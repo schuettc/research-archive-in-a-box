@@ -86,6 +86,8 @@ class FakeS3:
         self.pending: dict[str, str] = {}
         self.copies: list[tuple[str, str]] = []
         self.fail_copy = False
+        self.sizes: dict[str, int] = {}
+        self.downloads: list[str] = []
 
     def get_object_tagging(self, *, Bucket: str, Key: str) -> dict[str, Any]:
         assert Bucket == STAGING
@@ -96,6 +98,7 @@ class FakeS3:
     def get_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:
         if Bucket != STAGING:
             return {"Body": io.BytesIO(self.published[(Bucket, Key)])}
+        self.downloads.append(Key)
         return {"Body": io.BytesIO(self.objects[Key])}
 
     def put_object(self, *, Bucket: str, Key: str, Body: Any, **_: Any) -> dict[str, Any]:
@@ -108,6 +111,8 @@ class FakeS3:
         return {}
 
     def head_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:
+        if Bucket == STAGING and Key in self.objects:
+            return {"ContentLength": self.sizes.get(Key, len(self.objects[Key]))}
         if (Bucket, Key) not in self.published:
             raise ClientError({"Error": {"Code": "404"}}, "HeadObject")
         return {"Metadata": {}}
@@ -565,6 +570,47 @@ def test_a_threat_tag_blocks_the_round_with_a_scan_finding(world: World) -> None
         ("scan.THREATS_FOUND", "error", {"path": "data/logger.csv"})
     ]
     assert world.s3.copies == []
+
+
+def test_a_stored_file_of_another_size_than_declared_blocks_the_round_unread(
+    world: World,
+) -> None:
+    # The upload link signs only the SHA-256, so a client may declare a size it does not send.
+    world.s3.sizes[f"incoming/{SID}/1/data/logger.csv"] = 7
+
+    result, _ = world.run(["timeout"])
+
+    assert result["status"] == "abandoned"
+    report = json.loads(world.s3.objects[f"reports/{SID}/1.json"])
+    declared = next(e["size"] for e in world.item["files"]["1"] if e["path"] == "data/logger.csv")
+    assert [
+        (f["ruleId"], f["severity"], f["target"], f["message"]) for f in report["findings"]
+    ] == [
+        (
+            "upload.size",
+            "error",
+            {"path": "data/logger.csv"},
+            f"data/logger.csv is 7 bytes as uploaded, not the {declared:,} bytes the submission"
+            " declared.",
+        )
+    ]
+    assert world.reviews.events[1]["blocked"] is True
+    assert world.s3.downloads == [] and world.s3.copies == []
+
+
+def test_stored_files_totalling_more_than_the_limit_block_the_round_unread(world: World) -> None:
+    for entry in world.item["files"]["1"][:2]:
+        entry["size"] = 5 * 1024**3
+        world.s3.sizes[f"incoming/{SID}/1/{entry['path']}"] = 5 * 1024**3
+
+    result, _ = world.run(["timeout"])
+
+    assert result["status"] == "abandoned"
+    report = json.loads(world.s3.objects[f"reports/{SID}/1.json"])
+    [finding] = report["findings"]
+    assert (finding["ruleId"], finding["severity"]) == ("upload.total", "error")
+    assert "more than the 9 GiB (9,663,676,416 bytes) this archive takes" in finding["message"]
+    assert world.s3.downloads == []
 
 
 def test_a_scan_that_never_finishes_ends_failed_after_a_day(world: World) -> None:
