@@ -223,3 +223,22 @@ def test_a_column_in_the_readers_namespace_is_unreadable_not_a_failure(tmp_path:
 
     assert "names that start with 'cruise:' are kept for the reader" in result.findings[0].message
     assert result.findings[0].rule_id == "values.unreadable"
+
+
+def test_a_table_that_is_not_utf8_is_unreadable_not_a_failed_check(tmp_path: Path) -> None:
+    (tmp_path / "t.csv").write_bytes("a,b\n1,ok\n2,\u00f6k\n".encode("latin-1"))
+    fields = [{"name": "a", "type": "integer"}, {"name": "b", "type": "string"}]
+    resource = {
+        "name": "t",
+        "path": "t.csv",
+        "type": "table",
+        "format": "csv",
+        "schema": {"fields": fields},
+    }
+    context = Context.for_package(tmp_path, Manifest.model_validate({"resources": [resource]}))
+
+    unreadable = REGISTRY.get("values.unreadable").run(context)
+    constant = REGISTRY.get("values.constant").run(context)
+
+    assert [f.rule_id for f in unreadable.findings] == ["values.unreadable"]
+    assert not any(f.rule_id.endswith("check-failed") for f in constant.findings)

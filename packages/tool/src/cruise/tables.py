@@ -105,7 +105,8 @@ def read_table(
     con = connection if connection is not None else connect()
     try:
         relation = con.sql(sql)
-        relation.aggregate("count(*)").fetchall()  # read it once, so a bad file fails here
+        # Read every column once, so a bad file or a cell that is not UTF-8 fails here.
+        relation.aggregate("count(COLUMNS(*))").fetchall()
         return relation
     except duckdb.Error as exc:
         raise UnreadableTable(f"{resource.name} can't be read: {exc}") from exc
