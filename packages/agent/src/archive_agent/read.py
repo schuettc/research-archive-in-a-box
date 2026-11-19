@@ -44,8 +44,9 @@ def search(
         "page": page,
         "size": size,
     }
-    answer: dict[str, Any] = session.archive().get("/api/search", params=params)
-    return answer
+    archive = session.archive()
+    answer: dict[str, Any] = archive.get("/api/search", params=params)
+    return {**answer, "archive": archive.url}
 
 
 def _quote(segment: str) -> str:

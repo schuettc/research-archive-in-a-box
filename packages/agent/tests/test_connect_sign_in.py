@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 from mcp.server.mcpserver.exceptions import ToolError
 
-from archive_agent import server, state
+from archive_agent import server, state, submit
 from archive_agent.errors import NotConnected, Refused, SignInFailed, Unreachable
 from archive_agent.state import Session
 from archive_client.signin import AuthConfig, SignInError, Tokens
@@ -20,6 +20,19 @@ def jwt(claims: dict[str, Any]) -> str:
         return base64.urlsafe_b64encode(json.dumps(value).encode()).rstrip(b"=").decode()
 
     return f"{part({'alg': 'none'})}.{part(claims)}.signature"
+
+
+ECOLOGY = {"profiles": ["core", "ecology"], "required": []}
+
+
+def signed(site: str) -> Tokens:
+    """A contributor's tokens, good for an hour, issued by the archive at `site`."""
+    return Tokens(
+        access_token="a",
+        id_token=jwt({"email": "ana@example.org", "cognito:groups": ["contributor"]}),
+        expires_at=time.time() + 3600,
+        site=site,
+    )
 
 
 def test_the_saved_file_follows_xdg_config_home(config_home: Path) -> None:
@@ -84,15 +97,16 @@ def test_connect_forgets_the_last_archives_sign_in(archive: Any, tokens: Tokens)
 
 def test_sign_in_answers_the_email_and_groups_and_keeps_the_tokens(archive: Any) -> None:
     seen: list[AuthConfig] = []
-    signed = Tokens(
+    issued = Tokens(
         access_token="access",
         id_token=jwt({"email": "ana@example.org", "cognito:groups": ["contributor", "curator"]}),
         expires_at=time.time() + 3600,
+        site=archive.url,
     )
 
     def fake_sign_in(config: AuthConfig) -> Tokens:
         seen.append(config)
-        return signed
+        return issued
 
     session = Session(sign_in=fake_sign_in)
     server.connect(session, archive.url)
@@ -102,14 +116,19 @@ def test_sign_in_answers_the_email_and_groups_and_keeps_the_tokens(archive: Any)
     assert answer["email"] == "ana@example.org"
     assert answer["groups"] == ["contributor", "curator"]
     assert "expires_at" in answer
-    assert session.tokens == signed
+    assert session.tokens == issued
     assert session.groups == ["contributor", "curator"]
     assert seen == [AuthConfig(site=archive.url)]
 
 
 def test_sign_in_with_no_groups_answers_an_empty_list(archive: Any) -> None:
-    signed = Tokens(access_token="a", id_token=jwt({"email": "e@x"}), expires_at=time.time() + 60)
-    session = Session(sign_in=lambda config: signed)
+    issued = Tokens(
+        access_token="a",
+        id_token=jwt({"email": "e@x"}),
+        expires_at=time.time() + 60,
+        site=archive.url,
+    )
+    session = Session(sign_in=lambda config: issued)
     server.connect(session, archive.url)
 
     assert server.sign_in(session)["groups"] == []
@@ -145,3 +164,116 @@ def test_the_server_lists_its_tools_and_answers_errors_in_plain_words() -> None:
     # An anticipated error: the protocol layer answers it as is_error with this message.
     with pytest.raises(ToolError, match="No archive is set yet.*call connect"):
         asyncio.run(mcp.call_tool("sign_in", {}))
+
+
+def test_a_session_stays_on_its_archive_when_the_saved_file_changes(
+    archive: Any, other: Any
+) -> None:
+    archive.json("GET /api/submissions", {"submissions": []})
+    session = Session(sign_in=lambda config: signed(config.site))
+    server.connect(session, archive.url)
+    server.sign_in(session)
+
+    state.save_url(other.url)  # another window's connect
+    submit.submissions(session)
+
+    assert session.url() == archive.url
+    last = archive.seen[-1]
+    assert (last.method, last.path) == ("GET", "/api/submissions")
+    assert session.tokens is not None
+    assert last.headers["authorization"] == session.tokens.id_token
+    assert other.seen == []
+    assert Session().url() == other.url
+
+
+def test_a_session_takes_the_saved_address_at_its_first_call_and_keeps_it(
+    archive: Any, other: Any
+) -> None:
+    state.save_url(archive.url, ECOLOGY)
+    session = Session()
+
+    assert session.url() == archive.url
+    state.save_url(other.url)
+
+    assert session.url() == archive.url
+    assert session.checks == ECOLOGY
+
+
+def test_a_session_with_nothing_saved_fixes_nothing_until_there_is_an_address(
+    archive: Any,
+) -> None:
+    session = Session()
+    assert session.known() is None
+
+    state.save_url(archive.url)
+
+    assert session.url() == archive.url
+
+
+def test_connect_moves_this_session_only_and_sets_the_default(
+    archive: Any, other: Any, config_home: Path
+) -> None:
+    state.save_url(archive.url)
+    first, second = Session(), Session()
+    assert first.url() == archive.url
+
+    answer = server.connect(second, other.url)
+
+    assert (first.url(), second.url()) == (archive.url, other.url)
+    assert state.saved_url() == other.url
+    assert answer["note"] == (
+        "This window now uses this archive. It is also the default for new windows; "
+        "other open windows keep the archive they started with."
+    )
+
+
+def test_a_connect_that_fails_leaves_the_session_where_it_was(
+    archive: Any, other: Any, tokens: Tokens
+) -> None:
+    session = Session(tokens=tokens, groups=["curator"])
+    server.connect(session, archive.url)
+    session.tokens = tokens
+    other.json("GET /auth-config.json", {"hello": "world"})  # it answers, but is no archive
+
+    with pytest.raises(Refused, match="research archive"):
+        server.connect(session, other.url)
+
+    assert session.url() == archive.url
+    assert session.tokens == tokens
+    assert state.saved_url() == archive.url
+
+
+def test_sign_in_goes_to_this_sessions_archive_and_names_it(archive: Any, other: Any) -> None:
+    seen: list[AuthConfig] = []
+
+    def fake(config: AuthConfig) -> Tokens:
+        seen.append(config)
+        return signed(config.site)
+
+    session = Session(sign_in=fake)
+    server.connect(session, archive.url)
+    state.save_url(other.url)
+
+    answer = server.sign_in(session)
+
+    assert seen == [AuthConfig(site=archive.url)]
+    assert answer["archive"] == archive.url
+    assert session.tokens is not None and session.tokens.site == archive.url
+
+
+def test_a_sign_in_that_ends_after_this_window_moved_is_dropped(archive: Any, other: Any) -> None:
+    session = Session()
+
+    def moved_meanwhile(config: AuthConfig) -> Tokens:
+        server.connect(session, other.url)  # this window's own connect, during the browser wait
+        return signed(config.site)
+
+    session.sign_in = moved_meanwhile
+    server.connect(session, archive.url)
+
+    with pytest.raises(SignInFailed, match=f"was for {archive.url}.*now on {other.url}"):
+        server.sign_in(session)
+
+    assert session.tokens is None
+    assert session.groups == []
+    assert session.url() == other.url

@@ -44,8 +44,12 @@ class Stub:
         self.routes[route] = Answer(status, body, "application/octet-stream")
 
 
-@pytest.fixture
-def stub() -> Iterator[Stub]:
+AUTH_CONFIG = {"region": "us-east-1", "webClientId": "web"}
+"""`/auth-config.json` as a deployed archive answers it."""
+
+
+def _serve() -> Iterator[Stub]:
+    """A stub archive on a port of its own, shut down when the test ends."""
     archive = Stub()
 
     class Handler(BaseHTTPRequestHandler):
@@ -89,6 +93,19 @@ def stub() -> Iterator[Stub]:
     server.server_close()
 
 
+@pytest.fixture
+def stub() -> Iterator[Stub]:
+    yield from _serve()
+
+
+@pytest.fixture
+def other() -> Iterator[Stub]:
+    """A second archive on its own port, answering `/auth-config.json` as `archive` does."""
+    for second in _serve():
+        second.json("GET /auth-config.json", AUTH_CONFIG)
+        yield second
+
+
 @pytest.fixture(autouse=True)
 def config_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Every test saves its archive URL under a temporary folder."""
@@ -98,19 +115,15 @@ def config_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 @pytest.fixture
-def tokens() -> Tokens:
-    """Tokens good for another hour."""
-    return Tokens(access_token="access", id_token="id-token", expires_at=time.time() + 3600)
+def tokens(stub: Stub) -> Tokens:
+    """Tokens good for another hour, issued by the stub archive."""
+    return Tokens(
+        access_token="access", id_token="id-token", expires_at=time.time() + 3600, site=stub.url
+    )
 
 
 @pytest.fixture
 def archive(stub: Stub) -> Stub:
     """The stub answering `/auth-config.json` as a deployed archive does."""
-    stub.json(
-        "GET /auth-config.json",
-        {
-            "region": "us-east-1",
-            "webClientId": "web",
-        },
-    )
+    stub.json("GET /auth-config.json", AUTH_CONFIG)
     return stub

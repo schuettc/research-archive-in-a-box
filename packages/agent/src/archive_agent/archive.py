@@ -32,7 +32,8 @@ def _message(body: bytes) -> str:
 
 
 class Archive:
-    """Calls one archive, sending the ID token when signed in.
+    """Calls one archive, sending the ID token when signed in to it. A token another archive
+    issued is never sent.
 
     The archive's Cognito authorizer reads the ID token from the `Authorization` header (its
     routes ask for no OAuth scopes, and the backend reads the email and groups claims, which
@@ -54,6 +55,14 @@ class Archive:
 
     def _token(self, signed_in: bool) -> str | None:
         tokens = self.tokens
+        if tokens is not None and tokens.site != self.url:
+            # Another archive's token: as good as none here, and never put in a header.
+            if not signed_in:
+                return None
+            raise SignedOut(
+                f"Your sign-in is for {tokens.site}, not {self.url}, so it wasn't sent. "
+                f"Call sign_in to sign in to {self.url}, then retry."
+            )
         if tokens is not None and tokens.expires_at > self._now():
             return tokens.id_token
         if not signed_in:

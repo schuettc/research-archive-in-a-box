@@ -101,7 +101,9 @@ def _run(archive: FakeArchive, package: Path, clock: Clock | None = None) -> int
 
     def sign_in(config: AuthConfig) -> Tokens:
         signed.append(config)
-        return Tokens(access_token="access-token", id_token=ID_TOKEN, expires_at=3600.0)
+        return Tokens(
+            access_token="access-token", id_token=ID_TOKEN, expires_at=3600.0, site=config.site
+        )
 
     code = seed.main(
         [DOMAIN, "--package", str(package)],

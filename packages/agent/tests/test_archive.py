@@ -47,7 +47,7 @@ def test_a_signed_in_route_with_no_tokens_is_signed_out_without_calling(stub: An
 
 
 def test_expired_tokens_are_signed_out_without_calling(stub: Any) -> None:
-    expired = Tokens(access_token="a", id_token="i", expires_at=time.time() - 1)
+    expired = Tokens(access_token="a", id_token="i", expires_at=time.time() - 1, site=stub.url)
 
     with pytest.raises(SignedOut, match="expired"):
         Archive(stub.url, expired).get("/api/whoami", signed_in=True)
@@ -98,3 +98,15 @@ def test_fetch_answers_the_bytes_of_a_path_or_an_absolute_link(stub: Any, tokens
     assert Archive(stub.url, tokens).fetch(stub.url + "/data/x/1/a.csv") == b"a,b\n"
     # `/data` is public and a presigned link carries its own signature, so no token goes.
     assert all("authorization" not in seen.headers for seen in stub.seen)
+
+
+def test_a_token_is_never_sent_to_another_address(stub: Any, other: Any, tokens: Tokens) -> None:
+    other.json("GET /api/submissions", {"submissions": []})
+    other.json("GET /api/search", {"rows": []})
+
+    with pytest.raises(SignedOut, match=f"is for {stub.url}, not {other.url}"):
+        Archive(other.url, tokens).get("/api/submissions", signed_in=True)
+    assert other.seen == []
+
+    Archive(other.url, tokens).get("/api/search")
+    assert "authorization" not in other.seen[0].headers

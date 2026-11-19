@@ -7,6 +7,7 @@ import pytest
 
 from archive_agent import local
 from archive_agent.errors import LocalError
+from archive_agent.state import Session
 from archive_contract.exports.readme import render_readme
 from archive_contract.manifest import Manifest
 
@@ -30,7 +31,7 @@ def rule_ids(answer: dict[str, Any]) -> list[str]:
 
 
 def test_diagnose_answers_the_json_cruise_prints_with_the_verdict(package: Path) -> None:
-    answer = local.diagnose(str(package))
+    answer = local.diagnose(Session(), str(package))
 
     assert set(answer) == {"validation", "quality", "findings", "verdict", "note"}
     assert answer["validation"]["valid"] is True
@@ -41,7 +42,7 @@ def test_diagnose_answers_the_json_cruise_prints_with_the_verdict(package: Path)
 
 def test_diagnose_refuses_a_folder_that_isnt_there(tmp_path: Path) -> None:
     with pytest.raises(LocalError, match="no folder"):
-        local.diagnose(str(tmp_path / "missing"))
+        local.diagnose(Session(), str(tmp_path / "missing"))
 
 
 def test_edit_manifest_applies_a_column_description_and_a_license(package: Path) -> None:
@@ -74,7 +75,7 @@ def test_edit_manifest_applies_a_column_description_and_a_license(package: Path)
     assert answer["written"] == list(WRITTEN)
     assert answer["applied"] == 2
 
-    after = local.diagnose(str(package))
+    after = local.diagnose(Session(), str(package))
     assert after["validation"]["valid"] is True
     assert not [r for r in rule_ids(after) if r.startswith("structure.")]
     assert "field.description-missing" not in rule_ids(after)

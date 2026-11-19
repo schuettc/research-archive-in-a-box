@@ -96,7 +96,7 @@ def test_submit_sends_exactly_the_checksummed_files_each_with_its_checksum_heade
 
     result = submit.submit(session, str(package))
 
-    assert result == {"id": "s1", "round": 1, "status": "checking"}
+    assert result == {"id": "s1", "round": 1, "status": "checking", "archive": connected.url}
     create = posts(connected)[0]
     assert (create.method, create.path) == ("POST", "/api/submissions")
     assert create.headers["authorization"] == "id-token"
@@ -169,7 +169,7 @@ def test_submit_with_a_submission_sends_the_next_round_through_uploads(
 
     result = submit.submit(session, str(package), submission="s1")
 
-    assert result == {"id": "s1", "round": 2, "status": "checking"}
+    assert result == {"id": "s1", "round": 2, "status": "checking", "archive": connected.url}
     assert [s.path for s in connected.seen if s.method == "POST"] == [
         "/api/submissions/s1/uploads",
         "/api/submissions/s1/submit",
@@ -274,7 +274,7 @@ def test_decide_posts_the_decision_and_note(connected: Any, session: Session) ->
 
     result = submit.decide(session, "s1", "approve", "Looks complete.")
 
-    assert result == {"submissionId": "s1", "decision": "approve"}
+    assert result == {"submissionId": "s1", "decision": "approve", "archive": connected.url}
     assert json.loads(connected.seen[0].body) == {"decision": "approve", "note": "Looks complete."}
 
 
