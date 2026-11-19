@@ -14,7 +14,7 @@ import pytest
 from aws_durable_execution_sdk_python import DurableContext
 from botocore.exceptions import ClientError
 
-from archive_backend import api, doi, ingest, pages, reindex, submissions
+from archive_backend import api, doi, ingest, pages, reindex, submissions, zips
 from archive_backend.embeddings import Bedrock
 from archive_backend.ingest import Clients, Env
 from archive_contract.exports.readme import render_readme
@@ -75,9 +75,29 @@ class FakeS3:
         self.objects: dict[tuple[str, str], bytes] = {}
         self.puts: list[dict[str, Any]] = []
         self.fail_put: Callable[[str, str], bool] = lambda bucket, key: False
+        self.copies: list[dict[str, Any]] = []
+        self.fail_copy: Callable[[str, str], bool] = lambda bucket, key: False
+        # Paths whose copy arrives with other bytes than its source's.
+        self.corrupt: set[str] = set()
+        self.gets: list[tuple[str, str]] = []
 
     def get_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:
+        self.gets.append((Bucket, Key))
         return {"Body": io.BytesIO(self.objects[(Bucket, Key)])}
+
+    def copy_object(
+        self, *, Bucket: str, Key: str, CopySource: dict[str, str], **extra: Any
+    ) -> dict[str, Any]:
+        """S3's own copy, which answers the SHA-256 of what it stored."""
+        if self.fail_copy(Bucket, Key):
+            raise RuntimeError(f"copy to {Key} refused")
+        body = self.objects[(CopySource["Bucket"], CopySource["Key"])]
+        if any(Key.endswith("/" + path) for path in self.corrupt):
+            body += b"!"
+        self.objects[(Bucket, Key)] = body
+        self.copies.append({"Bucket": Bucket, "Key": Key, "CopySource": CopySource, **extra})
+        checksum = base64.b64encode(hashlib.sha256(body).digest()).decode()
+        return {"CopyObjectResult": {"ChecksumSHA256": checksum}}
 
     def put_object(self, *, Bucket: str, Key: str, Body: Any, **extra: Any) -> dict[str, Any]:
         if self.fail_put(Bucket, Key):
@@ -500,16 +520,38 @@ def test_limited_and_restricted_data_go_under_restricted(world: World, access: s
     assert "/data/secret/" not in page
 
 
-def test_every_put_carries_its_checksum_and_the_manifest_goes_last(world: World) -> None:
+def test_every_file_is_copied_by_s3_and_checked_against_checksums_sha256(world: World) -> None:
     world.hold(SID, _package(), datasetId="stream")
 
     world.publish()
 
-    puts = [p for p in world.s3.puts if p["Bucket"] == ARCHIVE]
-    files = [p for p in puts if "/_zips/" not in p["Key"]]
-    assert len(files) == len(_package())
-    assert all(p.get("ChecksumSHA256") for p in puts)
-    assert files[-1]["Key"] == "open/stream/1/datapackage.json"
+    copies = [c for c in world.s3.copies if c["Bucket"] == ARCHIVE]
+    assert sorted(c["Key"] for c in copies) == sorted("open/stream/1/" + p for p in _package())
+    for made in copies:
+        path = made["Key"].removeprefix("open/stream/1/")
+        assert made["CopySource"] == {"Bucket": STAGING, "Key": f"held/{SID}/{path}"}
+        assert made["ChecksumAlgorithm"] == "SHA256"
+        assert (made["MetadataDirective"], made["TaggingDirective"]) == ("REPLACE", "REPLACE")
+        assert "Tagging" not in made
+    assert copies[-1]["Key"] == "open/stream/1/datapackage.json"
+    kinds = {c["Key"].rsplit("/", 1)[-1]: c.get("ContentType") for c in copies}
+    assert (kinds["logger.csv"], kinds["datapackage.json"]) == ("text/csv", "application/json")
+    # Nothing but the zips goes to the archive by a PUT, and no held data file is read.
+    assert all("/_zips/" in p["Key"] for p in world.s3.puts if p["Bucket"] == ARCHIVE)
+    assert (STAGING, f"held/{SID}/data/logger.csv") not in world.s3.gets
+
+
+def test_a_copy_that_differs_from_its_checksum_line_stops_before_the_manifest(
+    world: World,
+) -> None:
+    world.hold(SID, _package(), datasetId="stream")
+    world.s3.corrupt = {"data/logger.csv"}
+
+    with pytest.raises(ingest.CopyMismatch, match="data/logger.csv"):
+        world.publish()
+
+    assert "open/stream/1/datapackage.json" not in world.s3.keys(ARCHIVE)
+    assert "currentVersion" not in world.table()[("DATASET#stream", "META")]
 
 
 def test_the_published_version_validates(world: World, tmp_path: Path) -> None:
@@ -691,14 +733,28 @@ def test_a_retried_version_step_keeps_its_own_claim(world: World) -> None:
     assert meta["currentVersion"] == {"N": "1"} and "claimedBy" not in meta
 
 
-def test_the_page_step_writes_the_versions_zips_beside_it(world: World) -> None:
+def test_the_zips_are_written_before_the_version_goes_live(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
     world.hold(SID, _package(**{"archive:access": "limited"}), datasetId="secret")
+    real = zips.write_zips
+    live: list[bool] = []
 
-    world.publish()
+    def writing(*args: Any, **kwargs: Any) -> list[str]:
+        live.append("currentVersion" in world.table()[("DATASET#secret", "META")])
+        return real(*args, **kwargs)
 
+    monkeypatch.setattr(zips, "write_zips", writing)
+
+    context = world.publish()
+
+    assert context.names[:6] == [
+        f"publish-1-{part}" for part in ("version", "fill", "copy", "zips", "catalog", "page")
+    ]
+    assert live == [False]
     root = "restricted/secret/1/"
-    zips = world.s3.keys(ARCHIVE, root + "_zips/")
-    assert zips == [
+    written = world.s3.keys(ARCHIVE, root + "_zips/")
+    assert written == [
         root + "_zips/all/package.zip",
         root + "_zips/depth.zip",
         root + "_zips/sites.zip",
@@ -711,6 +767,27 @@ def test_the_page_step_writes_the_versions_zips_beside_it(world: World) -> None:
             digest, path = line.split(maxsplit=1)
             assert hashlib.sha256(z.read(path)).hexdigest() == digest
     assert ("DATASET#secret", "V#000001#FILE#_zips/all/package.zip") in world.table()
+
+
+def test_a_zip_failure_leaves_readers_on_the_version_before(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    world.hold("sub-a", _package(), datasetId="stream")
+    world.publish("sub-a")
+    world.hold("sub-b", _package(), datasetId="stream", newVersion=True)
+
+    def refuse(*args: Any, **kwargs: Any) -> list[str]:
+        raise RuntimeError("zip refused")
+
+    monkeypatch.setattr(zips, "write_zips", refuse)
+
+    with pytest.raises(RuntimeError, match="zip refused"):
+        world.publish("sub-b")
+
+    assert world.table()[("DATASET#stream", "META")]["currentVersion"] == {"N": "1"}
+    assert ("DATASET#stream", "V#000002") not in world.table()
+    status, body = world.read("/api/datasets/stream")
+    assert (status, body["currentVersion"]) == (200, 1)
 
 
 def test_a_public_dataset_with_an_embargo_to_come_is_held_under_restricted(world: World) -> None:
@@ -777,8 +854,8 @@ def test_without_the_doi_module_the_steps_are_exactly_todays(world: World) -> No
 
     assert context.names == [
         f"publish-1-{part}"
-        for part in ("version", "fill", "copy", "catalog", "page", "catalog-file", "sitemap")
-        + ("finish",)
+        for part in ("version", "fill", "copy", "zips", "catalog", "page", "catalog-file")
+        + ("sitemap", "finish")
     ]
     assert world.datacite.calls == []
 
@@ -803,6 +880,10 @@ def test_with_the_doi_module_publish_registers_a_findable_doi_and_shows_it(world
     assert _verifies(world, "open/stream/1/")
     assert context.names[-3:] == ["publish-1-catalog-file", "publish-1-sitemap", "publish-1-finish"]
     assert "publish-1-doi" in context.names
+    at = context.names.index("publish-1-doi-identifier")
+    assert context.names[at + 1 : at + 4] == [
+        f"publish-1-doi-{part}" for part in ("zips", "catalog", "page")
+    ]
     assert len(context.names) == len(set(context.names))
     assert world.sns.messages == []
 
@@ -920,11 +1001,11 @@ def test_a_publish_that_fails_after_the_claim_leaves_the_live_dataset_as_it_was(
     world.publish("sub-a")
     before = copy.deepcopy(world.table())
     world.hold("sub-b", _package(), datasetId="stream", newVersion=True)
-    world.s3.fail_put = lambda bucket, key: (bucket, key) == (ARCHIVE, "open/stream/2/README.md")
+    world.s3.fail_copy = lambda bucket, key: (bucket, key) == (ARCHIVE, "open/stream/2/README.md")
 
     with pytest.raises(RuntimeError):
         world.publish("sub-b")
-    world.fail("sub-b", "put refused")
+    world.fail("sub-b", "copy refused")
 
     assert world.table() == before
     assert world.submissions.items["sub-b"]["status"] == "failed"
@@ -1041,6 +1122,8 @@ def test_a_takeover_publishes_a_version_holding_only_its_own_files(world: World)
     world.publish("sub-a")
     left = _package()
     left["data/extra.csv"] = b"a,b\n1,2\n"
+    extra = hashlib.sha256(left["data/extra.csv"]).hexdigest()
+    left["checksums.sha256"] += f"{extra}  data/extra.csv\n".encode()
     world.hold("sub-b", left, datasetId="stream", newVersion=True)
     _fail_the_catalog_put(world)
     with pytest.raises(RuntimeError):

@@ -12,14 +12,15 @@ step that fails after its retries ends the submission as `failed` with an admin 
 
 Publish is a series of steps, each safe to repeat: claim the dataset's next version in the
 active catalog (`claimedBy` on the dataset item, which leaves `currentVersion` alone), fill in
-the manifest and regenerate its README and checksums, copy the files to the archive bucket (the
-manifest last), put the catalog items the reindex would build into the active table (the
-dataset item last, which moves `currentVersion` and drops the claim), write the dataset page,
-rewrite the catalog file search reads and the sitemap, and finish. Readers get the version
-before until the catalog step ends; a publish that fails before then releases its claim and
-removes what it wrote of the version, so the live dataset is as it was. With the DOI module
-on, after the page the version's DOI is registered with DataCite, its address written to
-`archive:identifier`, and the catalog items and pages rewritten to show it; a DataCite failure
+the manifest and regenerate its README and checksums, copy the files to the archive bucket
+inside S3 (the manifest last, each copy checked against its line in `checksums.sha256`), write
+the version's download zips, put the catalog items the reindex would build into the active
+table (the dataset item last, which moves `currentVersion` and drops the claim), write the
+dataset page, rewrite the catalog file search reads and the sitemap, and finish. Readers get
+the version before until the catalog step ends; a publish that fails before then releases its
+claim and removes what it wrote of the version, so the live dataset is as it was. With the DOI
+module on, after the page the version's DOI is registered with DataCite, its address written to
+`archive:identifier`, and the zips, catalog items and pages rewritten to show it; a DataCite failure
 after the step's retries alerts and the publish finishes without a DOI.
 """
 
@@ -106,6 +107,11 @@ class S3(Protocol):
     def copy_object(self, **kwargs: Any) -> Any: ...
     def get_paginator(self, name: str) -> Any: ...
     def delete_objects(self, **kwargs: Any) -> Any: ...
+    def create_multipart_upload(self, **kwargs: Any) -> dict[str, Any]: ...
+    def upload_part(self, **kwargs: Any) -> dict[str, Any]: ...
+    def upload_part_copy(self, **kwargs: Any) -> dict[str, Any]: ...
+    def complete_multipart_upload(self, **kwargs: Any) -> Any: ...
+    def abort_multipart_upload(self, **kwargs: Any) -> Any: ...
 
 
 class SNS(Protocol):
@@ -839,6 +845,10 @@ def _root(filled: dict[str, Any], target: dict[str, Any]) -> str:
     return f"{filled['prefix']}/{target['datasetId']}/{target['version']}/"
 
 
+class CopyMismatch(Exception):
+    """A file arrived in the archive bucket with other bytes than `checksums.sha256` lists."""
+
+
 @durable_step
 def _copy(
     _: StepContext,
@@ -848,28 +858,41 @@ def _copy(
     target: dict[str, Any],
     filled: dict[str, Any],
 ) -> int:
-    """One checksummed PUT per file into the archive bucket, the manifest last."""
+    """One copy per file inside S3 into the archive bucket, the manifest last, each checked
+    against its line in the held `checksums.sha256`. No file passes through the function."""
     paths = sorted(filled["files"], key=lambda p: (p == MANIFEST, p))
     root = _root(filled, target)
+    # The fill step has just rewritten it, so it lists every file but itself.
+    listed = _read(c, env.staging_bucket, _held(sid, CHECKSUMS))
+    expected = zips.checksum_lines(listed.decode("utf-8"))
+    expected[CHECKSUMS] = hashlib.sha256(listed).hexdigest()
     for path in paths:
-        with tempfile.TemporaryFile() as stream:
-            body = c.s3.get_object(Bucket=env.staging_bucket, Key=_held(sid, path))["Body"]
-            digest = hashlib.sha256()
-            while chunk := body.read(CHUNK):
-                digest.update(chunk)
-                stream.write(chunk)
-            stream.seek(0)
-            put: dict[str, Any] = {
-                "Bucket": env.archive_bucket,
-                "Key": root + path,
-                "Body": stream,
-                "ChecksumSHA256": base64.b64encode(digest.digest()).decode("ascii"),
-            }
-            kind = mimetypes.guess_type(path)[0]
-            if kind:
-                put["ContentType"] = kind
-            c.s3.put_object(**put)
+        copy: dict[str, Any] = {
+            "Bucket": env.archive_bucket,
+            "Key": root + path,
+            "CopySource": {"Bucket": env.staging_bucket, "Key": _held(sid, path)},
+            "ChecksumAlgorithm": "SHA256",
+            "MetadataDirective": "REPLACE",
+            # With no tags given: the scan's tag stays out of the archive.
+            "TaggingDirective": "REPLACE",
+        }
+        kind = mimetypes.guess_type(path)[0]
+        if kind:
+            copy["ContentType"] = kind
+        stored = c.s3.copy_object(**copy).get("CopyObjectResult", {}).get("ChecksumSHA256")
+        if not stored or base64.b64decode(stored).hex() != expected.get(path):
+            raise CopyMismatch(f"the copy of {path} differs from its line in checksums.sha256")
     return len(paths)
+
+
+@durable_step
+def _zips(
+    _: StepContext, c: Clients, env: Env, target: dict[str, Any], filled: dict[str, Any]
+) -> int:
+    """The version's download zips, written before the catalog step makes it live."""
+    root = _root(filled, target)
+    text = _read(c, env.archive_bucket, root + MANIFEST).decode("utf-8")
+    return len(zips.write_zips(c.s3, env.archive_bucket, root, json.loads(text)))
 
 
 def _write(c: Clients, table: str, requests: list[dict[str, Any]]) -> None:
@@ -958,7 +981,6 @@ def _page(
     dataset_id, version = target["datasetId"], int(target["version"])
     root = _root(filled, target)
     text = _read(c, env.archive_bucket, root + MANIFEST).decode("utf-8")
-    zips.write_zips(c.s3, env.archive_bucket, root, json.loads(text))
     manifest = Manifest.model_validate_json(text)
     brand = pages.page_brand(read_archive_config(c.ssm, env.archive_config_parameter))
     withdrawn = withdrawal_of(_meta(c, target["table"], dataset_id))
@@ -1084,6 +1106,7 @@ def _register_doi(
     address = found["address"]
     try:
         context.step(_doi_identifier(c, env, target, filled, address), name=name("doi-identifier"))
+        context.step(_zips(c, env, target, filled), name=name("doi-zips"))
         context.step(_catalog(c, env, sid, target, filled), name=name("doi-catalog"))
         context.step(_page(c, env, target, filled), name=name("doi-page"))
     except Exception as error:
@@ -1126,6 +1149,7 @@ def publish(
     target = context.step(_version(c, env, sid), name=name("version"))
     filled = context.step(_fill(c, env, sid, target), name=name("fill"))
     context.step(_copy(c, env, sid, target, filled), name=name("copy"))
+    context.step(_zips(c, env, target, filled), name=name("zips"))
     context.step(_catalog(c, env, sid, target, filled), name=name("catalog"))
     context.step(_page(c, env, target, filled), name=name("page"))
     if filled.get("dois"):

@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import io
 import json
@@ -122,7 +123,14 @@ class FakeS3:
     ) -> dict[str, Any]:
         if self.fail_copy:
             raise RuntimeError("copy refused")
-        assert Bucket == STAGING and CopySource["Bucket"] == STAGING
+        assert CopySource["Bucket"] == STAGING
+        if Bucket == ARCHIVE:
+            # The publish's copy, which S3 answers with the SHA-256 of what it stored.
+            body = self.objects[CopySource["Key"]]
+            self.published[(Bucket, Key)] = body
+            checksum = base64.b64encode(hashlib.sha256(body).digest()).decode()
+            return {"CopyObjectResult": {"ChecksumSHA256": checksum}}
+        assert Bucket == STAGING
         self.objects[Key] = self.objects[CopySource["Key"]]
         self.copies.append((CopySource["Key"], Key))
         return {}

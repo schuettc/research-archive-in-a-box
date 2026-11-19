@@ -9,7 +9,7 @@ from typing import Any, cast
 import pytest
 from botocore.exceptions import ClientError
 
-from archive_backend import zips
+from archive_backend import parts, zips
 
 SAMPLE = Path(__file__).parents[3] / "examples" / "sample-package"
 BUCKET = "archive"
@@ -23,6 +23,8 @@ class FakeS3:
         self.objects: dict[tuple[str, str], bytes] = {}
         self.metadata: dict[tuple[str, str], dict[str, str]] = {}
         self.puts: list[dict[str, Any]] = []
+        self.uploads: dict[tuple[str, str], dict[str, Any]] = {}
+        self.multipart: list[dict[str, Any]] = []
         # Without s3:ListBucket, S3 answers a missing key with 403 rather than 404.
         self.can_list = can_list
 
@@ -50,6 +52,29 @@ class FakeS3:
         self.metadata[(Bucket, Key)] = extra.get("Metadata", {})
         self.puts.append({"Bucket": Bucket, "Key": Key, **extra})
         return {}
+
+    # A multipart upload: the parts are joined into the object on complete.
+    def create_multipart_upload(self, *, Bucket: str, Key: str, **extra: Any) -> dict[str, Any]:
+        assert extra["ChecksumAlgorithm"] == "SHA256"
+        self.uploads[(Bucket, Key)] = {"extra": extra, "parts": {}}
+        return {"UploadId": "u-1"}
+
+    def upload_part(
+        self, *, Bucket: str, Key: str, PartNumber: int, Body: bytes, **extra: Any
+    ) -> dict[str, Any]:
+        assert extra["ChecksumSHA256"] == base64.b64encode(hashlib.sha256(Body).digest()).decode()
+        self.uploads[(Bucket, Key)]["parts"][PartNumber] = Body
+        return {"ETag": f"etag-{PartNumber}"}
+
+    def complete_multipart_upload(self, *, Bucket: str, Key: str, **_: Any) -> dict[str, Any]:
+        upload = self.uploads.pop((Bucket, Key))
+        self.objects[(Bucket, Key)] = b"".join(body for _, body in sorted(upload["parts"].items()))
+        self.metadata[(Bucket, Key)] = upload["extra"].get("Metadata", {})
+        self.multipart.append({"Bucket": Bucket, "Key": Key, **upload["extra"]})
+        return {}
+
+    def abort_multipart_upload(self, **_: Any) -> dict[str, Any]:
+        raise AssertionError("no upload fails in these tests")
 
 
 def _s3(fake: FakeS3) -> zips.S3:
@@ -117,11 +142,36 @@ def test_a_shapefile_sets_zip_holds_its_four_members(s3: FakeS3) -> None:
     ]
 
 
-def test_every_zip_is_one_checksummed_put(s3: FakeS3) -> None:
+def test_a_zip_within_one_request_is_one_put_with_its_sha256(s3: FakeS3) -> None:
     zips.write_zips(_s3(s3), BUCKET, ROOT, _manifest())
 
     assert len(s3.puts) == 3
     assert all(put["ContentType"] == "application/zip" for put in s3.puts)
+
+
+def test_a_zip_over_one_request_is_written_in_parts_with_its_fingerprint(
+    s3: FakeS3, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(parts, "ONE_REQUEST_MAX", 16)
+    monkeypatch.setattr(parts, "PART", 8)
+
+    written = zips.write_zips(_s3(s3), BUCKET, ROOT, _manifest())
+
+    assert s3.puts == [] and len(written) == 3
+    key = f"{ROOT}_zips/all/package.zip"
+    [upload] = [u for u in s3.multipart if u["Key"] == key]
+    assert upload["ContentType"] == "application/zip"
+    listed = zips.checksum_lines((SAMPLE / "checksums.sha256").read_text())
+    assert sorted(_zip(s3, "all/package.zip").namelist()) == sorted([*listed, "checksums.sha256"])
+    hashes = {
+        **listed,
+        "checksums.sha256": hashlib.sha256(
+            s3.objects[(BUCKET, ROOT + "checksums.sha256")]
+        ).hexdigest(),
+    }
+    mark = zips.fingerprint((*sorted(listed), "checksums.sha256"), hashes)
+    assert s3.metadata[(BUCKET, key)] == {"members-sha256": mark}
+    assert zips.write_zips(_s3(s3), BUCKET, ROOT, _manifest()) == []
 
 
 def test_a_second_run_writes_nothing_new(s3: FakeS3) -> None:

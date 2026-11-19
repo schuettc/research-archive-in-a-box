@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 from botocore.exceptions import ClientError
 
-from archive_backend import doi, lifecycle
+from archive_backend import doi, lifecycle, parts
 from archive_backend.doi import DataCiteError
 from archive_backend.reindex import catalog_items, dataset_item
 from datacite_fake import FakeDataCite
@@ -40,6 +40,9 @@ class FakeS3:
         self.corrupt: set[str] = set()
         self.copies: list[str] = []
         self.puts: list[str] = []
+        self.metadata: dict[tuple[str, str], dict[str, str]] = {}
+        self.uploads: dict[tuple[str, str], dict[str, Any]] = {}
+        self.part_copies: list[str] = []
 
     def put(self, bucket: str, key: str, body: bytes) -> None:
         self.objects[(bucket, key)] = (body, _b64(body))
@@ -71,7 +74,13 @@ class FakeS3:
     def head_object(self, *, Bucket: str, Key: str, **_: Any) -> dict[str, Any]:
         if (Bucket, Key) not in self.objects:
             raise ClientError({"Error": {"Code": "404"}}, "HeadObject")
-        return {"ChecksumSHA256": self.objects[(Bucket, Key)][1]}
+        body, checksum = self.objects[(Bucket, Key)]
+        return {
+            "ChecksumSHA256": checksum,
+            "ContentLength": len(body),
+            "Metadata": self.metadata.get((Bucket, Key), {}),
+            "ContentType": "application/zip" if Key.endswith(".zip") else "text/plain",
+        }
 
     def put_object(self, *, Bucket: str, Key: str, Body: Any, **kwargs: Any) -> dict[str, Any]:
         body = Body.encode() if isinstance(Body, str) else Body
@@ -89,6 +98,38 @@ class FakeS3:
         self.objects[(Bucket, Key)] = (body, _b64(body))
         self.copies.append(Key)
         return {"CopyObjectResult": {"ChecksumSHA256": _b64(body)}}
+
+    # A multipart copy: the ranges are joined into the object on complete, whose checksum is
+    # then a composite, not a SHA-256 of the whole object.
+    def create_multipart_upload(self, *, Bucket: str, Key: str, **extra: Any) -> dict[str, Any]:
+        self.uploads[(Bucket, Key)] = {"extra": extra, "parts": {}}
+        return {"UploadId": "u-1"}
+
+    def upload_part_copy(
+        self,
+        *,
+        Bucket: str,
+        Key: str,
+        PartNumber: int,
+        CopySource: dict[str, str],
+        CopySourceRange: str,
+        **_: Any,
+    ) -> dict[str, Any]:
+        first, last = (int(n) for n in CopySourceRange.removeprefix("bytes=").split("-"))
+        body = self.objects[(CopySource["Bucket"], CopySource["Key"])][0][first : last + 1]
+        self.uploads[(Bucket, Key)]["parts"][PartNumber] = body
+        return {"CopyPartResult": {"ETag": f"etag-{PartNumber}", "ChecksumSHA256": _b64(body)}}
+
+    def complete_multipart_upload(self, *, Bucket: str, Key: str, **_: Any) -> dict[str, Any]:
+        upload = self.uploads.pop((Bucket, Key))
+        pieces = [body for _, body in sorted(upload["parts"].items())]
+        self.objects[(Bucket, Key)] = (b"".join(pieces), f"composite-{len(pieces)}")
+        self.metadata[(Bucket, Key)] = upload["extra"].get("Metadata", {})
+        self.part_copies.append(Key)
+        return {}
+
+    def abort_multipart_upload(self, **_: Any) -> dict[str, Any]:
+        raise AssertionError("no copy fails in these tests")
 
     def delete_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:
         self.objects.pop((Bucket, Key), None)
@@ -348,6 +389,30 @@ def test_a_copy_that_differs_from_its_checksum_keeps_the_source_and_fails_the_ru
     assert world.s3.copies == ["restricted/ds/1/data/a.csv"]
     assert world.s3.keys(ARCHIVE, "open/ds/") == []
     assert world.meta("ds")["prefix"] == {"S": "restricted"}
+
+
+def test_a_zip_over_one_request_is_moved_in_parts(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Above every listed file of the version, below the zip.
+    monkeypatch.setattr(parts, "ONE_REQUEST_MAX", 1000)
+    monkeypatch.setattr(parts, "PART", 400)
+    world.publish("ds", "open")
+    world.withdraw("ds")
+    # A zip written in parts: more than one request takes, with a composite checksum.
+    body = bytes(range(250)) * 6
+    world.s3.objects[(ARCHIVE, "open/ds/1/_zips/all/package.zip")] = (body, "composite-4")
+    world.s3.metadata[(ARCHIVE, "open/ds/1/_zips/all/package.zip")] = {"members-sha256": "abc"}
+
+    world.sync("ds")
+
+    target = "restricted/ds/1/_zips/all/package.zip"
+    assert world.s3.part_copies == [target] and target not in world.s3.copies
+    assert world.s3.body(ARCHIVE, target) == body
+    assert world.s3.metadata[(ARCHIVE, target)] == {"members-sha256": "abc"}
+    assert world.s3.keys(ARCHIVE, "open/ds/") == []
+    # Every file within one request still moves by one copy.
+    assert "restricted/ds/1/data/a.csv" in world.s3.copies
 
 
 def test_a_file_already_in_place_is_not_copied_again(world: World) -> None:
