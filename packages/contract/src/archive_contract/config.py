@@ -253,6 +253,26 @@ class Doi(_Strict):
     )
 
 
+# The ingest function checks a package on its own disk. AWS gives a Lambda function at most
+# LAMBDA_DISK_MB of /tmp; the margin is what the function needs beside the package's files.
+LAMBDA_DISK_MB = 10_240
+DISK_MARGIN_MB = 1_024
+MAX_PACKAGE_GIB = (LAMBDA_DISK_MB - DISK_MARGIN_MB) // 1024
+
+
+class Submissions(_Strict):
+    """What the archive takes as a submission."""
+
+    max_package_gib: int = PydanticField(
+        default=MAX_PACKAGE_GIB,
+        ge=1,
+        le=MAX_PACKAGE_GIB,
+        alias="maxPackageGiB",
+        description="The largest package the archive takes: the total size of its files, in "
+        "GiB. The checking function's disk is sized from it at deploy.",
+    )
+
+
 class ArchiveConfig(ArchiveModel):
     """Which profiles apply, extra required fields, vocabularies, themes, the licenses and
     access levels offered, and the publisher the archive fills in at publish."""
@@ -267,6 +287,7 @@ class ArchiveConfig(ArchiveModel):
     infrastructure: Infrastructure | None = None
     brand: Brand | None = None
     doi: Doi | None = None
+    submissions: Submissions = PydanticField(default_factory=Submissions)
 
     @model_validator(mode="after")
     def _known_fields(self) -> Self:

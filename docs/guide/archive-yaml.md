@@ -43,6 +43,8 @@ brand:
 doi:
   repository: EXAMPLE.IRC
   prefix: "10.5072"
+submissions:
+  maxPackageGiB: 9
 infrastructure:
   alertEmail: archive-admin@example.org
   monthlyBudgetUsd: 50
@@ -325,6 +327,32 @@ brand:
     The Invented Research Cooperative keeps your email address so you can sign in.
 
     Write to archive-admin@example.org to see or delete what we hold about you.
+```
+
+## Submissions: submissions
+
+### `submissions`
+
+What the archive takes as a submission. Leave it out and the archive takes the largest package it can.
+
+- **Type:** a block of the field below.
+- **Default:** a block with the default below.
+
+```yaml
+submissions:
+  maxPackageGiB: 9
+```
+
+### `submissions.maxPackageGiB`
+
+The largest package the archive takes, as the total size of its files in GiB. A larger package is refused before anything is uploaded. The function that checks a package has its disk sized from this number at deploy, so a change takes effect at the next deploy. Whatever the number, each file may be at most 5 GiB and a package may hold at most 1,000 files.
+
+- **Type:** a whole number from 1 to 9.
+- **Default:** `9`, the most a package can be.
+
+```yaml
+submissions:
+  maxPackageGiB: 4
 ```
 
 ## DOIs: doi

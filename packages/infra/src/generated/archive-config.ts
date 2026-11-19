@@ -65,6 +65,10 @@ export type Licenses = string[];
 export type Profiles = string[];
 export type Publisher = string;
 export type Required = string[];
+/**
+ * The largest package the archive takes: the total size of its files, in GiB. The checking function's disk is sized from it at deploy.
+ */
+export type Maxpackagegib = number;
 export type Themes = string[];
 export type Field = string;
 export type Name3 = string;
@@ -85,6 +89,7 @@ export interface ArchiveConfig {
   profiles?: Profiles;
   publisher: Publisher;
   required?: Required;
+  submissions?: Submissions;
   themes?: Themes;
   vocabularies?: Vocabularies;
   [k: string]: unknown;
@@ -173,6 +178,12 @@ export interface StageDoi {
 export interface Domain {
   hostedZoneId: Hostedzoneid;
   name: Name1;
+}
+/**
+ * What the archive takes as a submission.
+ */
+export interface Submissions {
+  maxPackageGiB?: Maxpackagegib;
 }
 /**
  * A vocabulary for a manifest field, named by URL or given as terms.
