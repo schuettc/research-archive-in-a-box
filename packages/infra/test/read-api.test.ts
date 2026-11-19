@@ -15,7 +15,10 @@ function build(stage: string): Built {
   const archive = new ResearchArchive(stack, "Archive", {
     config: {
       publisher: "P",
-      infrastructure: { alertEmail: "a@example.org", stages: [{ name: stage }] },
+      infrastructure: {
+        alertEmail: "a@example.org",
+        stages: [{ name: stage, ...(stage === "dev" ? { keepData: false } : {}) }],
+      },
     },
     stage,
   });

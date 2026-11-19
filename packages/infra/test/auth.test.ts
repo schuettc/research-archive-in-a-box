@@ -30,7 +30,10 @@ function archive(stage = "prod"): Template {
   new ResearchArchive(stack, "Archive", {
     config: {
       publisher: "P",
-      infrastructure: { alertEmail: "a@example.org", stages: [{ name: "prod" }, { name: "dev" }] },
+      infrastructure: {
+        alertEmail: "a@example.org",
+        stages: [{ name: "prod" }, { name: "dev", keepData: false }],
+      },
     },
     stage,
   });
@@ -39,7 +42,7 @@ function archive(stage = "prod"): Template {
 
 function authWithClients(): Template {
   const stack = new Stack(testApp(), "S");
-  const auth = new Auth(stack, "Auth", { isProd: false, brand: BRAND });
+  const auth = new Auth(stack, "Auth", { keepData: false, brand: BRAND });
   auth.addAppClients();
   return Template.fromStack(stack);
 }
@@ -133,7 +136,10 @@ test("after deploy the pool's passkey relying party is the distribution's domain
   const a = new ResearchArchive(stack, "Archive", {
     config: {
       publisher: "P",
-      infrastructure: { alertEmail: "a@example.org", stages: [{ name: "prod" }, { name: "dev" }] },
+      infrastructure: {
+        alertEmail: "a@example.org",
+        stages: [{ name: "prod" }, { name: "dev", keepData: false }],
+      },
     },
     stage: "dev",
   });
@@ -172,7 +178,7 @@ test("a change to the pool's settings calls SetUserPoolMfaConfig again", () => {
   const fingerprint = (subject: string) => {
     const stack = new Stack(testApp(), "S");
     const auth = new Auth(stack, "Auth", {
-      isProd: false,
+      keepData: false,
       brand: { ...BRAND, name: subject },
     });
     auth.setRelyingParty("d123.cloudfront.net");
@@ -197,7 +203,7 @@ test("the invitation email speaks in the archive's name", () => {
 test("the sign-up code email speaks in the archive's name, escaped in its HTML body", () => {
   const stack = new Stack(testApp(), "S");
   new Auth(stack, "Auth", {
-    isProd: false,
+    keepData: false,
     brand: { ...BRAND, name: "Lake & <Archive>" },
   });
   const [pool] = Object.values(Template.fromStack(stack).findResources("AWS::Cognito::UserPool"));
@@ -209,7 +215,7 @@ test("the sign-up code email speaks in the archive's name, escaped in its HTML b
   expect(pool?.Properties.EmailVerificationSubject).toBe(verification.EmailSubject);
 });
 
-test("a non-prod stage has the e2e client, with admin password sign-in and no secret, and its outputs", () => {
+test("a stage with keepData: false has the e2e client, with admin password sign-in and no secret, and its outputs", () => {
   const template = archive("dev");
 
   template.resourceCountIs("AWS::Cognito::UserPoolClient", 2);
@@ -223,7 +229,7 @@ test("a non-prod stage has the e2e client, with admin password sign-in and no se
   expect(outputs).toEqual(expect.arrayContaining(["E2eClientId", "UserPoolId", "SiteDomain"]));
 });
 
-test("a prod stage has no e2e client, no admin password sign-in on any client, and no e2e outputs", () => {
+test("a stage that keeps its data has no e2e client, no admin password sign-in on any client, and no e2e outputs", () => {
   const template = archive("prod");
 
   const clients = Object.values(template.findResources("AWS::Cognito::UserPoolClient"));
@@ -253,16 +259,16 @@ test("the ingest-test config makes only the ingest-test stack, with the e2e clie
   });
 });
 
-test("the e2e client refuses a prod pool", () => {
+test("the e2e client refuses the pool of a stage that keeps its data", () => {
   const auth = new Auth(new Stack(testApp(), "S"), "Auth", {
-    isProd: true,
+    keepData: true,
     brand: BRAND,
   });
 
-  expect(() => auth.addTestClient()).toThrow(/prod/);
+  expect(() => auth.addTestClient()).toThrow(/keeps its data/);
 });
 
-test("the prod user pool is retained with deletion protection; a dev stage's is not", () => {
+test("the user pool of a stage that keeps its data is retained with deletion protection; that of a stage with keepData: false is not", () => {
   const [prod] = Object.values(archive("prod").findResources("AWS::Cognito::UserPool"));
   const [dev] = Object.values(archive("dev").findResources("AWS::Cognito::UserPool"));
 
@@ -285,7 +291,7 @@ test("the app's archive.yaml synthesizes no user pool domain and no managed logi
 
 function inviteBody(siteAddress?: string, name = "Lake Archive"): string {
   const stack = new Stack(testApp(), "S");
-  new Auth(stack, "Auth", { isProd: false, brand: { ...BRAND, name }, siteAddress });
+  new Auth(stack, "Auth", { keepData: false, brand: { ...BRAND, name }, siteAddress });
   const [pool] = Object.values(Template.fromStack(stack).findResources("AWS::Cognito::UserPool"));
   return pool?.Properties.AdminCreateUserConfig.InviteMessageTemplate.EmailMessage as string;
 }
@@ -351,7 +357,7 @@ test("the brand's name on the From line is the one the emails speak in", () => {
   const stack = new Stack(testApp(), "S", { env: { region: "us-east-1" } });
   const ready = new Construct(stack, "Ready");
   new Auth(stack, "Auth", {
-    isProd: false,
+    keepData: false,
     brand: BRAND,
     email: { domain: "data.example.org", ready },
   });

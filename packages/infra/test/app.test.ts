@@ -340,7 +340,7 @@ test("ResearchArchive refuses a domain without a certificate, and a certificate 
 });
 
 test("with a domain, the staging bucket allows both the CloudFront origin and the name", () => {
-  const { archive: a, stack, template } = domainArchive("dev");
+  const { archive: a, stack, template } = domainArchive("dev", { keepData: false });
   const distribution = stack.getLogicalId(a.distribution.node.defaultChild as CfnDistribution);
   const cors = resourcesOf(template.toJSON(), "Custom::AWS").find((r) =>
     JSON.stringify(r.Properties.Create ?? "").includes("putBucketCors"),
