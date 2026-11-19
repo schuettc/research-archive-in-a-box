@@ -187,16 +187,25 @@ def test_mixed_date_formats_tells_month_first_from_day_first(tmp_path: Path) -> 
     assert only(result)[:2] == ("a", [2])
 
 
-def test_an_unreadable_table_is_a_note_and_a_failed_check(tmp_path: Path) -> None:
+def test_a_csv_that_cannot_be_parsed_is_an_error_and_a_failed_check(tmp_path: Path) -> None:
     csv = "code,name\nNR1,North Run, lower pool\n"
     fields = [{"name": "code", "type": "string"}, {"name": "name", "type": "string"}]
 
-    result = run("values.unreadable", tmp_path, csv, fields)
+    result = run("values.malformed", tmp_path, csv, fields)
 
     finding = result.findings[0]
-    assert (finding.severity, finding.target and finding.target.resource) == ("note", "t")
+    assert (finding.severity, finding.target and finding.target.resource) == ("error", "t")
     assert "can't be read" in finding.message and finding.suggested_fix
     assert (len(result.findings), result.checks, result.passed) == (1, 1, 0)
+    assert run("values.unreadable", tmp_path, csv, fields).findings == []
+
+
+def test_a_table_left_unread_on_purpose_is_a_note_not_an_error(tmp_path: Path) -> None:
+    fields = [{"name": "cruise:row"}]
+
+    assert run("values.malformed", tmp_path, "cruise:row\na\n", fields).findings == []
+    note = run("values.unreadable", tmp_path, "cruise:row\na\n", fields)
+    assert [(f.rule_id, f.severity) for f in note.findings] == [("values.unreadable", "note")]
 
 
 def test_placeholder_reads_a_column_named_n(tmp_path: Path) -> None:
@@ -237,8 +246,9 @@ def test_a_table_that_is_not_utf8_is_unreadable_not_a_failed_check(tmp_path: Pat
     }
     context = Context.for_package(tmp_path, Manifest.model_validate({"resources": [resource]}))
 
-    unreadable = REGISTRY.get("values.unreadable").run(context)
+    malformed = REGISTRY.get("values.malformed").run(context)
     constant = REGISTRY.get("values.constant").run(context)
 
-    assert [f.rule_id for f in unreadable.findings] == ["values.unreadable"]
+    assert [f.rule_id for f in malformed.findings] == ["values.malformed"]
+    assert "UTF-8" in (malformed.findings[0].suggested_fix or "")
     assert not any(f.rule_id.endswith("check-failed") for f in constant.findings)

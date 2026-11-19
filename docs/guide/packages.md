@@ -54,6 +54,8 @@ Each finding also names the **rule** that raised it, such as `field.description-
 
 The **score** at the end counts how many of the checks under three of those questions passed, and the **verdict** says whether the package can be published.
 
+A CSV table that can't be parsed is an error, `values.malformed`, and blocks publishing: a file that is not UTF-8, a row with more or fewer cells than the schema has fields, or a quote that is never closed. Nothing else can check such a table, so fix the file first. A table `cruise` leaves unread on purpose, such as one in a format other than CSV, gets the note `values.unreadable` and does not block.
+
 A finding under the heading "Checks that could not run (a fault in cruise, not in your package)" means `cruise` itself failed on that one check, so what the check looks at was not checked. It is an error and blocks publishing, and its rule ends in `.check-failed`, such as `values.check-failed`. Nothing in your data caused it: send the message to the archive's maintainers. Every other check's result still stands.
 
 ## Checking the sample package

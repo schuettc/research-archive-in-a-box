@@ -31,6 +31,10 @@ class UnreadableTable(ValueError):
     """A table resource this reader can't open."""
 
 
+class MalformedTable(UnreadableTable):
+    """A CSV table the reader tried to read and could not parse."""
+
+
 def connect() -> duckdb.DuckDBPyConnection:
     """An in-memory DuckDB that never installs or loads an extension, so never fetches one."""
     return duckdb.connect(
@@ -109,4 +113,6 @@ def read_table(
         relation.aggregate("count(COLUMNS(*))").fetchall()
         return relation
     except duckdb.Error as exc:
-        raise UnreadableTable(f"{resource.name} can't be read: {exc}") from exc
+        # DuckDB ends its message with advice on reader options, which nobody here can set.
+        reason = str(exc).split("\n\nPossible Solution", 1)[0].strip()
+        raise MalformedTable(f"{resource.name} can't be read: {reason}") from exc

@@ -6,10 +6,13 @@ failed read. Each value rule applies one check per column it looks at.
 
 | Rule | Catches | Severity |
 | --- | --- | --- |
-| `values.unreadable` | A table resource the value rules can't read (a malformed CSV, a format \
-other than CSV, a path with glob characters, a column named in the reader's own `cruise:` \
-namespace), naming the reason. One failed check per such table, so skipped data never raises \
-the score. A table whose files failed the structure check is not reported again. | note |
+| `values.malformed` | A CSV table that can't be parsed (a file that is not UTF-8, a row with \
+the wrong number of cells, an unclosed quote), naming the reason. No value, key or constraint \
+check could look at it, so it blocks. | error |
+| `values.unreadable` | A table resource the value rules leave unread (a format other than \
+CSV, a path with glob characters, a column named in the reader's own `cruise:` namespace), \
+naming the reason. One failed check per such table, so skipped data never raises the score. \
+A table whose files failed the structure check is not reported again. | note |
 """
 
 from collections.abc import Iterator
@@ -517,6 +520,27 @@ def duplicate_key(ctx: Context) -> Outcome:
                 )
             )
     return Outcome(problems, checks)
+
+
+@rule("values.malformed", question="trust", scope="table", severity="error")
+def malformed(ctx: Context) -> Outcome:
+    """Each CSV table that can't be parsed is one check, and it fails: nothing checked it."""
+    problems = [
+        Problem(
+            f"Table {resource.name} can't be read, so nothing checked its values, keys or "
+            f"constraints: {reason}",
+            resource=resource.name,
+            path=resource.path if isinstance(resource.path, str) else None,
+            fix=(
+                "Save the file as UTF-8 text."
+                if "not utf-8" in reason
+                else "Write the table as a well-formed CSV file: every row with one cell per "
+                "field in the schema, and every quote closed."
+            ),
+        )
+        for resource, reason in ctx.unreadable(malformed=True)
+    ]
+    return Outcome(problems, len(problems))
 
 
 @rule("values.unreadable", question="trust", scope="table", severity="note")

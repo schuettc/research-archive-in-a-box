@@ -19,7 +19,7 @@ from archive_contract.findings import Evidence, Finding, Severity, Target
 from archive_contract.manifest import CORE_FIELDS, Manifest
 from archive_contract.profile import Profile
 from archive_contract.resources import Resource
-from cruise.tables import UnreadableTable, connect, read_table
+from cruise.tables import MalformedTable, UnreadableTable, connect, read_table
 
 Question = Literal["find", "understand", "trust"]
 QUESTIONS: tuple[Question, ...] = ("find", "understand", "trust")
@@ -76,7 +76,8 @@ class Context:
     def read(self, resource: Resource) -> duckdb.DuckDBPyRelation | None:
         """The resource's rows, or None when it is skipped, not a table or can't be read.
 
-        A table that can't be read is reported once, by `values.unreadable`."""
+        A table that can't be read is reported once, by `values.malformed` or
+        `values.unreadable`."""
         if resource.name in self.skip or resource.table_schema is None:
             return None
         try:
@@ -98,8 +99,9 @@ class Context:
             if relation is not None and resource.table_schema is not None:
                 yield resource, resource.table_schema, relation
 
-    def unreadable(self) -> Iterator[tuple[Resource, str]]:
-        """Every table resource the value rules can't read, with the reason.
+    def unreadable(self, *, malformed: bool = False) -> Iterator[tuple[Resource, str]]:
+        """Every table resource the value rules don't read, with the reason: those left unread
+        on purpose (not CSV, no single file), or with `malformed` those whose CSV can't be parsed.
 
         A resource whose files failed the structure check is not listed: its structure
         finding already says why."""
@@ -107,7 +109,8 @@ class Context:
             try:
                 self.reader(resource)
             except UnreadableTable as exc:
-                yield resource, str(exc)
+                if isinstance(exc, MalformedTable) == malformed:
+                    yield resource, str(exc)
 
 
 @dataclass(frozen=True)
