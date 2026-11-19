@@ -70,6 +70,8 @@ export class Curation extends Construct {
     });
     const lifecycle = this.lifecycle;
     lifecycle.addToRolePolicy(allow(["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], data));
+    // A zip too large for one copy is moved in parts; a copy that fails is aborted.
+    lifecycle.addToRolePolicy(allow(["s3:AbortMultipartUpload"], data));
     // HEAD of a missing key answers 403 instead of 404 without list rights.
     lifecycle.addToRolePolicy(
       allow(["s3:ListBucket"], [archiveBucket.bucketArn], {

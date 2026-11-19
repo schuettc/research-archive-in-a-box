@@ -11,7 +11,15 @@ import type { ResearchArchive } from "./research-archive";
 export interface IngestProps {
   readonly archive: ResearchArchive;
   readonly stage: string;
+  /** The archive's package-size limit, `submissions.maxPackageGiB`. */
+  readonly maxPackageGiB: number;
 }
+
+/**
+ * The room the ingest function's /tmp has beyond the package limit, in MiB. The contract's
+ * DISK_MARGIN_MB repeated: the schema's maximum plus this is a Lambda's largest disk.
+ */
+export const DISK_MARGIN_MIB = 1024;
 
 const GUARDDUTY_PLAN_SERVICE = "malware-protection-plan.guardduty.amazonaws.com";
 
@@ -73,8 +81,9 @@ export class Ingest extends Construct {
       handler: "archive_backend.ingest.handler",
       timeout: Duration.minutes(15),
       memorySize: 2048,
-      // diagnose downloads the whole round to /tmp.
-      ephemeralStorageSize: Size.gibibytes(10),
+      // The check step downloads the whole round to /tmp, and the zips step builds package.zip
+      // there: the package limit plus a fixed margin.
+      ephemeralStorageSize: Size.mebibytes(props.maxPackageGiB * 1024 + DISK_MARGIN_MIB),
       durableConfig: { executionTimeout: Duration.days(365), retentionPeriod: Duration.days(30) },
       environment: {
         ...recordEnv,
@@ -110,6 +119,10 @@ export class Ingest extends Construct {
         ["s3:PutObject", "s3:GetObject"],
         objects(archive.archiveBucket, "open/", "restricted/"),
       ),
+    );
+    // A zip too large for one PUT is written in parts; an upload that fails is aborted.
+    fn.addToRolePolicy(
+      allow(["s3:AbortMultipartUpload"], objects(archive.archiveBucket, "open/", "restricted/")),
     );
     // The page step HEADs each zip to see whether it changed; without list rights S3 answers a
     // missing key with 403 instead of 404.

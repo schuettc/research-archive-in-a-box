@@ -24,10 +24,14 @@ export interface AuthConfig {
   readonly webClientId: string;
 }
 
-/** What /archive-checks.json tells the cruise plugin: the requirement sets ingest checks against. */
+/**
+ * What /archive-checks.json tells the cruise plugin and the web app: the requirement sets ingest
+ * checks against, and the largest package the archive takes, in GiB.
+ */
 export interface ArchiveChecks {
   readonly profiles: readonly string[];
   readonly required: readonly string[];
+  readonly maxPackageGiB: number;
 }
 
 export interface WebProps {
@@ -345,6 +349,7 @@ export class Web extends Construct {
         s3deploy.Source.jsonData("archive-checks.json", {
           profiles: [...checks.profiles],
           required: [...checks.required],
+          maxPackageGiB: checks.maxPackageGiB,
         }),
         s3deploy.Source.data("robots.txt", robotsTxt(this.siteDomain)),
       ],

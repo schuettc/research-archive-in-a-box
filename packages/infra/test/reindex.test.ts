@@ -236,6 +236,20 @@ test("in the archive bucket it may write only the versions' zips, with room to b
   expect(reindexFunction().properties).toMatchObject({ EphemeralStorage: { Size: 10240 } });
 });
 
+test("it may abort a multipart upload of a version's zip, and of nothing else", () => {
+  const aborts = statements()
+    .filter((s) => actions(s).includes("s3:AbortMultipartUpload"))
+    .map((s) => JSON.stringify(s.Resource));
+
+  expect(aborts.length).toBeGreaterThan(0);
+  for (const r of aborts) {
+    expect(r).toContain(stack.getLogicalId(archive.archiveBucket.node.defaultChild as CfnElement));
+    expect(r).toMatch(/\/(open|restricted)\/\*\/_zips\/\*/);
+  }
+  expect(aborts.join()).toContain("/open/*/_zips/*");
+  expect(aborts.join()).toContain("/restricted/*/_zips/*");
+});
+
 test("only with a doi block may the reindex read the DataCite password and rewrite manifests and checksums", () => {
   const withDois = new Stack(testApp(), "D");
   const doiArchive = new ResearchArchive(withDois, "Archive", {

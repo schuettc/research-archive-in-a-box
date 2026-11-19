@@ -431,15 +431,19 @@ test("auth-config.json holds exactly the region and the web client's id", () => 
   expect(stack.resolve(data.region)).toEqual({ Ref: "AWS::Region" });
 });
 
-test("archive-checks.json holds exactly the config's profiles and required fields", () => {
+test("archive-checks.json holds exactly the config's profiles, required fields and package limit", () => {
   const jsonData = vi.spyOn(s3deploy.Source, "jsonData");
-  archive({ profiles: ["core", "ecology"], required: ["keywords"] });
+  archive({
+    profiles: ["core", "ecology"],
+    required: ["keywords"],
+    submissions: { maxPackageGiB: 2 },
+  });
   archive();
 
   const calls = jsonData.mock.calls.filter(([name]) => name === "archive-checks.json");
   expect(calls.map(([, data]) => data)).toEqual([
-    { profiles: ["core", "ecology"], required: ["keywords"] },
-    { profiles: ["core"], required: [] },
+    { profiles: ["core", "ecology"], required: ["keywords"], maxPackageGiB: 2 },
+    { profiles: ["core"], required: [], maxPackageGiB: 9 },
   ]);
 });
 

@@ -39,6 +39,8 @@ export class Storage extends Construct {
     this.archiveBucket = new s3.Bucket(this, "Archive", {
       ...common,
       versioned: true,
+      // Parts of a multipart upload that died are not kept and billed. Nothing stored expires.
+      lifecycleRules: [{ abortIncompleteMultipartUploadAfter: Duration.days(1) }],
       ...(props.objectLock && {
         objectLockEnabled: true,
         objectLockDefaultRetention: s3.ObjectLockRetention.governance(

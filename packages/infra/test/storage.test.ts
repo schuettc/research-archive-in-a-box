@@ -64,6 +64,15 @@ test("the archive bucket is versioned, blocks public access and enforces TLS", (
   ).toBeUndefined();
 });
 
+test("the archive bucket drops an unfinished multipart upload after a day, and expires nothing", () => {
+  const { archive: a, template } = archive();
+  const bucket = template.toJSON().Resources[bucketOf(a, "archiveBucket")];
+
+  expect(bucket.Properties.LifecycleConfiguration.Rules).toEqual([
+    { AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }, Status: "Enabled" },
+  ]);
+});
+
 test("only staging's incoming/ objects expire after 30 days", () => {
   const { archive: a, template } = archive();
   const staging = template.toJSON().Resources[bucketOf(a, "stagingBucket")];

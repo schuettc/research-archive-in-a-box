@@ -74,6 +74,32 @@ test("the ingest function is durable for a year, with 15 minutes, 2048 MB and 10
   });
 });
 
+test("the ingest function's /tmp is the package limit plus 1 GiB", () => {
+  const small = new Stack(testApp(), "Small");
+  new ResearchArchive(small, "Archive", {
+    config: {
+      publisher: "P",
+      submissions: { maxPackageGiB: 2 },
+      infrastructure: { alertEmail: "a@example.org", stages: [{ name: "prod" }] },
+    },
+    stage: "prod",
+  });
+
+  Template.fromStack(small).hasResourceProperties("AWS::Lambda::Function", {
+    Handler: INGEST,
+    EphemeralStorage: { Size: 3072 },
+  });
+});
+
+test("the ingest may abort a multipart upload in the archive bucket", () => {
+  const archiveId = logicalId(archive.archiveBucket);
+  const aborts = statements(INGEST).filter((s) => actions(s).includes("s3:AbortMultipartUpload"));
+  const resources = JSON.stringify(aborts.map((s) => s.Resource));
+
+  expect(resources).toContain(archiveId);
+  expect(resources.match(/"\/[^"]*"/g)?.sort()).toEqual(['"/open/*"', '"/restricted/*"']);
+});
+
 test("it is invoked through a live alias, which the IngestFunction output names", () => {
   const aliasId = stack.getLogicalId(archive.ingestFunction.node.defaultChild as CfnAlias);
 

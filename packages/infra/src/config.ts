@@ -10,6 +10,21 @@ export function stagesOf(config: ArchiveConfig): Stage[] {
   return config.infrastructure?.stages ?? [{ name: "prod" }];
 }
 
+/**
+ * The archive's package-size limit in GiB: the config's `submissions.maxPackageGiB`, or the
+ * default the contract's committed schema gives it.
+ */
+export function maxPackageGiB(config: ArchiveConfig): number {
+  const named = config.submissions?.maxPackageGiB;
+  if (named !== undefined) {
+    return named;
+  }
+  const schema = JSON.parse(readFileSync(SCHEMA_PATH, "utf-8")) as {
+    $defs: { Submissions: { properties: { maxPackageGiB: { default: number } } } };
+  };
+  return schema.$defs.Submissions.properties.maxPackageGiB.default;
+}
+
 /** Read an archive config file and validate it against the contract's committed schema. */
 export function loadArchiveConfig(path: string): ArchiveConfig {
   const schema = JSON.parse(readFileSync(SCHEMA_PATH, "utf-8")) as {
