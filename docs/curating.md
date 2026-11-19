@@ -69,7 +69,9 @@ a file only hides it behind a delete marker; each object version has to go by it
    what is being removed: the reason is kept as the record of the withdrawal. Decline any
    submission for the dataset still waiting in review, so nothing publishes it again. Wait until
    the page shows it withdrawn: its files are then under `restricted/<id>/`; a run that failed
-   partway can leave some under `open/<id>/`, so both are cleared below.
+   partway can leave some under `open/<id>/`. Publishing also kept each version's files under
+   `publishing/<id>/` until the version went live, and the copies deleted from there are still
+   stored as object versions. All three are cleared below.
 
 2. **Find the stage's resources.** In a shell signed in to the stage's account, with the stage's
    region (the one `archive.yaml` names, or your default):
@@ -86,11 +88,11 @@ a file only hides it behind a delete marker; each object version has to go by it
    echo "$archive $derived $staging $distribution"
    ```
 
-3. **List every object version and delete marker** under both prefixes, and read the list before
-   deleting anything:
+3. **List every object version and delete marker** under the three prefixes, and read the list
+   before deleting anything:
 
    ```bash
-   for prefix in "open/$id/" "restricted/$id/"; do
+   for prefix in "open/$id/" "restricted/$id/" "publishing/$id/"; do
        aws s3api list-object-versions --bucket "$archive" --prefix "$prefix" \
            --query "[Versions, DeleteMarkers][].[Key, VersionId]" --output text
    done | grep -v '^None$' > versions.txt
