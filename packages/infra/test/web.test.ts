@@ -324,8 +324,8 @@ test("CloudFront is denied the archive bucket's restricted/ prefix", () => {
 });
 
 // Without s3:ListBucket, S3 answers 403 for a missing key. A missing-key GET carries no s3:prefix,
-// so a prefix condition would keep the 403: the grant is unconditioned but this distribution's alone.
-test("this distribution, and no other, may list the archive bucket", () => {
+// so a prefix condition would keep the 403: each grant is unconditioned but this distribution's alone.
+test("this distribution, and no other, may list the archive and derived buckets", () => {
   const { archive: a, stack, template } = archive();
   const distribution = stack.getLogicalId(a.distribution.node.defaultChild as CfnDistribution);
   const policies = template.findResources("AWS::S3::BucketPolicy");
@@ -334,14 +334,20 @@ test("this distribution, and no other, may list the archive bucket", () => {
   );
   const lists = statements.filter((s) => [s.Action].flat().includes("s3:ListBucket"));
 
-  expect(lists).toHaveLength(1);
-  const [list] = lists;
-  expect(list?.Effect).toBe("Allow");
-  expect(list?.Principal).toEqual({ Service: "cloudfront.amazonaws.com" });
-  expect(list?.Action).toBe("s3:ListBucket");
-  expect(list?.Resource).toEqual({ "Fn::GetAtt": [bucketId(stack, a.archiveBucket), "Arn"] });
-  expect(JSON.stringify(list?.Condition.StringEquals["AWS:SourceArn"])).toContain(distribution);
-  expect(Object.keys(list?.Condition as Json)).toEqual(["StringEquals"]);
+  expect(lists.map((s) => s.Resource)).toEqual(
+    expect.arrayContaining([
+      { "Fn::GetAtt": [bucketId(stack, a.archiveBucket), "Arn"] },
+      { "Fn::GetAtt": [bucketId(stack, a.derivedBucket), "Arn"] },
+    ]),
+  );
+  expect(lists).toHaveLength(2);
+  for (const list of lists) {
+    expect(list.Effect).toBe("Allow");
+    expect(list.Principal).toEqual({ Service: "cloudfront.amazonaws.com" });
+    expect(list.Action).toBe("s3:ListBucket");
+    expect(JSON.stringify(list.Condition.StringEquals["AWS:SourceArn"])).toContain(distribution);
+    expect(Object.keys(list.Condition as Json)).toEqual(["StringEquals"]);
+  }
 });
 
 afterEach(() => {

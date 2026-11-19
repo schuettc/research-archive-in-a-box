@@ -284,17 +284,21 @@ export class Web extends Construct {
         resources: [props.archiveBucket.arnForObjects("restricted/*")],
       }),
     );
-    // Without s3:ListBucket S3 answers 403 for a missing key. A missing-key GET carries no
-    // s3:prefix, so the grant can't be conditioned on one; it stays this distribution's alone,
-    // which can't send a list: /data/* forces the /open origin path and forwards no query string.
-    props.archiveBucket.addToResourcePolicy(
-      new iam.PolicyStatement({
-        principals: [new iam.ServicePrincipal("cloudfront.amazonaws.com")],
-        actions: ["s3:ListBucket"],
-        resources: [props.archiveBucket.bucketArn],
-        conditions: { StringEquals: { "AWS:SourceArn": this.distribution.distributionArn } },
-      }),
-    );
+    // Without s3:ListBucket S3 answers 403 for a missing key, so both buckets grant it and a
+    // missing file is a 404. A missing-key GET carries no s3:prefix, so the grant can't be
+    // conditioned on one; it stays this distribution's alone, which can't send a list: /data/*
+    // forces the /open origin path, the default behaviour the /site one, and neither forwards a
+    // query string, so the derived bucket's logs/ stays out of reach.
+    for (const bucket of [props.archiveBucket, props.derivedBucket]) {
+      bucket.addToResourcePolicy(
+        new iam.PolicyStatement({
+          principals: [new iam.ServicePrincipal("cloudfront.amazonaws.com")],
+          actions: ["s3:ListBucket"],
+          resources: [bucket.bucketArn],
+          conditions: { StringEquals: { "AWS:SourceArn": this.distribution.distributionArn } },
+        }),
+      );
+    }
   }
 
   /**
