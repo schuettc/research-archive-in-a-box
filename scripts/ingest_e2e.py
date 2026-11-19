@@ -35,6 +35,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol, cast
 
+from archive_contract.validate import package_files
+
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLE = ROOT / "examples" / "sample-package"
 MANIFEST = "datapackage.json"
@@ -71,7 +73,8 @@ def package_copy(into: Path, change: Callable[[dict[str, Any]], None] | None = N
 
 
 def _package_files(folder: Path) -> list[Path]:
-    return sorted(p for p in folder.rglob("*") if p.is_file())
+    """The contract's walk: no `_build/`, no hidden file or folder, no symlink."""
+    return [folder / path for path in package_files(folder)[0]]
 
 
 def checksum_text(folder: Path) -> str:

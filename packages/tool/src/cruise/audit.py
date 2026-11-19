@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from archive_contract.profile import Profile
-from archive_contract.validate import BUILD, MANIFEST
+from archive_contract.validate import BUILD, MANIFEST, is_hidden
 from cruise.diagnose import Diagnosis, diagnose
 
 SKIPPED = frozenset({BUILD, "node_modules"})
@@ -49,14 +49,15 @@ class AuditRow:
 
 
 def find_packages(folders: Sequence[Path]) -> list[Path]:
-    """Every folder holding a `datapackage.json`, without entering `_build/` or
-    `node_modules/` or following symlinks. A folder that doesn't exist is an error."""
+    """Every folder holding a `datapackage.json`, without entering `_build/`, `node_modules/`
+    or a hidden folder, or following symlinks. The folders given are searched whatever their
+    own names. A folder that doesn't exist is an error."""
     found: list[Path] = []
     for folder in folders:
         if not folder.is_dir():
             raise FileNotFoundError(f"no folder at {folder}")
         for dirpath, dirnames, filenames in os.walk(folder):
-            dirnames[:] = sorted(d for d in dirnames if d not in SKIPPED)
+            dirnames[:] = sorted(d for d in dirnames if d not in SKIPPED and not is_hidden(d))
             if MANIFEST in filenames:
                 found.append(Path(dirpath))
     return sorted(found)

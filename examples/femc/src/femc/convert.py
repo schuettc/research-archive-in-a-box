@@ -24,7 +24,7 @@ from archive_contract.exports.readme import render_readme
 from archive_contract.fields import Field
 from archive_contract.imports.eml import EmlImport, from_eml, slug
 from archive_contract.manifest import Manifest
-from archive_contract.validate import BUILD, CHECKSUMS, MANIFEST, package_files
+from archive_contract.validate import BUILD, CHECKSUMS, MANIFEST, is_hidden, package_files
 from femc.eml import Standardized, standardize
 
 RECORD = "eml.xml"
@@ -463,14 +463,19 @@ class Builder:
 
 
 def _unzip(archive: Path, target: Path) -> list[Path]:
-    """Unpack a zip into `target`, refusing a member that would land outside it."""
+    """Unpack a zip into `target`, refusing a member that would land outside it.
+
+    Hidden members (`.DS_Store`) and the `__MACOSX/` folder a Mac's zip adds are left out.
+    """
     written: list[Path] = []
     with zipfile.ZipFile(archive) as source:
         for entry in source.infolist():
             pure = PurePosixPath(entry.filename)
             if pure.is_absolute() or ".." in pure.parts or "\\" in entry.filename:
                 raise ValueError(f"{archive.name} holds {entry.filename!r}, outside the zip")
-            if entry.is_dir():
+            if entry.is_dir() or pure.parts[0] == "__MACOSX":
+                continue
+            if is_hidden(pure.as_posix()):
                 continue
             out = target.joinpath(*pure.parts)
             out.parent.mkdir(parents=True, exist_ok=True)

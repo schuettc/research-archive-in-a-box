@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -216,6 +217,17 @@ def test_the_sample_package_list_leaves_out_its_build_folder() -> None:
     listed = (seed.SAMPLE / "checksums.sha256").read_text(encoding="utf-8").split()
     sums = dict(zip(listed[1::2], listed[0::2], strict=True))
     assert {f["path"]: f["sha256"] for f in files if f["path"] != "checksums.sha256"} == sums
+
+
+def test_the_file_list_leaves_out_hidden_files_and_folders(tmp_path: Path) -> None:
+    folder = tmp_path / "package"
+    shutil.copytree(seed.SAMPLE, folder)
+    (folder / ".DS_Store").write_bytes(b"x")
+    (folder / "data" / ".DS_Store").write_bytes(b"x")
+    (folder / ".git").mkdir()
+    (folder / ".git" / "config").write_bytes(b"x")
+
+    assert seed.file_list(folder) == seed.file_list(seed.SAMPLE)
 
 
 def test_a_report_that_cannot_be_reached_still_shows_the_status_and_events(
