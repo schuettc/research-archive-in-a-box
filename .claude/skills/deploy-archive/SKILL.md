@@ -79,6 +79,12 @@ tell the person.
 5. Keep the one `prod` stage unless they ask for another, such as `dev` listed before `prod`. A
    stage in another AWS account gets its own `account` (and `region`).
 
+   For each stage other than the one that holds the real archive, ask: "Should this stage keep
+   its data when it is torn down? The default is yes." A no writes `keepData: false` on it,
+   reading the field's `description` from `$defs.Stage`: the stage is then deleted whole when
+   torn down, and it alone gets the local upload origin and the end-to-end sign-in client. Never
+   write `keepData: false` on the stage that holds the real archive.
+
    With DOIs on, ask for each stage: "Should this stage register test DOIs or live ones? The
    default is test." A test stage needs nothing more. For a live stage (usually `prod` alone),
    ask for the live repository id and its prefix, and write the stage's own `doi` block, reading
@@ -362,13 +368,14 @@ With a domain, that is the name: check that `curl -sSI https://<name>/` answers 
 ## Teardown
 
 1. Ask which stage. **They type the stage name** exactly; anything else stops here.
-2. Say plainly what happens: the stage's stack is deleted. A `prod` stage **keeps its buckets and
-   tables**: they still hold the data and still bill for storage, and deleting them is by hand.
-   Any other stage deletes everything, data included. Submissions still waiting for review or
-   for changes end, and their contributors would have to submit again on another stage. With a
-   domain, the name's two alias records go with the stack and its certificate stack is deleted;
-   no other record in the zone changes. With `email: ses`, the SES identity and its three DKIM
-   records go with the stage's stack too.
+2. Say plainly what happens: the stage's stack is deleted. Read the stage's `keepData` from
+   `archive.yaml`. A stage that keeps its data (the default) **keeps its buckets, tables, user pool
+   and logs**: they still hold the data and still bill for storage, and deleting them is by hand. A
+   stage with `keepData: false` deletes everything, data included. Submissions still waiting for
+   review or for changes end, and their contributors would have to submit again on another stage.
+   With a domain, the name's two alias records go with the stack and its certificate stack is
+   deleted; no other record in the zone changes. With `email: ses`, the SES identity and its three
+   DKIM records go with the stage's stack too.
 3. ✋ **Wait for:** "destroy <stage>". Then: `just destroy <stage>`. It stops the stage's
    running ingest executions (they would block the delete), deletes the stack, deletes every
    log group under `/aws/lambda/ResearchArchive-<stage>-` (each function's own, which Lambda
