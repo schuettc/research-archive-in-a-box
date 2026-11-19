@@ -1,4 +1,4 @@
-import { statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import {
@@ -8,6 +8,7 @@ import {
   fieldValue,
   fromEntries,
   fromFileList,
+  hidden,
   sha256Hex,
   uploadFile,
   withEdits,
@@ -28,6 +29,33 @@ test("paths are relative to the package folder's root, and hidden files are skip
   expect(paths).toContain("data/codes/condition-codes.csv");
   expect(paths).not.toContain(".DS_Store");
   expect(paths.every((path) => !path.startsWith("sample-package/"))).toBe(true);
+});
+
+const HIDDEN_CASES = JSON.parse(
+  readFileSync(
+    join(import.meta.dirname, "../../contract/tests/fixtures/hidden-paths.json"),
+    "utf8",
+  ),
+) as { cases: { path: string; hidden: boolean }[] };
+
+test.each(HIDDEN_CASES.cases)(
+  "the contract's hidden-path case $path",
+  ({ path, hidden: expected }) => {
+    expect(hidden(path)).toBe(expected);
+  },
+);
+
+test("a checksums line for a hidden file is named as one to remove", async () => {
+  const sums =
+    readFileSync(join(SAMPLE, "checksums.sha256"), "utf8") + `${"0".repeat(64)}  .DS_Store\n`;
+  const checked = await checkPackage(fromFileList(sampleFiles({ "checksums.sha256": sums })));
+
+  expect(checked.ok).toBe(false);
+  if (!checked.ok) {
+    expect(checked.problem).toBe(
+      "checksums.sha256 lists .DS_Store, a hidden file, which a package never holds. Remove its line (any cruise set rewrites the file without it), then choose the folder again.",
+    );
+  }
 });
 
 test("the sample package checks: every listed file matches, and its id and title are read", async () => {
