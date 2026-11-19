@@ -111,25 +111,33 @@ class FakeS3:
             self.objects[Key] = body
         return {}
 
-    def head_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:
+    def head_object(self, *, Bucket: str, Key: str, **_: Any) -> dict[str, Any]:
         if Bucket == STAGING and Key in self.objects:
             return {"ContentLength": self.sizes.get(Key, len(self.objects[Key]))}
         if (Bucket, Key) not in self.published:
             raise ClientError({"Error": {"Code": "404"}}, "HeadObject")
-        return {"Metadata": {}}
+        body = self.published[(Bucket, Key)]
+        return {"Metadata": {}, "ContentLength": len(body), "ChecksumSHA256": self._sha256(body)}
+
+    @staticmethod
+    def _sha256(body: bytes) -> str:
+        return base64.b64encode(hashlib.sha256(body).digest()).decode()
 
     def copy_object(
         self, *, Bucket: str, Key: str, CopySource: dict[str, str], **_: Any
     ) -> dict[str, Any]:
         if self.fail_copy:
             raise RuntimeError("copy refused")
-        assert CopySource["Bucket"] == STAGING
         if Bucket == ARCHIVE:
-            # The publish's copy, which S3 answers with the SHA-256 of what it stored.
-            body = self.objects[CopySource["Key"]]
+            # The publish's copy into the archive bucket and its move within it, each of which
+            # S3 answers with the SHA-256 of what it stored.
+            if CopySource["Bucket"] == ARCHIVE:
+                body = self.published[(ARCHIVE, CopySource["Key"])]
+            else:
+                body = self.objects[CopySource["Key"]]
             self.published[(Bucket, Key)] = body
-            checksum = base64.b64encode(hashlib.sha256(body).digest()).decode()
-            return {"CopyObjectResult": {"ChecksumSHA256": checksum}}
+            return {"CopyObjectResult": {"ChecksumSHA256": self._sha256(body)}}
+        assert CopySource["Bucket"] == STAGING
         assert Bucket == STAGING
         self.objects[Key] = self.objects[CopySource["Key"]]
         self.copies.append((CopySource["Key"], Key))
@@ -140,13 +148,24 @@ class FakeS3:
         return self
 
     def paginate(self, *, Bucket: str, Prefix: str) -> Iterator[dict[str, Any]]:
-        keys = sorted(k for k in self.objects if k.startswith(Prefix))
+        if Bucket == STAGING:
+            keys = sorted(k for k in self.objects if k.startswith(Prefix))
+        else:
+            keys = sorted(k for b, k in self.published if b == Bucket and k.startswith(Prefix))
         for start in range(0, len(keys), 3):
             yield {"Contents": [{"Key": k} for k in keys[start : start + 3]]}
 
     def delete_objects(self, *, Bucket: str, Delete: dict[str, Any]) -> dict[str, Any]:
         for entry in Delete["Objects"]:
-            self.objects.pop(entry["Key"], None)
+            if Bucket == STAGING:
+                self.objects.pop(entry["Key"], None)
+            else:
+                self.published.pop((Bucket, entry["Key"]), None)
+        return {}
+
+    def delete_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:
+        assert Bucket == ARCHIVE
+        del self.published[(Bucket, Key)]
         return {}
 
     def keys(self, prefix: str) -> list[str]:

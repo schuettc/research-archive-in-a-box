@@ -12,13 +12,19 @@ step that fails after its retries ends the submission as `failed` with an admin 
 
 Publish is a series of steps, each safe to repeat: claim the dataset's next version in the
 active catalog (`claimedBy` on the dataset item, which leaves `currentVersion` alone), fill in
-the manifest and regenerate its README and checksums, copy the files to the archive bucket
-inside S3 (the manifest last, each copy checked against its line in `checksums.sha256`), write
-the version's download zips, put the catalog items the reindex would build into the active
-table (the dataset item last, which moves `currentVersion` and drops the claim), write the
-dataset page, rewrite the catalog file search reads and the sitemap, and finish. Readers get
-the version before until the catalog step ends; a publish that fails before then releases its
-claim and removes what it wrote of the version, so the live dataset is as it was. With the DOI
+the manifest and regenerate its README and checksums, copy the files inside S3 to the archive
+bucket's private folder `publishing/<id>/<version>/` (the manifest last, each copy checked
+against its line in `checksums.sha256`), write the version's download zips beside them, move
+the files and zips inside S3 to `open/` or `restricted/` (the manifest last, each copy checked
+against the private one, which is then deleted), put the catalog items the reindex would build
+into the active table (the dataset item last, which moves `currentVersion` and drops the
+claim), write the dataset page, rewrite the catalog file search reads and the sitemap, and
+finish. Nothing reads `publishing/`: CloudFront serves `open/` alone and the reindex, the
+lifecycle and the integrity check list `open/` and `restricted/`, so a version that is not
+finished is at no address a reader or a cache can reach. Readers get the version before until
+the catalog step ends; a publish that fails before then releases its claim and removes what it
+wrote of the version, in the private folder and the public one, so the live dataset is as it
+was. With the DOI
 module on, after the page the version's DOI is registered with DataCite, its address written to
 `archive:identifier`, and the zips, catalog items and pages rewritten to show it; a DataCite failure
 after the step's retries alerts and the publish finishes without a DOI.
@@ -61,7 +67,7 @@ from aws_durable_execution_sdk_python.waits import (
 )
 from botocore.exceptions import ClientError
 
-from archive_backend import doi, pages, zips
+from archive_backend import doi, pages, parts, zips
 from archive_backend.catalog_file import write_catalog_file
 from archive_backend.config import read_archive_config
 from archive_backend.embeddings import Bedrock, with_embedding
@@ -107,6 +113,7 @@ class S3(Protocol):
     def copy_object(self, **kwargs: Any) -> Any: ...
     def get_paginator(self, name: str) -> Any: ...
     def delete_objects(self, **kwargs: Any) -> Any: ...
+    def delete_object(self, **kwargs: Any) -> Any: ...
     def create_multipart_upload(self, **kwargs: Any) -> dict[str, Any]: ...
     def upload_part(self, **kwargs: Any) -> dict[str, Any]: ...
     def upload_part_copy(self, **kwargs: Any) -> dict[str, Any]: ...
@@ -687,9 +694,11 @@ def _live_version(meta: dict[str, Any] | None) -> int | None:
 
 def _clear_version(c: Clients, env: Env, table: str, dataset_id: str, version: int) -> None:
     """Remove what a publish left of a version that never went live: its version and file items
-    in the catalog and its folder in the archive bucket. Only ever called by the holder of the
-    claim on that version, which is what says the version is not live. The bucket is versioned,
-    so each delete adds a delete marker and the stored bytes stay."""
+    in the catalog and its folders in the archive bucket. Only ever called by the holder of the
+    claim on that version, which is what says the version is not live: its items in the catalog,
+    its private folder, and its public folder for a publish that stopped during or after the
+    move. The bucket is versioned, so each delete adds a delete marker and the stored bytes
+    stay."""
     query: dict[str, Any] = {
         "TableName": table,
         "KeyConditionExpression": "PK = :pk AND begins_with(SK, :sk)",
@@ -708,7 +717,7 @@ def _clear_version(c: Clients, env: Env, table: str, dataset_id: str, version: i
             break
         query["ExclusiveStartKey"] = last
     _write(c, table, [{"DeleteRequest": {"Key": key}} for key in keys])
-    for prefix in PREFIXES:
+    for prefix in (PUBLISHING, *PREFIXES):
         _delete_prefix(c, env, f"{prefix}/{dataset_id}/{version}/", env.archive_bucket)
 
 
@@ -877,6 +886,17 @@ def _root(filled: dict[str, Any], target: dict[str, Any]) -> str:
     return f"{filled['prefix']}/{target['datasetId']}/{target['version']}/"
 
 
+# Where a version's files and zips are kept in the archive bucket until the move step: beside
+# `open/` and `restricted/`, and read by nothing but the publish. CloudFront's one origin on the
+# bucket is `open/` and it is denied this folder outright; the reindex, the lifecycle and the
+# integrity check list `open/` and `restricted/` only.
+PUBLISHING = "publishing"
+
+
+def _publishing(target: dict[str, Any]) -> str:
+    return f"{PUBLISHING}/{target['datasetId']}/{target['version']}/"
+
+
 class CopyMismatch(Exception):
     """A file arrived in the archive bucket with other bytes than `checksums.sha256` lists."""
 
@@ -890,10 +910,11 @@ def _copy(
     target: dict[str, Any],
     filled: dict[str, Any],
 ) -> int:
-    """One copy per file inside S3 into the archive bucket, the manifest last, each checked
-    against its line in the held `checksums.sha256`. No file passes through the function."""
+    """One copy per file inside S3 into the version's private folder in the archive bucket, the
+    manifest last, each checked against its line in the held `checksums.sha256`. No file passes
+    through the function, and none is at a public address until the move step."""
     paths = sorted(filled["files"], key=lambda p: (p == MANIFEST, p))
-    root = _root(filled, target)
+    root = _publishing(target)
     # The fill step has just rewritten it, so it lists every file but itself.
     listed = _read(c, env.staging_bucket, _held(sid, CHECKSUMS))
     expected = zips.checksum_lines(listed.decode("utf-8"))
@@ -918,13 +939,51 @@ def _copy(
 
 
 @durable_step
-def _zips(
-    _: StepContext, c: Clients, env: Env, target: dict[str, Any], filled: dict[str, Any]
-) -> int:
-    """The version's download zips, written before the catalog step makes it live."""
-    root = _root(filled, target)
+def _zips(_: StepContext, c: Clients, env: Env, root: str) -> int:
+    """The download zips of the version whose files are under `root`, written beside them: in
+    the private folder before the version is live, in its public one when a DOI changes it."""
     text = _read(c, env.archive_bucket, root + MANIFEST).decode("utf-8")
     return len(zips.write_zips(c.s3, env.archive_bucket, root, json.loads(text)))
+
+
+@durable_step
+def _move(
+    _: StepContext, c: Clients, env: Env, target: dict[str, Any], filled: dict[str, Any]
+) -> int:
+    """Move the version's files and zips from its private folder to its public one, inside S3,
+    the manifest last, so the reindex finds the version only once it is whole. How many moved.
+
+    Each file is copied, the copy's SHA-256 compared with the private copy's, and only then is
+    the private copy deleted (a delete marker: the bucket is versioned). A file larger than one
+    CopyObject takes, which only a zip written in parts can be, is copied in parts and has no
+    whole-file SHA-256 to compare. Safe to run again: what is still in the private folder is
+    what is left to move, a file copied but not yet deleted is copied again over the same bytes,
+    and after a complete move the folder is empty and nothing happens."""
+    bucket, source, root = env.archive_bucket, _publishing(target), _root(filled, target)
+    keys: list[str] = []
+    for page in c.s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=source):
+        keys.extend(item["Key"] for item in page.get("Contents", []))
+    keys.sort(key=lambda k: (k == source + MANIFEST, k))
+    for key in keys:
+        path = key[len(source) :]
+        head = c.s3.head_object(Bucket=bucket, Key=key, ChecksumMode="ENABLED")
+        size = int(head["ContentLength"])
+        if size > parts.ONE_REQUEST_MAX:
+            parts.copy(c.s3, bucket, key, root + path, size)
+        else:
+            copied = c.s3.copy_object(
+                Bucket=bucket,
+                Key=root + path,
+                CopySource={"Bucket": bucket, "Key": key},
+                ChecksumAlgorithm="SHA256",
+                # The private copy has no tags, and the role no right to read any.
+                TaggingDirective="REPLACE",
+            )
+            stored = copied.get("CopyObjectResult", {}).get("ChecksumSHA256")
+            if not stored or stored != head.get("ChecksumSHA256"):
+                raise CopyMismatch(f"the copy of {path} to {root} differs from the one checked")
+        c.s3.delete_object(Bucket=bucket, Key=key)
+    return len(keys)
 
 
 def _write(c: Clients, table: str, requests: list[dict[str, Any]]) -> None:
@@ -1138,7 +1197,7 @@ def _register_doi(
     address = found["address"]
     try:
         context.step(_doi_identifier(c, env, target, filled, address), name=name("doi-identifier"))
-        context.step(_zips(c, env, target, filled), name=name("doi-zips"))
+        context.step(_zips(c, env, _root(filled, target)), name=name("doi-zips"))
         context.step(_catalog(c, env, sid, target, filled), name=name("doi-catalog"))
         context.step(_page(c, env, target, filled), name=name("doi-page"))
     except Exception as error:
@@ -1181,7 +1240,8 @@ def publish(
     target = context.step(_version(c, env, sid), name=name("version"))
     filled = context.step(_fill(c, env, sid, target), name=name("fill"))
     context.step(_copy(c, env, sid, target, filled), name=name("copy"))
-    context.step(_zips(c, env, target, filled), name=name("zips"))
+    context.step(_zips(c, env, _publishing(target)), name=name("zips"))
+    context.step(_move(c, env, target, filled), name=name("move"))
     context.step(_catalog(c, env, sid, target, filled), name=name("catalog"))
     context.step(_page(c, env, target, filled), name=name("page"))
     if filled.get("dois"):
