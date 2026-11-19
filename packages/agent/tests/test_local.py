@@ -1,3 +1,4 @@
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -165,3 +166,22 @@ def test_edit_manifest_sets_and_clears_the_embargo_date(package: Path) -> None:
 
     local.edit_manifest(str(package), [{"target": "archive:embargoUntil", "value": None}])
     assert "archive:embargoUntil" not in json.loads(path.read_text())
+
+
+def test_edit_manifest_leaves_a_hidden_file_out_of_the_checksums(package: Path) -> None:
+    (package / ".DS_Store").write_bytes(b"x")
+    (package / "data" / ".DS_Store").write_bytes(b"x")
+
+    local.edit_manifest(str(package), [{"target": "title", "value": "A new title"}])
+
+    assert ".DS_Store" not in (package / "checksums.sha256").read_text()
+    findings = local.diagnose(Session(), str(package))["findings"]
+    assert not [f for f in findings if f["severity"] == "error"]
+
+
+def test_diagnose_names_a_hidden_file_the_checksums_list(package: Path) -> None:
+    (package / ".DS_Store").write_bytes(b"x")
+    with (package / "checksums.sha256").open("a") as out:
+        out.write(f"{hashlib.sha256(b'x').hexdigest()}  .DS_Store\n")
+
+    assert "structure.checksums-hidden" in rule_ids(local.diagnose(Session(), str(package)))

@@ -11,8 +11,9 @@ note.** The tools come from the `cruise` MCP server.
 
 ## Steps
 
-1. **Call `sign_in`** (say first that it opens the browser), then `submissions` with the
-   queue (`queue: true`). Show what waits in review, stale ones first: id, who submitted
+1. **Call `sign_in`** (say first that it opens the browser) and tell the curator which
+   archive it answers as `archive`: the queue and every decision in this window go to that
+   archive. Then call `submissions` with the queue (`queue: true`). Show what waits in review, stale ones first: id, who submitted
    it, the dataset it versions (if any) and how long it has waited. The title comes from
    its `datapackage.json`, read in step 2.
 2. **For the one the curator picks, read it.** Call `submissions` with its id for its status,
@@ -38,17 +39,20 @@ note.** The tools come from the `cruise` MCP server.
    It answers only that the decision was accepted (`submissionId` and `decision`); an
    approval is published afterwards, on its own. Say the decision was accepted, then call
    `submissions` with the id and report its status as it stands. Say it is published, and
-   give `/datasets/<id>` on the archive, only once that status is `published`.
+   give `/datasets/<id>` on the archive, only once that status is `published`. `decide`
+   answers the `archive` it went to; say it with the decision.
 
 ## When a tool answers an error
 
 Say what the tool said in plain words, and what to do next:
 
-- **No archive is set**: ask for the archive's web address and call `connect`.
+- **No archive is set, or it is the wrong one**: ask for the archive's web address and call
+  `connect`. It changes this window only; other open windows keep their archive.
 - **The archive can't be reached**: nothing was decided; run the step again when it
   answers. Nothing is queued.
 - **Signed out or the sign-in expired**: sign-in lasts an hour and only while this session
-  runs. Call `sign_in` again (with their go) and retry.
+  runs. Call `sign_in` again (with their go) and retry. A sign-in is for one archive; after
+  `connect` to another, sign in again.
 - **Not allowed** (it names the group): reviewing needs the `curator` group; the archive's
   admin can add it.
 - **The submission isn't in review** (from `submission_files`), or another **conflict**:

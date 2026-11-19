@@ -30,7 +30,7 @@ sample-package/
   original/logger-raw.csv
 ```
 
-Its `_build/` folder holds the script that generated it. `cruise` leaves any folder named `_build` out of the package's checks and its `checksums.sha256`, and the web app uploads only the files `checksums.sha256` lists, so `_build/` stays on your computer.
+Its `_build/` folder holds the script that generated it. `cruise` leaves the top-level `_build` folder, and every hidden file and folder (one whose name starts with a dot, such as `.DS_Store` or `.git/`), out of the package's checks and its `checksums.sha256`. The web app and the plugin upload only the files `checksums.sha256` lists, and the archive refuses a hidden path from any client, so `_build/` and hidden files stay on your computer. If a `checksums.sha256` written by an older `cruise` lists a hidden file, `cruise diagnose` reports `structure.checksums-hidden`; run any `cruise set` and the line is gone.
 
 ## Installing cruise
 
@@ -457,7 +457,7 @@ The archive runs the same rules on every submission, from the same code, so a pa
 
 ## Auditing many packages
 
-`cruise audit` finds every folder with a `datapackage.json` under the folders it is given and prints one line per package, those with the most errors and the lowest score first:
+`cruise audit` finds every folder with a `datapackage.json` under the folders it is given and prints one line per package, those with the most errors and the lowest score first. It does not look inside `_build`, `node_modules` or hidden folders.
 
 ```
 cruise audit .
