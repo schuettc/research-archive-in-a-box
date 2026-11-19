@@ -1307,3 +1307,67 @@ def test_a_claim_only_id_is_a_new_dataset(world: World) -> None:
     fresh = world.create("bob", datasetId="stream")
 
     assert world.submissions.items[(fresh,)]["newVersion"] is False
+
+
+MIB = 1024**2
+
+
+def _two_files(size: int) -> list[dict[str, Any]]:
+    return [{"path": f"data/{name}.bin", "size": size, "sha256": DIGEST} for name in ("a", "b")]
+
+
+def test_create_refuses_a_package_over_the_archives_limit(world: World) -> None:
+    world.ssm.config = {"publisher": "X", "submissions": {"maxPackageGiB": 1}}
+
+    status, body = world.call(
+        "POST", "/api/submissions", "alice", "contributor", {"files": _two_files(600 * MIB)}
+    )
+
+    assert status == 400
+    assert body["error"] == (
+        "the package's files total 1,258,291,200 bytes, "
+        "more than the 1 GiB (1,073,741,824 bytes) this archive takes"
+    )
+    assert world.submissions.items == {}
+    assert world.s3.presigned == []
+
+
+def test_create_takes_a_package_of_exactly_the_limit(world: World) -> None:
+    world.ssm.config = {"publisher": "X", "submissions": {"maxPackageGiB": 1}}
+
+    status, body = world.call(
+        "POST", "/api/submissions", "alice", "contributor", {"files": _two_files(512 * MIB)}
+    )
+
+    assert status == 201, body
+
+
+def test_the_next_rounds_uploads_are_held_to_the_same_limit(world: World) -> None:
+    world.ssm.config = {"publisher": "X", "submissions": {"maxPackageGiB": 1}}
+    sid = world.create("alice")
+    world.submissions.items[(sid,)].update(status="needs-changes", callbackId="cb-resubmit")
+    before = dict(world.submissions.items[(sid,)])
+    world.s3.presigned.clear()
+
+    status, body = world.call(
+        "POST",
+        "/api/submissions/{id}/uploads",
+        "alice",
+        "contributor",
+        {"files": _two_files(600 * MIB)},
+        sid=sid,
+    )
+
+    assert status == 400
+    assert "more than the 1 GiB" in body["error"]
+    assert world.submissions.items[(sid,)] == before
+    assert world.s3.presigned == []
+
+
+def test_with_no_setting_the_limit_is_9_gib(world: World) -> None:
+    status, body = world.call(
+        "POST", "/api/submissions", "alice", "contributor", {"files": _two_files(5 * 1024**3)}
+    )
+
+    assert status == 400
+    assert "more than the 9 GiB (9,663,676,416 bytes) this archive takes" in body["error"]
