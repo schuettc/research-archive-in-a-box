@@ -61,6 +61,12 @@ async function getJson<T>(path: string, init?: RequestInit): Promise<T> {
 
 const segment = encodeURIComponent;
 
+/** The most a package's files may total, in bytes, as the archive publishes it. */
+export async function getPackageLimit(): Promise<number> {
+  const checks = await getJson<{ maxPackageGiB: number }>("/archive-checks.json");
+  return checks.maxPackageGiB * 1024 ** 3;
+}
+
 /** `GET /api/search` with the query string as the search page holds it. */
 export function search(query: URLSearchParams): Promise<SearchAnswer> {
   return getJson(`/api/search?${query}`);

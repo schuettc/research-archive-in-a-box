@@ -141,3 +141,47 @@ def test_diagnose_with_no_archive_connected_checks_core_rules_and_says_so(
 
     assert missing(result) == []
     assert "weren't available" in result["note"]
+
+
+LIMITED = {**ECOLOGY, "maxPackageGiB": 9}
+
+
+def test_refresh_checks_answers_the_archives_package_limit(archive: Any) -> None:
+    archive.json("GET /archive-checks.json", LIMITED)
+    state.save_url(archive.url)
+
+    assert state.refresh_checks(archive.url) == 9 * 1024**3
+    assert state.saved_checks() == ECOLOGY
+
+
+def test_refresh_checks_answers_none_without_a_limit(archive: Any) -> None:
+    archive.json("GET /archive-checks.json", ECOLOGY)
+    state.save_url(archive.url)
+
+    assert state.refresh_checks(archive.url) is None
+
+    archive.json("GET /archive-checks.json", {"message": "boom"}, 500)
+    assert state.refresh_checks(archive.url) is None
+
+
+def test_diagnose_states_the_archives_package_limit_with_its_checks(
+    archive: Any, no_methods: Path
+) -> None:
+    archive.json("GET /archive-checks.json", LIMITED)
+    server.connect(Session(), archive.url)
+
+    answer = local.diagnose(str(no_methods))
+
+    assert answer["checks"] == {"archive": archive.url, **ECOLOGY, "maxPackageGiB": 9}
+
+
+def test_diagnose_states_a_limit_the_archive_changed_since_connect(
+    archive: Any, no_methods: Path
+) -> None:
+    archive.json("GET /archive-checks.json", LIMITED)
+    server.connect(Session(), archive.url)
+    archive.json("GET /archive-checks.json", {**ECOLOGY, "maxPackageGiB": 4})
+
+    state.refresh_checks(archive.url)
+
+    assert local.diagnose(str(no_methods))["checks"]["maxPackageGiB"] == 4

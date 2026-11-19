@@ -330,3 +330,36 @@ def test_submission_files_names_the_curator_group_on_a_403(
 
     with pytest.raises(NotAllowed, match="`curator` group"):
         submit.submission_files(session, "s1")
+
+
+def test_a_package_over_the_archives_limit_is_refused_before_anything_is_sent(
+    connected: Any, session: Session, package: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connected.json(
+        "GET /archive-checks.json", {"profiles": ["core"], "required": [], "maxPackageGiB": 1}
+    )
+    over = [{"path": "data/big.bin", "size": 1024**3 + 1, "sha256": "0" * 64}]
+    monkeypatch.setattr(submit, "_files", lambda root: over)
+
+    with pytest.raises(
+        Refused, match="more than the 1 GiB this archive takes, so nothing was sent"
+    ) as refused:
+        submit.submit(session, str(package))
+
+    assert "total 1,073,741,825 bytes" in str(refused.value)
+    assert [(s.method, s.path) for s in connected.seen] == [("GET", "/archive-checks.json")]
+
+
+def test_an_archive_that_publishes_no_limit_is_sent_to_as_before(
+    connected: Any, session: Session, package: Path
+) -> None:
+    connected.json("GET /archive-checks.json", {"profiles": ["core"], "required": []})
+    answer_uploads(connected, "POST /api/submissions", package, "s-1", 1)
+    connected.json("POST /api/submissions/s-1/submit", {"status": "checking"}, 202)
+
+    submit.submit(session, str(package))
+
+    assert [s.path for s in posts(connected)] == [
+        "/api/submissions",
+        "/api/submissions/s-1/submit",
+    ]

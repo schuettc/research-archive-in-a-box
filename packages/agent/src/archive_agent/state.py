@@ -13,6 +13,8 @@ from archive_agent.archive import Archive
 from archive_agent.errors import ArchiveError, NotAllowed, NotConnected, Refused
 from archive_client.signin import AuthConfig, Tokens, sign_in
 
+LIMIT = "maxPackageGiB"
+
 
 def config_file() -> Path:
     """`archive.json` under `$XDG_CONFIG_HOME/research-archive-in-a-box`, else `~/.config/...`."""
@@ -48,25 +50,35 @@ def checks(document: object) -> dict[str, list[str]] | None:
     return lists
 
 
-def fetch_checks(url: str) -> dict[str, list[str]] | None:
-    """The profiles and required fields the archive at `url` publishes, or None when it
-    publishes none. An archive deployed before /archive-checks.json existed answers 404 (or 403)
-    for it. Unreachable still raises."""
+def limit_gib(document: object) -> int | None:
+    """`/archive-checks.json`'s `maxPackageGiB`, the most a package's files may total, or None
+    when the archive publishes none."""
+    value = document.get(LIMIT) if isinstance(document, dict) else None
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+
+def fetch_published(url: str) -> tuple[dict[str, list[str]] | None, int | None]:
+    """The profiles and required fields the archive at `url` publishes, and its package limit
+    in GiB, each None when it publishes none. An archive deployed before /archive-checks.json
+    existed answers 404 (or 403) for it. Unreachable still raises."""
     try:
-        return checks(Archive(url).get("/archive-checks.json"))
+        document = Archive(url).get("/archive-checks.json")
     except (Refused, NotAllowed):
-        return None
+        return None, None
+    return checks(document), limit_gib(document)
 
 
-def refresh_checks(url: str) -> None:
-    """Save the archive's current checks when they changed; keep the saved ones when the
-    archive can't answer them."""
+def refresh_checks(url: str) -> int | None:
+    """Save the archive's current checks and package limit when they changed; keep the saved
+    ones when the archive can't answer them. Answers the limit in bytes, or None when the
+    archive publishes none or can't be reached."""
     try:
-        current = fetch_checks(url)
+        current, limit = fetch_published(url)
     except ArchiveError:
-        return
-    if current is not None and current != saved_checks():
-        save_url(url, current)
+        return None
+    if current is not None and (current, limit) != (saved_checks(), saved_limit_gib()):
+        save_url(url, current, limit)
+    return limit * 1024**3 if limit is not None else None
 
 
 def saved_checks() -> dict[str, list[str]] | None:
@@ -74,11 +86,21 @@ def saved_checks() -> dict[str, list[str]] | None:
     return checks(_saved().get("checks"))
 
 
-def save_url(url: str, archive_checks: dict[str, list[str]] | None = None) -> Path:
-    """Save the archive URL and the checks it publishes, if any, replacing the file whole."""
+def saved_limit_gib() -> int | None:
+    """The saved archive's package limit in GiB, or None when it publishes none."""
+    return limit_gib(_saved())
+
+
+def save_url(
+    url: str, archive_checks: dict[str, list[str]] | None = None, limit: int | None = None
+) -> Path:
+    """Save the archive URL with the checks and the package limit (GiB) it publishes, if any,
+    replacing the file whole."""
     document: dict[str, Any] = {"url": url}
     if archive_checks is not None:
         document["checks"] = archive_checks
+    if limit is not None:
+        document[LIMIT] = limit
     path = config_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(

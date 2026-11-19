@@ -195,7 +195,7 @@ export default defineConfig({
   server: process.env.ARCHIVE_DEV_SITE
     ? {
         proxy: Object.fromEntries(
-          ["^/api/", "^/auth-config\\.json$", "^/data/"].map((path) => [
+          ["^/api/", "^/auth-config\\.json$", "^/archive-checks\\.json$", "^/data/"].map((path) => [
             path,
             { target: process.env.ARCHIVE_DEV_SITE, changeOrigin: true },
           ]),

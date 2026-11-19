@@ -77,7 +77,7 @@ def submit(session: Session, folder: str, submission: str | None = None) -> dict
     way answers the plain error; nothing is retried.
     """
     # The archive may have changed what it checks since connect; check what it checks now.
-    state.refresh_checks(session.url())
+    limit = state.refresh_checks(session.url())
     findings = local.diagnose(folder)["findings"]
     errors = sum(1 for f in findings if f.get("severity") == "error")
     if errors:
@@ -88,6 +88,12 @@ def submit(session: Session, folder: str, submission: str | None = None) -> dict
         )
     root = Path(folder).expanduser().resolve()
     files = _files(root)
+    total = sum(int(entry["size"]) for entry in files)
+    if limit is not None and total > limit:
+        raise Refused(
+            f"The package's files total {total:,} bytes, more than the {limit // 1024**3} GiB "
+            "this archive takes, so nothing was sent."
+        )
     archive = session.archive()
     if submission is None:
         # The manifest's id names the dataset: a published one gets its next version. An id

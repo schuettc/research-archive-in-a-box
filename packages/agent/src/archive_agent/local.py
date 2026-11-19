@@ -35,7 +35,11 @@ def _selection() -> tuple[list[Profile], list[str], dict[str, Any] | None, str |
     url = state.saved_url()
     if archive_checks is None or url is None:
         return [load_profile("core")], [], None, NO_CHECKS
-    used = {"archive": url, **archive_checks}
+    used: dict[str, Any] = {"archive": url, **archive_checks}
+    limit = state.saved_limit_gib()
+    if limit is not None:
+        # The most a package's files may total; submit refuses a larger one before sending.
+        used[state.LIMIT] = limit
     profiles: list[Profile] = []
     unknown: list[str] = []
     for name in archive_checks["profiles"]:

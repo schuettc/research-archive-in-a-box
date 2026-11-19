@@ -53,8 +53,8 @@ def connect(session: Session, url: str) -> dict[str, Any]:
         isinstance(document.get(k), str) for k in ("region", "webClientId")
     ):
         raise Refused(f"{address} answered, but it doesn't look like a research archive.")
-    archive_checks = state.fetch_checks(address)
-    path = state.save_url(address, archive_checks)
+    archive_checks, limit = state.fetch_published(address)
+    path = state.save_url(address, archive_checks, limit)
     session.tokens = None
     session.groups = []
     if archive_checks is None:
