@@ -36,8 +36,8 @@ interface Brand {
   /**
    * The brand's files on disk, by the name they are served at under `/brand/`: the logo and
    * favicon named by their content (`logo-<hash>.svg`), which the app and index.html use and
-   * which cache for a year, and the logo again as `logo.<ext>`, the stable name the static
-   * dataset pages use, deployed no-cache.
+   * which cache for a year, and each again under its stable name, `logo.<ext>` for the static
+   * dataset pages and `favicon.<ext>` for /favicon.ico, deployed no-cache.
    */
   files: Map<string, string>;
   /** The content-named file of each kind. */
@@ -65,7 +65,7 @@ function readBrand(): Brand {
     const hash = createHash("sha256").update(readFileSync(file)).digest("hex").slice(0, 8);
     hashed.set(kind, `${kind}-${hash}${ext}`);
     files.set(`${kind}-${hash}${ext}`, file);
-    if (kind === "logo") files.set(`logo${ext}`, file);
+    files.set(`${kind}${ext}`, file);
   }
   return {
     publisher: config.publisher,

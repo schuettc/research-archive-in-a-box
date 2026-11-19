@@ -43,9 +43,11 @@ test("a build with a second brand takes its colour, name, logo and favicon", asy
     .join("");
   expect(css).toContain("#1e5631");
   expect(css).toContain("Charter");
-  // The app's copies are named by their content; logo.svg is the static pages' stable copy.
+  // The app's copies are named by their content; logo.svg is the static pages' stable copy and
+  // favicon.svg the one /favicon.ico reads.
   expect(readdirSync(join(out, "brand")).sort()).toEqual([
     expect.stringMatching(/^favicon-[0-9a-f]{8}\.svg$/),
+    "favicon.svg",
     expect.stringMatching(/^logo-[0-9a-f]{8}\.svg$/),
     "logo.svg",
   ]);
