@@ -4,6 +4,8 @@ Importing this module registers every rule in `REGISTRY`.
 """
 
 from cruise.rules import fields, package, values
+
+from cruise.rules import declared  # isort: skip  (last, so the rules keep their order)
 from cruise.rules.registry import (
     CHECK_FAILED,
     QUESTIONS,
@@ -30,6 +32,7 @@ __all__ = [
     "Registry",
     "Rule",
     "RuleResult",
+    "declared",
     "failed_id",
     "fields",
     "package",

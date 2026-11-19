@@ -322,3 +322,14 @@ def test_a_csv_path_with_another_format_is_still_not_read() -> None:
 
     with pytest.raises(UnreadableTable, match="only csv tables are read"):
         read_table(NO_FORMAT, resource)
+
+
+def test_the_declared_rules_come_after_the_rules_that_were_there_before() -> None:
+    ids = [rule.id for rule in REGISTRY]
+
+    assert (
+        ids.index("package.creator-orcid-missing")
+        < ids.index("values.not-declared-type")
+        < ids.index("values.unreadable")
+        < ids.index("values.foreign-key-missing")
+    )

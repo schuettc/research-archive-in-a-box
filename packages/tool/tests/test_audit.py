@@ -54,7 +54,7 @@ def test_audit_prints_one_row_per_package_messy_first(
     assert lines[1].startswith(str(archive / "nested" / "messy"))
     assert lines[1].endswith("package.core-missing")
     assert lines[2].startswith(str(archive / "sample"))
-    assert "(find 5 of 5, understand 42 of 45, trust 31 of 32)" in lines[2]
+    assert "(find 5 of 5, understand 42 of 45, trust 32 of 33)" in lines[2]
     assert len(lines) == 3
 
 
