@@ -59,6 +59,10 @@ export type Name1 = string;
  * ses: send the account emails (sign-up codes, invitations, password resets) through Amazon SES from no-reply@<domain>, with DKIM records in the domain's hosted zone. Needs a domain. Left out: Cognito's own email, which is capped per day.
  */
 export type Email = "ses" | null;
+/**
+ * true: the stage's buckets, tables, user pool and logs are kept when its stack is deleted, and the tables and user pool are protected from deletion. false: a disposable stage, deleted whole with its data when it is torn down, with the test conveniences (uploads from a local web app at http://localhost:5199, and the sign-in client the end-to-end test uses). Left out: true.
+ */
+export type Keepdata = boolean;
 export type Name2 = string;
 export type Region = string | null;
 export type Licenses = string[];
@@ -151,6 +155,7 @@ export interface Stage {
   doi?: StageDoi | null;
   domain?: Domain | null;
   email?: Email;
+  keepData?: Keepdata;
   name: Name2;
   region?: Region;
 }
