@@ -783,9 +783,18 @@ def test_a_zip_failure_leaves_readers_on_the_version_before(
 
     with pytest.raises(RuntimeError, match="zip refused"):
         world.publish("sub-b")
+    # The copy ran before the zips: its files are there for the failure handler to remove.
+    assert "open/stream/2/datapackage.json" in world.s3.keys(ARCHIVE)
+    world.table()[("DATASET#stream", "V#000002")] = {
+        "PK": {"S": "DATASET#stream"},
+        "SK": {"S": "V#000002"},
+    }
+    world.fail("sub-b", "zip refused")
 
-    assert world.table()[("DATASET#stream", "META")]["currentVersion"] == {"N": "1"}
-    assert ("DATASET#stream", "V#000002") not in world.table()
+    meta = world.table()[("DATASET#stream", "META")]
+    assert meta["currentVersion"] == {"N": "1"} and "claimedBy" not in meta
+    assert [sk for pk, sk in world.table() if sk.startswith("V#000002")] == []
+    assert world.s3.keys(ARCHIVE, "open/stream/2/") == []
     status, body = world.read("/api/datasets/stream")
     assert (status, body["currentVersion"]) == (200, 1)
 
@@ -1171,3 +1180,65 @@ def test_a_failure_of_a_submission_that_holds_no_claim_deletes_nothing(world: Wo
 
     assert world.table() == table
     assert world.s3.keys(ARCHIVE) == stored
+
+
+def test_a_takeover_while_the_holder_is_releasing_is_refused_and_the_release_frees_the_claim(
+    world: World,
+) -> None:
+    _two_versions_claimed(world)
+    # sub-b failed and its release has swapped the claim to its marker, but not finished.
+    world.submissions.items["sub-b"]["status"] = "failed"
+    world.table()[META]["claimedBy"] = {"S": "releasing#sub-b"}
+    world.hold("sub-c", _package(), datasetId="stream", newVersion=True)
+
+    with pytest.raises(ingest.PublishConflict, match="is being published by submission sub-b$"):
+        world.publish("sub-c")
+    assert world.table()[META]["claimedBy"] == {"S": "releasing#sub-b"}
+    assert world.s3.keys(ARCHIVE, "open/stream/2/") == []
+
+    world.fail("sub-b", "boom")  # the fail step's retry carries the release on
+
+    meta = world.table()[META]
+    assert meta["currentVersion"] == {"N": "1"} and "claimedBy" not in meta
+    world.publish("sub-c")
+    assert world.table()[META]["currentVersion"] == {"N": "2"}
+
+
+def test_a_release_whose_claim_was_taken_over_deletes_nothing_of_the_new_holder(
+    world: World,
+) -> None:
+    _two_versions_claimed(world)
+    # sub-c's version 2, as it stands once it has taken the claim over and copied.
+    record = ("DATASET#stream", "V#000002#FILE#data/logger.csv")
+    world.table()[record] = {"PK": {"S": record[0]}, "SK": {"S": record[1]}}
+    world.s3.objects[(ARCHIVE, "open/stream/2/datapackage.json")] = b"{}"
+    read = world.dynamodb.get_item
+
+    def taken_over_after_the_read(**kwargs: Any) -> dict[str, Any]:
+        answer = copy.deepcopy(read(**kwargs))
+        if kwargs["Key"]["SK"] == {"S": "META"}:
+            world.table()[META]["claimedBy"] = {"S": "sub-c"}
+        return answer
+
+    world.monkeypatch.setattr(world.dynamodb, "get_item", taken_over_after_the_read)
+
+    world.fail("sub-b", "boom")
+
+    assert world.table()[META]["claimedBy"] == {"S": "sub-c"}
+    assert record in world.table()
+    assert world.s3.keys(ARCHIVE, "open/stream/2/") == ["open/stream/2/datapackage.json"]
+
+
+def test_a_first_version_claim_left_by_a_failed_submission_is_taken_over(world: World) -> None:
+    world.hold("sub-a", _package(), datasetId="stream")
+    world.version("sub-a")
+    world.submissions.items["sub-a"]["status"] = "failed"  # failed, and its release never ran
+    assert "currentVersion" not in world.table()[META]
+    world.hold("sub-c", _package(), datasetId="stream")
+
+    world.publish("sub-c")
+
+    meta = world.table()[META]
+    assert meta["currentVersion"] == {"N": "1"} and "claimedBy" not in meta
+    assert world.submissions.items["sub-c"]["status"] == "published"
+    assert world.read("/api/datasets/stream")[1]["currentVersion"] == 1

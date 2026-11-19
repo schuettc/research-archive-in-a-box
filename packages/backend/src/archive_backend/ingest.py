@@ -717,39 +717,67 @@ def _active_table(c: Clients, env: Env) -> str:
     return env.catalog_table_a if active == "A" else env.catalog_table_b
 
 
+# A claim being released reads `releasing#<submission id>`: its holder failed and is removing
+# what it wrote of the version. No publish may take it over until the release has dropped it.
+RELEASING = "releasing#"
+
+
 def _release(c: Clients, env: Env, sid: str, item: dict[str, Any]) -> None:
     """Give up the submission's claim, if it holds one, after removing what it wrote of the
     claimed version; a first version's claim-only item is deleted. A submission that holds no
-    claim (it never claimed, or its version went live) changes nothing."""
+    claim (it never claimed, or its version went live) changes nothing.
+
+    Before anything is removed the claim is swapped to the releasing marker, under the condition
+    that it is still this submission's (or already its marker, from a try of the fail step that
+    stopped part-way). A takeover refuses a claim in that state, so nothing another publish
+    wrote can be under the version while it is cleared; a refused swap removes nothing."""
     dataset_id = item.get("datasetId")
     if not dataset_id:
         return
     dataset_id = str(dataset_id)
     table = _active_table(c, env)
     meta = _meta(c, table, dataset_id)
-    if meta is None or meta.get("claimedBy") != {"S": sid}:
+    marker = {"S": RELEASING + sid}
+    if meta is None or meta.get("claimedBy") not in ({"S": sid}, marker):
         return
     live = _live_version(meta)
+    held: dict[str, Any] = {"TableName": table, "Key": _meta_key(dataset_id)}
+    values: dict[str, Any] = {":marker": marker}
+    if live is None:
+        same = "attribute_not_exists(currentVersion)"
+    else:
+        # The version read above is the one cleared below, so it must still be the live one.
+        same = "currentVersion = :v"
+        values[":v"] = {"N": str(live)}
+    try:
+        c.dynamodb.update_item(
+            UpdateExpression="SET claimedBy = :marker",
+            ConditionExpression=f"(claimedBy = :sid OR claimedBy = :marker) AND {same}",
+            ExpressionAttributeValues=values | {":sid": {"S": sid}},
+            **held,
+        )
+    except ClientError as error:
+        # Refused: the claim is no longer this submission's, so nothing of the version is its.
+        if not _refused(error):
+            raise
+        return
     _clear_version(c, env, table, dataset_id, (live or 0) + 1)
-    held: dict[str, Any] = {
-        "TableName": table,
-        "Key": _meta_key(dataset_id),
-        "ExpressionAttributeValues": {":sid": {"S": sid}},
-    }
     try:
         if live is None:
             c.dynamodb.delete_item(
-                ConditionExpression="claimedBy = :sid AND attribute_not_exists(currentVersion)",
+                ConditionExpression=f"claimedBy = :marker AND {same}",
+                ExpressionAttributeValues=values,
                 **held,
             )
         else:
             c.dynamodb.update_item(
                 UpdateExpression="REMOVE claimedBy",
-                ConditionExpression="claimedBy = :sid AND attribute_exists(currentVersion)",
+                ConditionExpression=f"claimedBy = :marker AND {same}",
+                ExpressionAttributeValues=values,
                 **held,
             )
     except ClientError as error:
-        # Refused: the claim is no longer this submission's, so there is nothing to release.
+        # Refused: the marker is gone, so there is nothing left to release.
         if not _refused(error):
             raise
 
@@ -758,7 +786,8 @@ def _release(c: Clients, env: Env, sid: str, item: dict[str, Any]) -> None:
 def _version(_: StepContext, c: Clients, env: Env, sid: str) -> dict[str, Any]:
     """The dataset id (minted from the title when none was given) and its next version, read
     from the active catalog table and claimed there. A claim left by a submission that failed
-    is taken over, and what that publish left of the version is removed."""
+    is taken over, and what that publish left of the version is removed; one that submission is
+    still releasing is refused like a running publish's, for the step's retry to find free."""
     item = _submission(c, sid)
     table = _active_table(c, env)
     dataset_id = item.get("datasetId")
@@ -778,10 +807,13 @@ def _version(_: StepContext, c: Clients, env: Env, sid: str) -> dict[str, Any]:
     # A claim that is already this submission's is this step's own, from a try that failed.
     if holder != sid:
         if holder is not None:
-            other = c.submissions.get_item(Key={"submissionId": holder}).get("Item") or {}
-            if other.get("status") != "failed":
+            # A claim being released is held: its holder is still removing what it wrote.
+            releasing = holder.startswith(RELEASING)
+            name = holder.removeprefix(RELEASING)
+            other = c.submissions.get_item(Key={"submissionId": name}).get("Item") or {}
+            if releasing or other.get("status") != "failed":
                 raise PublishConflict(
-                    f"dataset {dataset_id} is being published by submission {holder}"
+                    f"dataset {dataset_id} is being published by submission {name}"
                 )
         _claim(c, table, dataset_id, version, sid, holder)
     if holder is not None:
