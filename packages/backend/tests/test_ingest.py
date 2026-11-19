@@ -217,11 +217,16 @@ class FakeDynamoDB:
         # The version claim on a dataset item none of these runs has published before.
         key = (TableName, Key["PK"]["S"], Key["SK"]["S"])
         assert key not in self.items
-        self.items[key] = {
-            **Key,
-            "currentVersion": ExpressionAttributeValues[":v"],
-            "claimedBy": ExpressionAttributeValues[":sid"],
-        }
+        self.items[key] = {**Key, "claimedBy": ExpressionAttributeValues[":sid"]}
+        return {}
+
+    def put_item(
+        self, *, TableName: str, Item: dict[str, Any], ExpressionAttributeValues: Any, **_: Any
+    ) -> dict[str, Any]:
+        # The dataset item going live, written by the submission that claimed it.
+        key = (TableName, Item["PK"]["S"], Item["SK"]["S"])
+        assert self.items[key]["claimedBy"] == ExpressionAttributeValues[":sid"]
+        self.items[key] = Item
         return {}
 
     def batch_write_item(self, *, RequestItems: dict[str, Any]) -> dict[str, Any]:

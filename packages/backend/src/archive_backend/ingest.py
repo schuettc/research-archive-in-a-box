@@ -10,13 +10,17 @@ execution timeout ends it without a word. Every call that reads the clock, the n
 value runs inside a named step, every status change writes its event in the same step, and a
 step that fails after its retries ends the submission as `failed` with an admin alert.
 
-Publish is a series of steps, each safe to repeat: assign the version from the active catalog,
-fill in the manifest and regenerate its README and checksums, copy the files to the archive
-bucket (the manifest last), put the catalog items the reindex would build into the active
-table, write the dataset page, rewrite the catalog file search reads and the sitemap, and
-finish. With the DOI module on, after the page the version's DOI is registered with DataCite, its
-address written to `archive:identifier`, and the catalog items and pages rewritten to show it; a
-DataCite failure after the step's retries alerts and the publish finishes without a DOI.
+Publish is a series of steps, each safe to repeat: claim the dataset's next version in the
+active catalog (`claimedBy` on the dataset item, which leaves `currentVersion` alone), fill in
+the manifest and regenerate its README and checksums, copy the files to the archive bucket (the
+manifest last), put the catalog items the reindex would build into the active table (the
+dataset item last, which moves `currentVersion` and drops the claim), write the dataset page,
+rewrite the catalog file search reads and the sitemap, and finish. Readers get the version
+before until the catalog step ends; a publish that fails before then releases its claim and
+removes what it wrote of the version, so the live dataset is as it was. With the DOI module
+on, after the page the version's DOI is registered with DataCite, its address written to
+`archive:identifier`, and the catalog items and pages rewritten to show it; a DataCite failure
+after the step's retries alerts and the publish finishes without a DOI.
 """
 
 from __future__ import annotations
@@ -61,7 +65,8 @@ from archive_backend.catalog_file import write_catalog_file
 from archive_backend.config import read_archive_config
 from archive_backend.embeddings import Bedrock, with_embedding
 from archive_backend.lifecycle import home_prefix
-from archive_backend.reindex import catalog_items, dataset_item, withdrawal_of
+from archive_backend.reindex import PREFIXES, catalog_items, dataset_item, withdrawal_of
+from archive_backend.reindex import _sk as version_key
 from archive_backend.sitemap import write_sitemap
 from archive_backend.submissions import Table, put_event, stored_policy
 from archive_contract import SubmissionFacts, match, reminder_schedule
@@ -86,6 +91,8 @@ DELETE_BATCH = 1000
 README = "README.md"
 CHECKSUMS = "checksums.sha256"
 CATALOG_BATCH = 25
+CATALOG_TRIES = 5
+REFUSED = "ConditionalCheckFailedException"
 SUFFIX = 6
 SLUG_LENGTH = 60
 CHUNK = 1024 * 1024
@@ -114,6 +121,9 @@ class DynamoDB(Protocol):
 
     def get_item(self, **kwargs: Any) -> dict[str, Any]: ...
     def update_item(self, **kwargs: Any) -> dict[str, Any]: ...
+    def put_item(self, **kwargs: Any) -> dict[str, Any]: ...
+    def delete_item(self, **kwargs: Any) -> dict[str, Any]: ...
+    def query(self, **kwargs: Any) -> dict[str, Any]: ...
     def batch_write_item(self, **kwargs: Any) -> dict[str, Any]: ...
     def scan(self, **kwargs: Any) -> dict[str, Any]: ...
 
@@ -235,15 +245,15 @@ def _incoming(sid: str, round: int, path: str) -> str:
     return f"incoming/{sid}/{round}/{path}"
 
 
-def _delete_prefix(c: Clients, env: Env, prefix: str) -> None:
+def _delete_prefix(c: Clients, env: Env, prefix: str, bucket: str | None = None) -> None:
+    """Delete every object under the prefix, in the staging bucket unless another is named."""
+    bucket = bucket or env.staging_bucket
     keys: list[str] = []
-    for page in c.s3.get_paginator("list_objects_v2").paginate(
-        Bucket=env.staging_bucket, Prefix=prefix
-    ):
+    for page in c.s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
         keys.extend(item["Key"] for item in page.get("Contents", []))
     for i in range(0, len(keys), DELETE_BATCH):
         c.s3.delete_objects(
-            Bucket=env.staging_bucket,
+            Bucket=bucket,
             Delete={"Objects": [{"Key": k} for k in keys[i : i + DELETE_BATCH]], "Quiet": True},
         )
 
@@ -581,40 +591,130 @@ def _meta(c: Clients, table: str, dataset_id: str) -> dict[str, Any] | None:
     return item
 
 
-def _claim(c: Clients, table: str, dataset_id: str, version: int, sid: str) -> None:
-    """Claim the version on the dataset item, so no other publish takes the same one.
+def _refused(error: ClientError) -> bool:
+    return bool(error.response["Error"]["Code"] == REFUSED)
 
-    The catalog step's put of the whole dataset item replaces it, dropping `claimedBy`.
+
+def _claim(
+    c: Clients, table: str, dataset_id: str, version: int, sid: str, holder: str | None = None
+) -> None:
+    """Claim the version on the dataset item, so no other publish takes the same one; with a
+    `holder`, take the claim over from that submission.
+
+    The claim is `claimedBy` alone: `currentVersion` moves in the catalog step, whose put of the
+    whole dataset item also drops the claim. A first version's claim is an item with no
+    `currentVersion`, which every reader takes as no dataset.
     """
-    values = {":v": {"N": str(version)}, ":sid": {"S": sid}}
+    values = {":sid": {"S": sid}}
     if version == 1:
-        condition = "attribute_not_exists(PK)"
+        live = "attribute_not_exists(currentVersion)"
     else:
-        condition = "currentVersion = :prev"
+        live = "currentVersion = :prev"
         values[":prev"] = {"N": str(version - 1)}
+    if holder is None:
+        free = "attribute_not_exists(claimedBy)"
+    else:
+        free = "claimedBy = :holder"
+        values[":holder"] = {"S": holder}
     try:
         c.dynamodb.update_item(
             TableName=table,
             Key=_meta_key(dataset_id),
-            UpdateExpression="SET currentVersion = :v, claimedBy = :sid",
-            ConditionExpression=condition,
+            UpdateExpression="SET claimedBy = :sid",
+            ConditionExpression=f"{live} AND {free}",
             ExpressionAttributeValues=values,
         )
     except ClientError as error:
-        if error.response["Error"]["Code"] != "ConditionalCheckFailedException":
+        if not _refused(error):
             raise
         raise PublishConflict(
             f"version {version} of dataset {dataset_id} was taken by another publish"
         ) from None
 
 
+def _live_version(meta: dict[str, Any] | None) -> int | None:
+    """The dataset's live version; None for no item and for a first version's claim."""
+    if meta is None or "currentVersion" not in meta:
+        return None
+    return int(meta["currentVersion"]["N"])
+
+
+def _clear_version(c: Clients, env: Env, table: str, dataset_id: str, version: int) -> None:
+    """Remove what a publish left of a version that never went live: its version and file items
+    in the catalog and its folder in the archive bucket. Only ever called by the holder of the
+    claim on that version, which is what says the version is not live. The bucket is versioned,
+    so each delete adds a delete marker and the stored bytes stay."""
+    query: dict[str, Any] = {
+        "TableName": table,
+        "KeyConditionExpression": "PK = :pk AND begins_with(SK, :sk)",
+        "ExpressionAttributeValues": {
+            ":pk": {"S": f"DATASET#{dataset_id}"},
+            ":sk": {"S": version_key(version)},
+        },
+        "ProjectionExpression": "PK, SK",
+    }
+    keys: list[dict[str, Any]] = []
+    while True:
+        page = c.dynamodb.query(**query)
+        keys.extend({"PK": item["PK"], "SK": item["SK"]} for item in page.get("Items", []))
+        last = page.get("LastEvaluatedKey")
+        if not last:
+            break
+        query["ExclusiveStartKey"] = last
+    _write(c, table, [{"DeleteRequest": {"Key": key}} for key in keys])
+    for prefix in PREFIXES:
+        _delete_prefix(c, env, f"{prefix}/{dataset_id}/{version}/", env.archive_bucket)
+
+
+def _active_table(c: Clients, env: Env) -> str:
+    active = c.ssm.get_parameter(Name=env.active_catalog_parameter)["Parameter"]["Value"]
+    return env.catalog_table_a if active == "A" else env.catalog_table_b
+
+
+def _release(c: Clients, env: Env, sid: str, item: dict[str, Any]) -> None:
+    """Give up the submission's claim, if it holds one, after removing what it wrote of the
+    claimed version; a first version's claim-only item is deleted. A submission that holds no
+    claim (it never claimed, or its version went live) changes nothing."""
+    dataset_id = item.get("datasetId")
+    if not dataset_id:
+        return
+    dataset_id = str(dataset_id)
+    table = _active_table(c, env)
+    meta = _meta(c, table, dataset_id)
+    if meta is None or meta.get("claimedBy") != {"S": sid}:
+        return
+    live = _live_version(meta)
+    _clear_version(c, env, table, dataset_id, (live or 0) + 1)
+    held: dict[str, Any] = {
+        "TableName": table,
+        "Key": _meta_key(dataset_id),
+        "ExpressionAttributeValues": {":sid": {"S": sid}},
+    }
+    try:
+        if live is None:
+            c.dynamodb.delete_item(
+                ConditionExpression="claimedBy = :sid AND attribute_not_exists(currentVersion)",
+                **held,
+            )
+        else:
+            c.dynamodb.update_item(
+                UpdateExpression="REMOVE claimedBy",
+                ConditionExpression="claimedBy = :sid AND attribute_exists(currentVersion)",
+                **held,
+            )
+    except ClientError as error:
+        # Refused: the claim is no longer this submission's, so there is nothing to release.
+        if not _refused(error):
+            raise
+
+
 @durable_step
 def _version(_: StepContext, c: Clients, env: Env, sid: str) -> dict[str, Any]:
     """The dataset id (minted from the title when none was given) and its next version, read
-    from the active catalog table and claimed there."""
+    from the active catalog table and claimed there. A claim left by a submission that failed
+    is taken over, and what that publish left of the version is removed."""
     item = _submission(c, sid)
-    active = c.ssm.get_parameter(Name=env.active_catalog_parameter)["Parameter"]["Value"]
-    table = env.catalog_table_a if active == "A" else env.catalog_table_b
+    table = _active_table(c, env)
     dataset_id = item.get("datasetId")
     if not dataset_id:
         manifest = json.loads(_read(c, env.staging_bucket, _held(sid, MANIFEST)))
@@ -623,15 +723,25 @@ def _version(_: StepContext, c: Clients, env: Env, sid: str) -> dict[str, Any]:
         _set(c, sid, {"datasetId": dataset_id})
     dataset_id = str(dataset_id)
     meta = _meta(c, table, dataset_id)
-    if meta is not None and meta.get("claimedBy") == {"S": sid}:
-        # This step's own claim, from a try that failed after it.
-        version = int(meta["currentVersion"]["N"])
-    else:
-        if bool(item.get("newVersion")) != (meta is not None):
-            state = "is not" if meta is None else "already is"
-            raise PublishConflict(f"dataset {dataset_id} {state} in the catalog")
-        version = int(meta["currentVersion"]["N"]) + 1 if meta is not None else 1
-        _claim(c, table, dataset_id, version, sid)
+    live = _live_version(meta)
+    if bool(item.get("newVersion")) != (live is not None):
+        state = "is not" if live is None else "already is"
+        raise PublishConflict(f"dataset {dataset_id} {state} in the catalog")
+    version = (live or 0) + 1
+    holder = (meta or {}).get("claimedBy", {}).get("S")
+    # A claim that is already this submission's is this step's own, from a try that failed.
+    if holder != sid:
+        if holder is not None:
+            other = c.submissions.get_item(Key={"submissionId": holder}).get("Item") or {}
+            if other.get("status") != "failed":
+                raise PublishConflict(
+                    f"dataset {dataset_id} is being published by submission {holder}"
+                )
+        _claim(c, table, dataset_id, version, sid, holder)
+    if holder is not None:
+        # Taken over, or this step's retry of a takeover: the failed publish's leftovers go
+        # before this one copies anything.
+        _clear_version(c, env, table, dataset_id, version)
     _set(c, sid, {"datasetId": dataset_id, "status": "publishing"})
     return {"datasetId": dataset_id, "version": version, "table": table}
 
@@ -722,40 +832,83 @@ def _copy(
     return len(paths)
 
 
-def _write_items(c: Clients, table: str, items: list[dict[str, Any]]) -> None:
-    for i in range(0, len(items), CATALOG_BATCH):
-        requests: dict[str, Any] = {
-            table: [{"PutRequest": {"Item": item}} for item in items[i : i + CATALOG_BATCH]]
-        }
+def _write(c: Clients, table: str, requests: list[dict[str, Any]]) -> None:
+    """Batch-write the put and delete requests, sending again whatever DynamoDB left out."""
+    for i in range(0, len(requests), CATALOG_BATCH):
+        left: dict[str, Any] = {table: requests[i : i + CATALOG_BATCH]}
         attempt = 0
-        while requests:
+        while left:
             if attempt:
                 time.sleep(min(0.05 * 2**attempt, 5))
-            requests = c.dynamodb.batch_write_item(RequestItems=requests).get(
-                "UnprocessedItems", {}
-            )
+            left = c.dynamodb.batch_write_item(RequestItems=left).get("UnprocessedItems", {})
             attempt += 1
+
+
+def _write_items(c: Clients, table: str, items: list[dict[str, Any]]) -> None:
+    _write(c, table, [{"PutRequest": {"Item": item}} for item in items])
 
 
 @durable_step
 def _catalog(
-    _: StepContext, c: Clients, env: Env, target: dict[str, Any], filled: dict[str, Any]
+    _: StepContext,
+    c: Clients,
+    env: Env,
+    sid: str,
+    target: dict[str, Any],
+    filled: dict[str, Any],
 ) -> int:
-    """The version, file and dataset items, built as the reindex builds them."""
+    """The version, file and dataset items, built as the reindex builds them. The dataset item
+    goes last and alone, in the one write that moves `currentVersion` and drops the claim: it
+    is refused unless this submission holds the claim, or the version is already live (this
+    step's own retry, and the DOI path's second run, which keeps a later publish's claim)."""
     dataset_id, version, prefix = target["datasetId"], int(target["version"]), filled["prefix"]
+    table = target["table"]
     text = _read(c, env.archive_bucket, _root(filled, target) + MANIFEST).decode("utf-8")
     manifest = json.loads(text)
     items = catalog_items(prefix, dataset_id, version, text)
-    # A new version of a withdrawn dataset stays withdrawn: the put replaces the dataset item.
-    withdrawn = withdrawal_of(_meta(c, target["table"], dataset_id))
-    item = dataset_item(dataset_id, [(prefix, version, manifest)], withdrawn)
+    _write_items(c, table, items)
     infrastructure = read_archive_config(c.ssm, env.archive_config_parameter).infrastructure
+    embedding: dict[str, Any] | None = None
     if infrastructure is not None and infrastructure.modules.embeddings is not None:
         # Set before the put, so no later write can drop it.
-        item = with_embedding(item, manifest, c.bedrock)
-    items.append(item)
-    _write_items(c, target["table"], items)
-    return len(items)
+        embedding = with_embedding({}, manifest, c.bedrock)
+    lost = PublishConflict(
+        f"the claim on dataset {dataset_id} was lost before version {version} went live"
+    )
+    for _try in range(CATALOG_TRIES):
+        meta = _meta(c, table, dataset_id) or {}
+        # A new version of a withdrawn dataset stays withdrawn: the put replaces the dataset item.
+        item = dataset_item(dataset_id, [(prefix, version, manifest)], withdrawal_of(meta))
+        item |= embedding or {}
+        values: dict[str, Any] = {":sid": {"S": sid}, ":v": {"N": str(version)}}
+        held, withdrawn = meta.get("claimedBy"), meta.get("withdrawn")
+        if held is not None and held != {"S": sid}:
+            # A later publish claimed after this version went live: its claim stays.
+            item["claimedBy"] = values[":held"] = held
+            live = "currentVersion = :v AND claimedBy = :held"
+        else:
+            live = "currentVersion = :v AND attribute_not_exists(claimedBy)"
+        # A withdrawal that landed since the read above must not be written over.
+        if withdrawn is None:
+            same = "attribute_not_exists(withdrawn)"
+        else:
+            same = "withdrawn = :withdrawn"
+            values[":withdrawn"] = withdrawn
+        try:
+            c.dynamodb.put_item(
+                TableName=table,
+                Item=item,
+                ConditionExpression=f"(claimedBy = :sid OR ({live})) AND {same}",
+                ExpressionAttributeValues=values,
+            )
+        except ClientError as error:
+            if not _refused(error):
+                raise
+            if (_meta(c, table, dataset_id) or {}).get("withdrawn") == withdrawn:
+                raise lost from None
+            continue
+        return len(items) + 1
+    raise lost
 
 
 @durable_step
@@ -873,6 +1026,7 @@ def _register_doi(
     context: DurableContext,
     c: Clients,
     env: Env,
+    sid: str,
     target: dict[str, Any],
     filled: dict[str, Any],
     name: Callable[[str], str],
@@ -890,7 +1044,7 @@ def _register_doi(
     address = found["address"]
     try:
         context.step(_doi_identifier(c, env, target, filled, address), name=name("doi-identifier"))
-        context.step(_catalog(c, env, target, filled), name=name("doi-catalog"))
+        context.step(_catalog(c, env, sid, target, filled), name=name("doi-catalog"))
         context.step(_page(c, env, target, filled), name=name("doi-page"))
     except Exception as error:
         failed = str(error) or type(error).__name__
@@ -932,10 +1086,10 @@ def publish(
     target = context.step(_version(c, env, sid), name=name("version"))
     filled = context.step(_fill(c, env, sid, target), name=name("fill"))
     context.step(_copy(c, env, sid, target, filled), name=name("copy"))
-    context.step(_catalog(c, env, target, filled), name=name("catalog"))
+    context.step(_catalog(c, env, sid, target, filled), name=name("catalog"))
     context.step(_page(c, env, target, filled), name=name("page"))
     if filled.get("dois"):
-        _register_doi(context, c, env, target, filled, name)
+        _register_doi(context, c, env, sid, target, filled, name)
     context.step(_catalog_file(c, env, target), name=name("catalog-file"))
     context.step(_sitemap(c, env, target), name=name("sitemap"))
     context.step(_finish(c, env, sid, round, rule, target), name=name("finish"))
@@ -944,9 +1098,13 @@ def publish(
 
 @durable_step
 def _fail(_: StepContext, c: Clients, env: Env, sid: str, error: str) -> None:
+    """End the submission as `failed`, release its claim on a version that never went live,
+    removing what it wrote of that version, and alert the admins."""
     item = _submission(c, sid)
     round = int(item.get("round") or 1)
     _set(c, sid, {"status": "failed"}, remove=("callbackId",))
+    # After the status: a later publish may take over the claim of a submission that failed.
+    _release(c, env, sid, item)
     put_event(c.reviews, sid, "failed", PIPELINE, round, error=error[:1000])
     _alert(
         c,

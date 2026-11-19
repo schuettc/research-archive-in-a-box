@@ -118,6 +118,12 @@ export class Ingest extends Construct {
         StringLike: { "s3:prefix": ["open/*", "restricted/*"] },
       }),
     );
+    // A publish that fails before its version is live hides the folder it copied, and a later
+    // publish that takes over its claim does the same. The bucket is versioned, so the delete
+    // adds a delete marker: no right to delete a version or to bypass Object Lock.
+    fn.addToRolePolicy(
+      allow(["s3:DeleteObject"], objects(archive.archiveBucket, "open/", "restricted/")),
+    );
     fn.addToRolePolicy(allow(["s3:PutObject"], objects(archive.derivedBucket, "site/datasets/")));
     // Publish's catalog-file and sitemap steps rewrite the catalog file search reads and the
     // sitemap robots.txt names.
@@ -133,13 +139,18 @@ export class Ingest extends Construct {
     archive.submissions.grant(fn, "dynamodb:GetItem", "dynamodb:UpdateItem");
     archive.reviews.grant(fn, "dynamodb:PutItem");
     archive.settings.grant(fn, "dynamodb:GetItem");
-    // Publish claims its version with a conditional update of the dataset item, and its
-    // catalog-file step scans the active table for every row.
+    // Publish claims its version with a conditional update of the dataset item, and its catalog
+    // step moves currentVersion with a conditional put of it. A publish that fails deletes the
+    // claim-only item of a first version, and the version's items, which it finds by a query.
+    // The catalog-file step scans the active table for every row.
     for (const table of catalogTables) {
       table.grant(
         fn,
         "dynamodb:GetItem",
         "dynamodb:UpdateItem",
+        "dynamodb:PutItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Query",
         "dynamodb:BatchWriteItem",
         "dynamodb:Scan",
       );

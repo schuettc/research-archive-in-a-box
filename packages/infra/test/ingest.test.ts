@@ -371,6 +371,35 @@ test("the ingest may claim a version on either catalog table with a conditional 
   }
 });
 
+test("the ingest may put and delete the dataset item it claims", () => {
+  // The catalog step's conditional put moves currentVersion; a failed first version's claim is
+  // deleted; a failed version's items are found by a query of its dataset.
+  for (const action of ["dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:Query"]) {
+    const allowed = statements(INGEST).filter((s) => actions(s).includes(action));
+    const resources = JSON.stringify(allowed.map((s) => s.Resource));
+
+    for (const table of [archive.catalogTables.a, archive.catalogTables.b]) {
+      expect(resources).toContain(stack.getLogicalId(table.node.defaultChild as CfnBucket));
+    }
+  }
+});
+
+test("the ingest may delete only under the archive's open/ and restricted/, and no object version", () => {
+  const archiveId = logicalId(archive.archiveBucket);
+  const all = statements(INGEST).filter((s) => JSON.stringify(s.Resource).includes(archiveId));
+  const deletes = all.filter((s) => actions(s).includes("s3:DeleteObject"));
+
+  expect(deletes).toHaveLength(1);
+  expect(actions(deletes[0]!)).toEqual(["s3:DeleteObject"]);
+  const resources = JSON.stringify(deletes[0]!.Resource);
+  expect(resources.match(/"\/[^"]*"/g)?.sort()).toEqual(['"/open/*"', '"/restricted/*"']);
+  // A delete adds a delete marker; the stored version and its Object Lock retention stay.
+  const granted = all.flatMap(actions);
+  expect(granted).not.toContain("s3:DeleteObjectVersion");
+  expect(granted).not.toContain("s3:BypassGovernanceRetention");
+  expect(granted.filter((a) => a.includes("*"))).toEqual([]);
+});
+
 test("the ingest may scan either catalog table, to rewrite the catalog file at publish", () => {
   const scans = statements(INGEST).filter((s) => actions(s).includes("dynamodb:Scan"));
   const resources = JSON.stringify(scans.map((s) => s.Resource));

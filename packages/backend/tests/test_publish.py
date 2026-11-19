@@ -14,7 +14,7 @@ import pytest
 from aws_durable_execution_sdk_python import DurableContext
 from botocore.exceptions import ClientError
 
-from archive_backend import doi, ingest, pages, reindex, submissions
+from archive_backend import api, doi, ingest, pages, reindex, submissions
 from archive_backend.embeddings import Bedrock
 from archive_backend.ingest import Clients, Env
 from archive_contract.exports.readme import render_readme
@@ -30,6 +30,8 @@ DERIVED = "derived"
 CONFIG = "/research-archive/test/archive-config"
 ACTIVE = "/research-archive/test/catalog-active"
 DOMAIN = "d111.cloudfront.net"
+SITE = "/research-archive/test/site-domain"
+COUNTS = "download-counts"
 ENV = Env(
     submissions_table="submissions",
     reviews_table="reviews",
@@ -72,11 +74,14 @@ class FakeS3:
     def __init__(self) -> None:
         self.objects: dict[tuple[str, str], bytes] = {}
         self.puts: list[dict[str, Any]] = []
+        self.fail_put: Callable[[str, str], bool] = lambda bucket, key: False
 
     def get_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:
         return {"Body": io.BytesIO(self.objects[(Bucket, Key)])}
 
     def put_object(self, *, Bucket: str, Key: str, Body: Any, **extra: Any) -> dict[str, Any]:
+        if self.fail_put(Bucket, Key):
+            raise RuntimeError(f"put of {Key} refused")
         body = Body.read() if hasattr(Body, "read") else Body
         body = body.encode() if isinstance(body, str) else body
         if "ChecksumSHA256" in extra:
@@ -121,12 +126,36 @@ class FakeDynamoDB:
         }
         self.stale: dict[str, dict[tuple[str, str], dict[str, Any]]] | None = None
         self.writes: list[tuple[str, str]] = []
+        self.before_put: Callable[[], None] | None = None
 
     def get_item(self, *, TableName: str, Key: dict[str, Any]) -> dict[str, Any]:
         # A stale snapshot answers one read, as a publish that read before another wrote.
         tables, self.stale = self.stale or self.tables, None
         item = tables[TableName].get((Key["PK"]["S"], Key["SK"]["S"]))
         return {"Item": item} if item else {}
+
+    @staticmethod
+    def _holds(condition: str, item: dict[str, Any] | None, values: dict[str, Any]) -> bool:
+        """`attribute_exists(a)`, `attribute_not_exists(a)` and `a = :x`, joined by AND, OR and
+        brackets."""
+        item = item or {}
+        text = re.sub(
+            r"attribute_(not_)?exists\((\w+)\)",
+            lambda m: str((m[2] in item) != bool(m[1])),
+            condition,
+        )
+        text = re.sub(r"(\w+) = (:\w+)", lambda m: str(item.get(m[1]) == values[m[2]]), text)
+        text = text.replace("AND", "and").replace("OR", "or")
+        assert re.fullmatch(r"[TrueFalsandor() ]+", text), condition
+        return bool(eval(text))
+
+    def _check(
+        self, operation: str, table: str, key: tuple[str, str], condition: str, values: Any
+    ) -> None:
+        if not self._holds(condition, self.tables[table].get(key), values):
+            raise ClientError(
+                {"Error": {"Code": "ConditionalCheckFailedException", "Message": "no"}}, operation
+            )
 
     def update_item(
         self,
@@ -137,32 +166,86 @@ class FakeDynamoDB:
         ConditionExpression: str,
         ExpressionAttributeValues: dict[str, Any],
     ) -> dict[str, Any]:
-        """Only the `SET a = :x, ...` updates, under `attribute_not_exists(PK)` or `a = :x`."""
+        """`SET a = :x, ...` or `REMOVE a`, under a condition."""
         key = (Key["PK"]["S"], Key["SK"]["S"])
         self.writes.append(("update", key[0]))
-        current = self.tables[TableName].get(key)
-        if ConditionExpression == "attribute_not_exists(PK)":
-            holds = current is None
-        else:
-            name, value = (part.strip() for part in ConditionExpression.split("="))
-            holds = current is not None and current.get(name) == ExpressionAttributeValues[value]
-        if not holds:
-            raise ClientError(
-                {"Error": {"Code": "ConditionalCheckFailedException", "Message": "no"}},
-                "UpdateItem",
-            )
-        item = current if current is not None else dict(Key)
+        self._check("UpdateItem", TableName, key, ConditionExpression, ExpressionAttributeValues)
+        item = self.tables[TableName].setdefault(key, dict(Key))
+        if UpdateExpression.startswith("REMOVE "):
+            item.pop(UpdateExpression[7:].strip(), None)
+            return {}
         assert UpdateExpression.startswith("SET ")
         for assignment in UpdateExpression[4:].split(","):
             name, value = (part.strip() for part in assignment.split("="))
             item[name] = ExpressionAttributeValues[value]
-        self.tables[TableName][key] = item
         return {}
+
+    def put_item(
+        self,
+        *,
+        TableName: str,
+        Item: dict[str, Any],
+        ConditionExpression: str,
+        ExpressionAttributeValues: dict[str, Any],
+    ) -> dict[str, Any]:
+        key = (Item["PK"]["S"], Item["SK"]["S"])
+        if self.before_put:
+            hook, self.before_put = self.before_put, None
+            hook()
+        self._check("PutItem", TableName, key, ConditionExpression, ExpressionAttributeValues)
+        self.writes.append(("put", key[0]))
+        self.tables[TableName][key] = Item
+        return {}
+
+    def delete_item(
+        self,
+        *,
+        TableName: str,
+        Key: dict[str, Any],
+        ConditionExpression: str,
+        ExpressionAttributeValues: dict[str, Any],
+    ) -> dict[str, Any]:
+        key = (Key["PK"]["S"], Key["SK"]["S"])
+        self._check("DeleteItem", TableName, key, ConditionExpression, ExpressionAttributeValues)
+        del self.tables[TableName][key]
+        return {}
+
+    def query(
+        self,
+        *,
+        TableName: str,
+        KeyConditionExpression: str,
+        ExpressionAttributeValues: dict[str, Any],
+        **page: Any,
+    ) -> dict[str, Any]:
+        """A partition's items whose sort key begins with `:sk`, two per page; no downloads
+        have been counted."""
+        if TableName == COUNTS:
+            return {"Items": []}
+        assert KeyConditionExpression == "PK = :pk AND begins_with(SK, :sk)"
+        pk, sk = ExpressionAttributeValues[":pk"]["S"], ExpressionAttributeValues[":sk"]["S"]
+        rows = [
+            item
+            for (p, k), item in sorted(self.tables[TableName].items())
+            if p == pk and k.startswith(sk)
+        ]
+        if "FilterExpression" in page:
+            assert page["FilterExpression"] == "attribute_exists(#v)"
+            rows = [row for row in rows if page["ExpressionAttributeNames"]["#v"] in row]
+        start = page.get("ExclusiveStartKey", {}).get("n", 0)
+        answer: dict[str, Any] = {"Items": rows[start : start + 2]}
+        if start + 2 < len(rows):
+            answer["LastEvaluatedKey"] = {"n": start + 2}
+        return answer
 
     def batch_write_item(self, *, RequestItems: dict[str, Any]) -> dict[str, Any]:
         for table, requests in RequestItems.items():
             assert len(requests) <= 25
             for request in requests:
+                if "DeleteRequest" in request:
+                    key = request["DeleteRequest"]["Key"]
+                    self.tables[table].pop((key["PK"]["S"], key["SK"]["S"]), None)
+                    continue
                 item = request["PutRequest"]["Item"]
                 self.writes.append(("put", item["PK"]["S"]))
                 self.tables[table][(item["PK"]["S"], item["SK"]["S"])] = item
@@ -214,6 +297,8 @@ class FakeSSM:
     def get_parameter(self, *, Name: str) -> dict[str, Any]:
         if Name == ACTIVE:
             return {"Parameter": {"Value": self.active}}
+        if Name == SITE:
+            return {"Parameter": {"Value": DOMAIN}}
         assert Name == CONFIG
         return {"Parameter": {"Value": json.dumps(self.config)}}
 
@@ -270,6 +355,7 @@ class World:
         )
         monkeypatch.setattr(ingest, "_clock", lambda: self.now)
         monkeypatch.setattr(doi, "client", lambda ssm, settings: self.datacite)
+        self.monkeypatch = monkeypatch
 
     def hold(self, sid: str, files: dict[str, bytes], **record: Any) -> None:
         self.submissions.items[sid] = {
@@ -288,6 +374,47 @@ class World:
         """The version step alone."""
         target: dict[str, Any] = ingest._version(self.clients, ENV, sid)(None)  # type: ignore[arg-type]
         return target
+
+    def fail(self, sid: str, error: str) -> None:
+        """The fail step alone, as `run` calls it when a step has failed for good."""
+        ingest._fail(self.clients, ENV, sid, error)(None)  # type: ignore[arg-type]
+
+    def catalog(self, sid: str, target: dict[str, Any], prefix: str = "open") -> None:
+        """The catalog step alone, for a version whose files are in the archive bucket."""
+        filled = {"prefix": prefix}
+        ingest._catalog(self.clients, ENV, sid, target, filled)(None)  # type: ignore[arg-type]
+
+    def read(self, path: str, query: dict[str, str] | None = None) -> tuple[int, Any]:
+        """A GET of the read API over the same catalog tables, with no one signed in."""
+        readers = api.Clients(
+            s3=cast(Any, self.s3),
+            dynamodb=cast(api.DynamoDB, self.dynamodb),
+            ssm=cast(api.SSM, self.ssm),
+            bedrock=cast(Bedrock, self.bedrock),
+            cognito=cast(Any, None),
+        )
+        self.monkeypatch.setattr(api, "clients", lambda: readers)
+        self.monkeypatch.setenv("ACTIVE_CATALOG_PARAMETER", ACTIVE)
+        self.monkeypatch.setenv("CATALOG_TABLE_A", "catalog-a")
+        self.monkeypatch.setenv("CATALOG_TABLE_B", "catalog-b")
+        self.monkeypatch.setenv("SITE_DOMAIN_PARAMETER", SITE)
+        self.monkeypatch.setenv("DOWNLOAD_COUNTS_TABLE", COUNTS)
+        api.reset_caches()
+        event: dict[str, Any] = {
+            "resource": path,
+            "path": path,
+            "httpMethod": "GET",
+            "headers": {},
+            "multiValueHeaders": {},
+            "queryStringParameters": query,
+            "multiValueQueryStringParameters": {k: [v] for k, v in (query or {}).items()} or None,
+            "pathParameters": None,
+            "body": None,
+            "isBase64Encoded": False,
+            "requestContext": {"stage": "prod", "path": path},
+        }
+        response = api.handler(event, cast(Any, None))
+        return int(response["statusCode"]), json.loads(response["body"])
 
     def race(self, first: str, second: str) -> dict[str, Any]:
         """Both version steps read the catalog, then `first` claims, then `second`."""
@@ -557,7 +684,8 @@ def test_a_retried_version_step_keeps_its_own_claim(world: World) -> None:
     again = world.version(SID)
 
     assert again == first
-    assert world.table()[(f"DATASET#{first['datasetId']}", "META")]["claimedBy"] == {"S": SID}
+    claim = world.table()[(f"DATASET#{first['datasetId']}", "META")]
+    assert claim["claimedBy"] == {"S": SID} and "currentVersion" not in claim
     world.publish()
     meta = world.table()[(f"DATASET#{first['datasetId']}", "META")]
     assert meta["currentVersion"] == {"N": "1"} and "claimedBy" not in meta
@@ -747,3 +875,216 @@ def test_a_taken_doi_alerts_and_is_not_overwritten(world: World) -> None:
     assert DOI_NAME in alert["Message"] and "https://other.example/" in alert["Message"]
     manifest = _manifest(world, "open/stream/1/datapackage.json")
     assert manifest["archive:identifier"] == f"https://{DOMAIN}/datasets/stream/v1"
+
+
+META = ("DATASET#stream", "META")
+
+
+def _two_versions_claimed(world: World) -> dict[str, Any]:
+    """`stream` live at version 1 by sub-a, and version 2 claimed by sub-b; sub-b's target."""
+    world.hold("sub-a", _package(), datasetId="stream")
+    world.publish("sub-a")
+    world.hold("sub-b", _package(), datasetId="stream", newVersion=True)
+    return world.version("sub-b")
+
+
+def test_the_claim_leaves_current_version_alone(world: World) -> None:
+    _two_versions_claimed(world)
+
+    meta = world.table()[META]
+    assert meta["currentVersion"] == {"N": "1"} and meta["claimedBy"] == {"S": "sub-b"}
+    assert ("DATASET#stream", "V#000002") not in world.table()
+
+
+def test_the_dataset_reads_as_version_1_while_version_2_is_being_published(world: World) -> None:
+    _two_versions_claimed(world)
+
+    status, body = world.read("/api/datasets/stream")
+
+    assert status == 200
+    assert (body["currentVersion"], body["manifest"]["version"]) == (1, "1")
+
+
+def test_a_first_version_claim_is_an_item_with_no_current_version(world: World) -> None:
+    world.hold(SID, _package(), datasetId="stream")
+
+    world.version(SID)
+
+    assert set(world.table()[META]) == {"PK", "SK", "claimedBy"}
+
+
+def test_a_publish_that_fails_after_the_claim_leaves_the_live_dataset_as_it_was(
+    world: World,
+) -> None:
+    world.hold("sub-a", _package(), datasetId="stream")
+    world.publish("sub-a")
+    before = copy.deepcopy(world.table())
+    world.hold("sub-b", _package(), datasetId="stream", newVersion=True)
+    world.s3.fail_put = lambda bucket, key: (bucket, key) == (ARCHIVE, "open/stream/2/README.md")
+
+    with pytest.raises(RuntimeError):
+        world.publish("sub-b")
+    world.fail("sub-b", "put refused")
+
+    assert world.table() == before
+    assert world.submissions.items["sub-b"]["status"] == "failed"
+    assert [e["type"] for e in world.reviews.events] == ["published", "failed"]
+    [alert] = world.sns.messages
+    assert "sub-b" in alert["Subject"]
+
+
+def test_a_failed_first_version_leaves_no_dataset_item(world: World) -> None:
+    world.hold(SID, _package(), datasetId="stream")
+    world.version(SID)
+
+    world.fail(SID, "boom")
+
+    assert META not in world.table()
+
+
+def test_a_later_publish_takes_over_the_claim_of_a_failed_submission(world: World) -> None:
+    _two_versions_claimed(world)
+    world.submissions.items["sub-b"]["status"] = "failed"  # failed, and its release never ran
+    world.hold("sub-c", _package(), datasetId="stream", newVersion=True)
+
+    world.publish("sub-c")
+
+    meta = world.table()[META]
+    assert meta["currentVersion"] == {"N": "2"} and "claimedBy" not in meta
+    assert world.submissions.items["sub-c"]["status"] == "published"
+
+
+def test_a_claim_held_by_a_running_publish_is_not_taken_over(world: World) -> None:
+    _two_versions_claimed(world)
+    world.hold("sub-c", _package(), datasetId="stream", newVersion=True)
+
+    with pytest.raises(ingest.PublishConflict, match="is being published by submission sub-b"):
+        world.publish("sub-c")
+
+    assert world.table()[META]["claimedBy"] == {"S": "sub-b"}
+
+
+def test_the_catalog_step_refuses_when_its_claim_was_taken(world: World) -> None:
+    target = _two_versions_claimed(world)
+    world.s3.objects[(ARCHIVE, "open/stream/2/datapackage.json")] = world.s3.objects[
+        (ARCHIVE, "open/stream/1/datapackage.json")
+    ]
+    world.table()[META]["claimedBy"] = {"S": "sub-x"}
+
+    with pytest.raises(ingest.PublishConflict, match="the claim on dataset stream was lost"):
+        world.catalog("sub-b", target)
+
+    meta = world.table()[META]
+    assert meta["currentVersion"] == {"N": "1"} and meta["claimedBy"] == {"S": "sub-x"}
+
+
+def test_the_doi_paths_second_catalog_run_keeps_a_later_claim(world: World) -> None:
+    _two_versions_claimed(world)
+
+    world.catalog("sub-a", {"datasetId": "stream", "version": 1, "table": "catalog-b"})
+
+    meta = world.table()[META]
+    assert meta["currentVersion"] == {"N": "1"} and meta["claimedBy"] == {"S": "sub-b"}
+
+
+def test_a_withdrawal_during_the_publish_is_kept_when_the_version_goes_live(world: World) -> None:
+    withdrawn = {"S": json.dumps({"at": "2026-11-13T00:00:00Z", "by": "admin-1", "reason": "x"})}
+    target = _two_versions_claimed(world)
+    world.s3.objects[(ARCHIVE, "open/stream/2/datapackage.json")] = world.s3.objects[
+        (ARCHIVE, "open/stream/1/datapackage.json")
+    ]
+    # The withdrawal lands after the catalog step read the dataset item and before its put.
+    world.dynamodb.before_put = lambda: world.table()[META].update(withdrawn=withdrawn)
+
+    world.catalog("sub-b", target)
+
+    meta = world.table()[META]
+    assert meta["currentVersion"] == {"N": "2"} and "claimedBy" not in meta
+    assert json.loads(meta["withdrawn"]["S"]) == json.loads(withdrawn["S"])
+
+
+def _fail_the_catalog_put(world: World) -> None:
+    def refuse() -> None:
+        raise RuntimeError("the dataset item's put was refused")
+
+    world.dynamodb.before_put = refuse
+
+
+def test_a_catalog_step_that_fails_leaves_nothing_of_the_version_in_the_catalog(
+    world: World,
+) -> None:
+    world.hold("sub-a", _package(), datasetId="stream")
+    world.publish("sub-a")
+    before = copy.deepcopy(world.table())
+    world.hold("sub-b", _package(), datasetId="stream", newVersion=True)
+    _fail_the_catalog_put(world)
+
+    with pytest.raises(RuntimeError):
+        world.publish("sub-b")
+    # The version and file items were written before the dataset item's put failed.
+    assert ("DATASET#stream", "V#000002") in world.table()
+    world.fail("sub-b", "put refused")
+
+    assert world.table() == before
+    assert world.read("/api/datasets/stream/versions")[1] == {
+        "versions": [{"version": 1, "prefix": "open", "publishedAt": "2026-11-14T09:30:00Z"}]
+    }
+    assert world.read("/api/datasets/stream/versions/2")[0] == 404
+    link = "/api/datasets/stream/versions/2/download"
+    assert world.read(link, {"path": "data/logger.csv"})[0] == 404
+    link = "/api/datasets/stream/versions/1/download"
+    assert world.read(link, {"path": "data/logger.csv"})[0] == 200
+
+
+def test_a_takeover_publishes_a_version_holding_only_its_own_files(world: World) -> None:
+    world.hold("sub-a", _package(), datasetId="stream")
+    world.publish("sub-a")
+    left = _package()
+    left["data/extra.csv"] = b"a,b\n1,2\n"
+    world.hold("sub-b", left, datasetId="stream", newVersion=True)
+    _fail_the_catalog_put(world)
+    with pytest.raises(RuntimeError):
+        world.publish("sub-b")
+    world.table()[("DATASET#stream", "V#000002#FILE#data/extra.csv")] = {
+        "PK": {"S": "DATASET#stream"},
+        "SK": {"S": "V#000002#FILE#data/extra.csv"},
+        "path": {"S": "data/extra.csv"},
+    }
+    world.submissions.items["sub-b"]["status"] = "failed"  # failed, and its release never ran
+    world.hold("sub-c", _package(), datasetId="stream", newVersion=True)
+
+    world.publish("sub-c")
+
+    assert ("DATASET#stream", "V#000002#FILE#data/extra.csv") not in world.table()
+    stored = [k for k in world.s3.keys(ARCHIVE, "open/stream/2/") if "/_zips/" not in k]
+    assert stored == sorted("open/stream/2/" + p for p in _package())
+
+
+def test_a_publish_that_fails_after_the_copy_hides_the_folder_it_copied(world: World) -> None:
+    world.hold("sub-a", _package(), datasetId="stream")
+    world.publish("sub-a")
+    first = world.s3.keys(ARCHIVE, "open/stream/1/")
+    world.hold("sub-b", _package(), datasetId="stream", newVersion=True)
+    _fail_the_catalog_put(world)
+    with pytest.raises(RuntimeError):
+        world.publish("sub-b")
+    assert "open/stream/2/datapackage.json" in reindex.manifest_keys(cast(Any, world.s3), ARCHIVE)
+
+    world.fail("sub-b", "put refused")
+
+    assert reindex.manifest_keys(cast(Any, world.s3), ARCHIVE) == ["open/stream/1/datapackage.json"]
+    assert world.s3.keys(ARCHIVE, "open/stream/2/") == []
+    assert world.s3.keys(ARCHIVE, "open/stream/1/") == first
+
+
+def test_a_failure_of_a_submission_that_holds_no_claim_deletes_nothing(world: World) -> None:
+    _two_versions_claimed(world)
+    world.hold("sub-c", _package(), datasetId="stream", newVersion=True)
+    world.s3.objects[(ARCHIVE, "open/stream/2/datapackage.json")] = b"{}"
+    table, stored = copy.deepcopy(world.table()), world.s3.keys(ARCHIVE)
+
+    world.fail("sub-c", "boom")
+    world.fail("sub-a", "boom")  # its version is live
+
+    assert world.table() == table
+    assert world.s3.keys(ARCHIVE) == stored
