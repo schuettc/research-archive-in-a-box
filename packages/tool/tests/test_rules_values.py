@@ -197,3 +197,29 @@ def test_an_unreadable_table_is_a_note_and_a_failed_check(tmp_path: Path) -> Non
     assert (finding.severity, finding.target and finding.target.resource) == ("note", "t")
     assert "can't be read" in finding.message and finding.suggested_fix
     assert (len(result.findings), result.checks, result.passed) == (1, 1, 0)
+
+
+def test_placeholder_reads_a_column_named_n(tmp_path: Path) -> None:
+    fields = [{"name": "n", "type": "number"}, {"name": "b", "type": "number"}]
+
+    result = run("values.placeholder", tmp_path, "n,b\n-1,2\n-1,3\n4,5\n", fields)
+
+    assert only(result)[0] == "n" and result.checks == 2
+
+
+def test_working_names_do_not_collide_with_columns_of_the_same_name(tmp_path: Path) -> None:
+    csv = "n,p,k,y\n2020-01-01,2020-01-01,1,1\n01/02/2020,01/02/2020,1,2\n"
+    fields = [{"name": c, "type": "string"} for c in "npky"]
+
+    for rule in ("values.mixed-date-formats", "values.constant"):
+        findings = run(rule, tmp_path, csv, fields).findings
+        assert not any(f.rule_id.endswith("check-failed") for f in findings)
+    dup = run("values.duplicate-key", tmp_path, csv, fields, primary_key=["k"])
+    assert only(dup)[1] == [1, 2]
+
+
+def test_a_column_in_the_readers_namespace_is_unreadable_not_a_failure(tmp_path: Path) -> None:
+    result = run("values.unreadable", tmp_path, "cruise:row\na\n", [{"name": "cruise:row"}])
+
+    assert "names that start with 'cruise:' are kept for the reader" in result.findings[0].message
+    assert result.findings[0].rule_id == "values.unreadable"

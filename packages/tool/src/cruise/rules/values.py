@@ -7,9 +7,9 @@ failed read. Each value rule applies one check per column it looks at.
 | Rule | Catches | Severity |
 | --- | --- | --- |
 | `values.unreadable` | A table resource the value rules can't read (a malformed CSV, a format \
-other than CSV, a path with glob characters), naming the reason. One failed check per such \
-table, so skipped data never raises the score. A table whose files failed the structure check \
-is not reported again. | note |
+other than CSV, a path with glob characters, a column named in the reader's own `cruise:` \
+namespace), naming the reason. One failed check per such table, so skipped data never raises \
+the score. A table whose files failed the structure check is not reported again. | note |
 """
 
 from collections.abc import Iterator
@@ -22,7 +22,7 @@ from archive_contract.fields import Field, TableSchema
 from archive_contract.manifest import SpatialCoverage, TemporalCoverage
 from archive_contract.resources import Resource
 from cruise.rules.registry import EVIDENCE_LIMIT, Context, Outcome, Problem, rule
-from cruise.tables import ROW, quote_identifier, quote_literal, select
+from cruise.tables import ROW, quote_identifier, quote_literal, select, working
 
 PLACEHOLDERS = (-9999, -999, -99, 9999, 99999)
 """Numbers that stand for "no value" in legacy data."""
@@ -189,9 +189,10 @@ def placeholder(ctx: Context) -> Outcome:
         checks += 1
         number = f"TRY_CAST(({_typed(column, value)}) AS DOUBLE)"
         suspects = [float(p) for p in PLACEHOLDERS]
+        n = working("n")
         negatives = select(
             relation,
-            f"SELECT {number} AS n, count(*) FROM t WHERE {number} < 0 GROUP BY n",
+            f"SELECT {number} AS {n}, count(*) FROM t WHERE {number} < 0 GROUP BY {n}",
         )
         others = select(relation, f"SELECT count(*) FROM t WHERE {number} >= 0")[0][0]
         if len(negatives) == 1 and negatives[0][1] > 1 and others:
@@ -272,11 +273,12 @@ def mixed_date_formats(ctx: Context) -> Outcome:
         if column.type not in (None, "string"):
             continue
         checks += 1
+        p = working("pattern")
         found: dict[str, int] = dict(
             select(
                 relation,
-                f"SELECT p, count(*) FROM (SELECT {_pattern(value)} AS p FROM t) "
-                "WHERE p IS NOT NULL GROUP BY p",
+                f"SELECT {p}, count(*) FROM (SELECT {_pattern(value)} AS {p} FROM t) "
+                f"WHERE {p} IS NOT NULL GROUP BY {p}",
             )
         )
         ambiguous_as = _resolve_ambiguous(found)
@@ -362,7 +364,7 @@ def coverage_gap(ctx: Context) -> Outcome:
         checks += 1
         present = {
             int(r[0])
-            for r in select(relation, f"SELECT DISTINCT {_year(column, value)} AS y FROM t")
+            for r in select(relation, f"SELECT DISTINCT {_year(column, value)} FROM t")
             if r[0] is not None
         }
         start = coverage.start
@@ -493,11 +495,12 @@ def duplicate_key(ctx: Context) -> Outcome:
         columns = ", ".join(quote_identifier(n) for n in names)
         present = " AND ".join(f"{quote_identifier(n)} IS NOT NULL" for n in names)
         joined = f"concat_ws(', ', {columns})"
+        k, n = working("key"), working("n")
         found = select(
             relation,
-            f"SELECT {ROW_SQL}, k, count(*) OVER () FROM ("
-            f"SELECT {ROW_SQL}, {joined} AS k, count(*) OVER (PARTITION BY {columns}) AS n "
-            f"FROM t WHERE {present}) WHERE n > 1 ORDER BY {ROW_SQL} LIMIT {EVIDENCE_LIMIT}",
+            f"SELECT {ROW_SQL}, {k}, count(*) OVER () FROM ("
+            f"SELECT {ROW_SQL}, {joined} AS {k}, count(*) OVER (PARTITION BY {columns}) AS {n} "
+            f"FROM t WHERE {present}) WHERE {n} > 1 ORDER BY {ROW_SQL} LIMIT {EVIDENCE_LIMIT}",
         )
         if found:
             label = ", ".join(names)

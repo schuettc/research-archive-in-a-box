@@ -11,9 +11,13 @@ from typing import Any
 import duckdb
 
 from archive_contract.resources import Resource
-from archive_contract.validate import readable_member
+from archive_contract.validate import is_csv_table, readable_member
 
-ROW = "cruise:row"
+RESERVED = "cruise:"
+"""The prefix of every name the reader and the rules give a column of their own. No column of
+a table may start with it, so a working name can never be one of the table's."""
+
+ROW = RESERVED + "row"
 """The column holding each row's 1-based number among the data rows."""
 
 GLOB_CHARACTERS = frozenset("*?[{}")
@@ -39,6 +43,11 @@ def quote_identifier(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
+def working(name: str) -> str:
+    """A working name for a rule's SQL, quoted: one no column of a table can have."""
+    return quote_identifier(RESERVED + name)
+
+
 def quote_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
@@ -58,9 +67,10 @@ def read_table(
 ) -> duckdb.DuckDBPyRelation:
     """A relation over the resource's file, every column as text, with its row number in `ROW`.
 
-    The columns take the schema's field names in order. Only CSV is read.
+    The columns take the schema's field names in order. Only CSV is read: a resource whose
+    format says csv, or that states no format and has a path ending in `.csv`.
     """
-    if (resource.format or "").lower() != "csv":
+    if not is_csv_table(resource):
         raise UnreadableTable(f"{resource.name} is {resource.format!r}; only csv tables are read")
     if not isinstance(resource.path, str) or not readable_member(root, resource.path):
         raise UnreadableTable(f"{resource.name} has no single file inside the package to read")
@@ -72,6 +82,12 @@ def read_table(
     schema = resource.table_schema
     if schema is None or not schema.fields:
         raise UnreadableTable(f"{resource.name} has no schema to read it by")
+    for name in schema.field_names():
+        if name.startswith(RESERVED):
+            raise UnreadableTable(
+                f"{resource.name} has a column named {name!r}; names that start with "
+                f"{RESERVED!r} are kept for the reader"
+            )
     dialect = resource.dialect or {}
     delimiter = str(dialect.get("delimiter", ","))
     quote = str(dialect.get("quoteChar", '"'))
