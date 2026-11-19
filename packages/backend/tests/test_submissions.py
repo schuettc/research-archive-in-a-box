@@ -1296,3 +1296,14 @@ def test_the_submissions_module_imports_no_diagnosis_at_load() -> None:
     code = "import sys, archive_backend.submissions; print('cruise.diagnose' in sys.modules)"
     found = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert found.stdout.strip() == "False"
+
+
+def test_a_claim_only_id_is_a_new_dataset(world: World) -> None:
+    # Another submission's first version being published: the claim, with no currentVersion yet.
+    world.catalog["catalog-b"].put_item(
+        Item={"PK": "DATASET#stream", "SK": "META", "claimedBy": "sub-a"}
+    )
+
+    fresh = world.create("bob", datasetId="stream")
+
+    assert world.submissions.items[(fresh,)]["newVersion"] is False

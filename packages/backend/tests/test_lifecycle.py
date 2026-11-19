@@ -639,3 +639,17 @@ def test_without_dois_in_the_payload_or_the_config_nothing_is_called(
     lifecycle.handler({"datasetId": "ds", "dois": True}, None)
 
     assert dois.calls == []
+
+
+def _claim_only(world: World) -> dict[str, Any]:
+    """A first version being published: the claim, with no currentVersion yet."""
+    claim = {"PK": {"S": "DATASET#stream"}, "SK": {"S": "META"}, "claimedBy": {"S": "sub-a"}}
+    world.dynamodb.tables[TABLE_B][("DATASET#stream", "META")] = dict(claim)
+    return claim
+
+
+def test_the_daily_run_passes_a_claim_only_item_by(world: World) -> None:
+    claim = _claim_only(world)
+
+    assert lifecycle.release(world.clients, world.env, TODAY) == []
+    assert world.meta("stream") == claim

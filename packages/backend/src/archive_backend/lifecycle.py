@@ -427,7 +427,9 @@ def release(c: Clients, env: Env, today: date) -> list[str]:
     due = sorted(
         pk.removeprefix("DATASET#")
         for pk, items in by_dataset.items()
-        if any(item["SK"]["S"] == "META" for item in items) and _drifted(c, env, items, today)
+        # A dataset item with no currentVersion is a first version's claim, and is passed by.
+        if any(item["SK"]["S"] == "META" and "currentVersion" in item for item in items)
+        and _drifted(c, env, items, today)
     )
     failed: list[str] = []
     for dataset_id in due:

@@ -164,3 +164,11 @@ def test_a_withdrawn_dataset_has_no_row() -> None:
     ]
 
     assert [row["id"] for row in catalog_rows(items)] == ["kept"]
+
+
+def test_a_claim_only_item_is_left_out() -> None:
+    claim = {"PK": {"S": "DATASET#stream"}, "SK": {"S": "META"}, "claimedBy": {"S": "sub-a"}}
+
+    assert [row["id"] for row in catalog_rows([*_items("kept", {"title": "Kept"}), claim])] == [
+        "kept"
+    ]

@@ -1275,3 +1275,13 @@ def test_a_public_file_not_yet_released_from_restricted_is_signed_where_it_is(
     assert [p["Params"]["Key"] for p in world.s3.presigned] == [key]
     [count] = world.dynamodb.tables[COUNTS].values()
     assert count["restricted"] == {"N": "1"}
+
+
+def test_a_claim_only_item_is_no_dataset(world: World) -> None:
+    # A first version being published: the claim, with no currentVersion yet.
+    world.dynamodb.load(
+        TABLE_B, [{"PK": {"S": "DATASET#stream"}, "SK": {"S": "META"}, "claimedBy": {"S": "sub-a"}}]
+    )
+
+    for path in ("/api/datasets/stream", "/api/datasets/stream/versions"):
+        assert world.call("GET", path)[0] == 404

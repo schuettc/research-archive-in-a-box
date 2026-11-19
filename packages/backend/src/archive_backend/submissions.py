@@ -386,10 +386,14 @@ def _own(caller: Caller, submission: dict[str, Any]) -> None:
 
 
 def _dataset(c: Clients, env: Env, dataset_id: str) -> dict[str, Any] | None:
+    """The published dataset's item; None for an item with no `currentVersion`, a first
+    version's claim."""
     active = c.ssm.get_parameter(Name=env.active_catalog_parameter)["Parameter"]["Value"]
     table = c.table(env.catalog_tables[active])
     item = table.get_item(Key={"PK": f"DATASET#{dataset_id}", "SK": "META"}).get("Item")
-    return cast(dict[str, Any] | None, item)
+    if item is None or "currentVersion" not in item:
+        return None
+    return cast(dict[str, Any], item)
 
 
 def _published_by(c: Clients, user: str, dataset_id: str) -> bool:

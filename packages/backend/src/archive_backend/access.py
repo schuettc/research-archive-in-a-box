@@ -404,11 +404,14 @@ def _dataset_id(value: str | None) -> str:
 
 
 def _catalog_meta(c: Clients, env: Env, dataset_id: str) -> dict[str, Any] | None:
-    """The dataset's item in the active catalog table, read as the submissions function does."""
+    """The dataset's item in the active catalog table, read as the submissions function does;
+    None for an item with no `currentVersion`, a first version's claim."""
     active = c.ssm.get_parameter(Name=env.active_catalog_parameter)["Parameter"]["Value"]
     table = c.table(env.catalog_tables[active])
     item = table.get_item(Key={"PK": f"DATASET#{dataset_id}", "SK": "META"}).get("Item")
-    return cast(dict[str, Any] | None, item)
+    if item is None or "currentVersion" not in item:
+        return None
+    return cast(dict[str, Any], item)
 
 
 def _access_item(c: Clients, dataset_id: str, user_id: str) -> dict[str, Any] | None:

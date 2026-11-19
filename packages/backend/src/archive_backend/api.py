@@ -338,7 +338,8 @@ def _query(**kwargs: Any) -> list[dict[str, Any]]:
 
 def _meta(table: str, dataset_id: str) -> dict[str, Any]:
     item = _get(table, f"DATASET#{dataset_id}", "META")
-    if item is None:
+    # An item with no currentVersion is a first version's claim: nothing is published yet.
+    if item is None or "currentVersion" not in item:
         raise NotFoundError(f"no dataset {dataset_id}")
     return _plain(item)
 
