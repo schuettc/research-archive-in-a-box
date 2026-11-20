@@ -1,10 +1,14 @@
-"""Publish the sample package on a deployed archive as its admin: `just seed <stage>`.
+"""Publish the sample packages on a deployed archive as its admin: `just seed <stage>`.
 
-It signs in on the archive's own sign-in page in the browser with `archive_client`, creates a
-submission for the package's files, uploads each to its presigned URL, submits it, approves it
-if it goes to review, and waits for it to publish. It prints each new status once, then the
-dataset's URL, or the status with its findings and events and exit 1 when the submission stops
-anywhere else.
+The sample packages are the folders directly under `examples/` that hold a `datapackage.json`;
+`--package <folder>`, which may be given several times, publishes those folders instead.
+
+It signs in once on the archive's own sign-in page in the browser with `archive_client`. Then,
+for each package in turn, it creates a submission for the package's files, uploads each to its
+presigned URL, submits it, approves it if it goes to review, and waits for it to publish. It
+prints each new status once, then the dataset's URL, or the status with its findings and events
+when the submission stops anywhere else; it then goes on to the next package, and exits 1 at
+the end when any package was not published.
 """
 
 from __future__ import annotations
@@ -25,7 +29,8 @@ from archive_client.signin import sign_in as browser_sign_in
 from archive_contract.validate import package_files
 
 ROOT = Path(__file__).resolve().parents[1]
-SAMPLE = ROOT / "examples" / "sample-package"
+EXAMPLES = ROOT / "examples"
+SAMPLE = EXAMPLES / "sample-package"
 POLL_SECONDS = 5.0
 TIMEOUT_SECONDS = 15 * 60.0
 STOPPED = ("needs-changes", "rejected", "failed", "expired", "abandoned")
@@ -50,6 +55,13 @@ def _sha256(path: Path) -> str:
 def _package_files(folder: Path) -> list[Path]:
     """The contract's walk: no `_build/`, no hidden file or folder, no symlink."""
     return [folder / path for path in package_files(folder)[0]]
+
+
+def sample_packages() -> list[Path]:
+    """Every folder directly under `examples/` that holds a manifest, in name order."""
+    return sorted(
+        folder for folder in EXAMPLES.iterdir() if (folder / "datapackage.json").is_file()
+    )
 
 
 def file_list(folder: Path) -> list[dict[str, Any]]:
@@ -184,7 +196,13 @@ def main(
 ) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0] if __doc__ else None)
     parser.add_argument("domain", help="the site's domain, the stack's SiteDomain output")
-    parser.add_argument("--package", type=Path, default=SAMPLE)
+    parser.add_argument(
+        "--package",
+        type=Path,
+        action="append",
+        help="a package folder to publish; may be given several times "
+        "(default: every sample package under examples/)",
+    )
     args = parser.parse_args(argv)
     try:
         print("signing in: finish it on the archive's sign-in page in the browser")
@@ -193,13 +211,16 @@ def main(
         print(f"sign-in failed: {error}")
         return 1
     seed = Seed(args.domain, tokens.id_token, send, sleep, clock, poll_seconds, timeout_seconds)
-    try:
-        sid = seed.submit(args.package)
-        print(seed.follow(sid))
-    except (Failed, OSError) as error:
-        print(error)
-        return 1
-    return 0
+    stopped = False
+    for folder in args.package or sample_packages():
+        print(f"{folder.name}:")
+        try:
+            sid = seed.submit(folder)
+            print(seed.follow(sid))
+        except (Failed, OSError) as error:
+            print(error)
+            stopped = True
+    return 1 if stopped else 0
 
 
 if __name__ == "__main__":

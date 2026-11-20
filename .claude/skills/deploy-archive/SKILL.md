@@ -363,15 +363,16 @@ just add-curator <stage> <email> <userId>
 
 ### 7. ✋ Seed
 
-**What it does.** Publishes the committed sample package (`examples/sample-package`, invented
-stream temperature data under CC-BY-4.0, access `public`) through the archive's own submit and
-publish path. It becomes **public data on their archive**. Before it submits, a browser tab
+**What it does.** Publishes the six committed sample packages (the folders under `examples/`
+with a `datapackage.json`: invented stream temperature data and five smaller invented datasets,
+all under CC-BY-4.0, access `public`), one after the other, through the archive's own submit
+and publish path. They become **public data on their archive**. Before it submits, a browser tab
 opens by itself on the archive's own sign-in page, because the seed submits and approves as the
 admin and the terminal never sees their password: the admin signs in there, setting their own
 password from the invite email, and presses **Sign in the command line**. Say the tab is coming
 and why before running it; it waits five minutes for the sign-in.
 
-**What it costs.** A few requests and a few kilobytes of storage. To take it down later, an
+**What it costs.** A few requests and a few kilobytes of storage. To take one down later, an
 admin withdraws it from its page (**Withdraw…** in the curators' bar): its files stop being
 served and it leaves search, and **Restore…** undoes it. Removing it for good is by hand, with
 the deletion runbook in `docs/curating.md` (Deleting data for good).
@@ -384,7 +385,8 @@ Then:
 just seed <stage>
 ```
 
-It prints the dataset's URL when it is published, or the status and its findings when it stops.
+For each package it prints the dataset's URL when it is published, or the status and its findings
+when it stops; it exits 1 when any package was not published.
 
 ### 8. Smoke test
 
