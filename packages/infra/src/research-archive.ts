@@ -247,6 +247,7 @@ export class ResearchArchive extends Construct {
       archiveBucket: this.archiveBucket,
       stagingBucket: this.stagingBucket,
       restApi: this.api,
+      originKey: api.originKey,
       brandColor: brand.primaryColor,
       faviconExt: props.config.brand?.favicon
         ? extname(props.config.brand.favicon).toLowerCase()

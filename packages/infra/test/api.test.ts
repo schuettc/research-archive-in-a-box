@@ -152,6 +152,64 @@ test("with WAF on, the same web ACL guards the user pool and rate-limits its sig
   expect(new Set(rules.map((rule) => rule.Priority)).size).toBe(rules.length);
 });
 
+test("with WAF on, every method needs the key CloudFront sends, from one usage plan on the stage", () => {
+  const { template } = archive(true);
+  const methods = Object.values(template.findResources("AWS::ApiGateway::Method"));
+  expect(methods.length).toBeGreaterThan(10);
+  for (const method of methods) expect(method.Properties.ApiKeyRequired).toBe(true);
+  template.resourceCountIs("AWS::ApiGateway::ApiKey", 1);
+  template.resourceCountIs("AWS::ApiGateway::UsagePlan", 1);
+  template.resourceCountIs("AWS::ApiGateway::UsagePlanKey", 1);
+  // API Gateway makes the value: the template names none.
+  const [key] = Object.values(template.findResources("AWS::ApiGateway::ApiKey"));
+  expect(key?.Properties.Value).toBeUndefined();
+
+  const off = archive(false).template;
+  off.resourceCountIs("AWS::ApiGateway::ApiKey", 0);
+  for (const method of Object.values(off.findResources("AWS::ApiGateway::Method"))) {
+    expect(method.Properties.ApiKeyRequired ?? false).toBe(false);
+  }
+});
+
+test("with WAF on, one rule limits each visitor address to 2,000 API requests in five minutes", () => {
+  const { template } = archive(true);
+  const [acl] = Object.keys(template.findResources("AWS::WAFv2::WebACL"));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rules: any[] = template.toJSON().Resources[acl!].Properties.Rules;
+  expect(rules).toHaveLength(6);
+  expect(new Set(rules.map((rule) => rule.Priority)).size).toBe(6);
+  const limit = rules.find((rule) => rule.Name === "ApiRateLimit");
+  expect(limit).toMatchObject({
+    Action: { Block: {} },
+    Statement: {
+      RateBasedStatement: {
+        AggregateKeyType: "CUSTOM_KEYS",
+        Limit: 2000,
+        EvaluationWindowSec: 300,
+        CustomKeys: [
+          {
+            Header: {
+              Name: "x-viewer-address",
+              TextTransformations: [{ Priority: 0, Type: "NONE" }],
+            },
+          },
+        ],
+        ScopeDownStatement: {
+          ByteMatchStatement: {
+            FieldToMatch: { SingleHeader: { Name: "x-api-key" } },
+            PositionalConstraint: "EXACTLY",
+            TextTransformations: [{ Priority: 0, Type: "NONE" }],
+          },
+        },
+      },
+    },
+  });
+  // The value compared is the key's own, read at deploy: a reference, never text in the template.
+  const search =
+    limit.Statement.RateBasedStatement.ScopeDownStatement.ByteMatchStatement.SearchString;
+  expect(search).toHaveProperty("Fn::GetAtt");
+});
+
 test("the integrity check runs weekly with no retries", () => {
   const { template } = archive();
   const fns = template.findResources("AWS::Lambda::Function", {
