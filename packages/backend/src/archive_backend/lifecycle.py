@@ -36,7 +36,7 @@ from typing import Any, Protocol, cast
 import boto3
 from botocore.exceptions import ClientError
 
-from archive_backend import doi, pages
+from archive_backend import doi, pages, parts
 from archive_backend.catalog_file import write_catalog_file
 from archive_backend.config import read_archive_config
 from archive_backend.reindex import embargo_of, withdrawal_of, write_pages
@@ -58,6 +58,11 @@ class S3(Protocol):
     def put_object(self, **kwargs: Any) -> Any: ...
     def copy_object(self, **kwargs: Any) -> dict[str, Any]: ...
     def delete_object(self, **kwargs: Any) -> Any: ...
+    def create_multipart_upload(self, **kwargs: Any) -> dict[str, Any]: ...
+    def upload_part(self, **kwargs: Any) -> dict[str, Any]: ...
+    def upload_part_copy(self, **kwargs: Any) -> dict[str, Any]: ...
+    def complete_multipart_upload(self, **kwargs: Any) -> Any: ...
+    def abort_multipart_upload(self, **kwargs: Any) -> Any: ...
 
 
 class DynamoDB(Protocol):
@@ -226,13 +231,21 @@ def _move_version(c: Clients, bucket: str, source: str, target: str, keys: list[
         # A file the version doesn't list (its checksums file, its zips) keeps its own checksum.
         expected = listed.get(path) or _stored(c, bucket, key)
         if expected is None or _stored(c, bucket, destination) != expected:
-            copied = c.s3.copy_object(
-                Bucket=bucket,
-                Key=destination,
-                CopySource={"Bucket": bucket, "Key": key},
-                ChecksumAlgorithm="SHA256",
-            )
-            actual = _hex(copied.get("CopyObjectResult", {}).get("ChecksumSHA256"))
+            size = int(c.s3.head_object(Bucket=bucket, Key=key)["ContentLength"])
+            if size > parts.ONE_REQUEST_MAX:
+                # More than one CopyObject takes: a zip that was written in parts. Its checksum
+                # is a composite, so `expected` is None and the move is unverified, as it is
+                # for any unlisted file with no checksum.
+                parts.copy(c.s3, bucket, key, destination, size)
+                actual = None
+            else:
+                copied = c.s3.copy_object(
+                    Bucket=bucket,
+                    Key=destination,
+                    CopySource={"Bucket": bucket, "Key": key},
+                    ChecksumAlgorithm="SHA256",
+                )
+                actual = _hex(copied.get("CopyObjectResult", {}).get("ChecksumSHA256"))
             if expected is not None and actual != expected:
                 logger.error(
                     "copy of %s to %s differs from its checksum; source kept", key, destination
@@ -427,7 +440,9 @@ def release(c: Clients, env: Env, today: date) -> list[str]:
     due = sorted(
         pk.removeprefix("DATASET#")
         for pk, items in by_dataset.items()
-        if any(item["SK"]["S"] == "META" for item in items) and _drifted(c, env, items, today)
+        # A dataset item with no currentVersion is a first version's claim, and is passed by.
+        if any(item["SK"]["S"] == "META" and "currentVersion" in item for item in items)
+        and _drifted(c, env, items, today)
     )
     failed: list[str] = []
     for dataset_id in due:

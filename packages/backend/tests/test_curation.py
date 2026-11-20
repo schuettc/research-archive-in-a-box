@@ -603,3 +603,15 @@ def test_an_admin_demoted_to_curator_may_still_correct_but_not_withdraw(world: W
 
     assert withdraw == 403
     assert world.lambda_.invokes == []
+
+
+def test_withdrawing_a_claim_only_id_is_not_found(world: World) -> None:
+    # A first version being published: the claim, with no currentVersion yet.
+    claim = {"PK": {"S": "DATASET#stream"}, "SK": {"S": "META"}, "claimedBy": {"S": "sub-a"}}
+    world.dynamodb.tables[TABLE_B][("DATASET#stream", "META")] = dict(claim)
+
+    status, _ = world.call("POST", "/api/admin/datasets/stream/withdraw", REASON, ADMIN)
+
+    assert status == 404
+    assert world.meta("stream") == claim
+    assert world.lifecycle_runs() == []

@@ -386,10 +386,14 @@ def _own(caller: Caller, submission: dict[str, Any]) -> None:
 
 
 def _dataset(c: Clients, env: Env, dataset_id: str) -> dict[str, Any] | None:
+    """The published dataset's item; None for an item with no `currentVersion`, a first
+    version's claim."""
     active = c.ssm.get_parameter(Name=env.active_catalog_parameter)["Parameter"]["Value"]
     table = c.table(env.catalog_tables[active])
     item = table.get_item(Key={"PK": f"DATASET#{dataset_id}", "SK": "META"}).get("Item")
-    return cast(dict[str, Any] | None, item)
+    if item is None or "currentVersion" not in item:
+        return None
+    return cast(dict[str, Any], item)
 
 
 def _published_by(c: Clients, user: str, dataset_id: str) -> bool:
@@ -415,10 +419,24 @@ def _published_by(c: Clients, user: str, dataset_id: str) -> bool:
         query["ExclusiveStartKey"] = last
 
 
+def _within_limit(c: Clients, env: Env, files: list[FileEntry]) -> None:
+    """Refuse a package whose files total more than `submissions.maxPackageGiB`; a total equal
+    to the limit is taken."""
+    gib = read_archive_config(c.ssm, env.archive_config_parameter).submissions.max_package_gib
+    total = sum(int(f["size"]) for f in files)
+    if total > gib * 1024**3:
+        raise Refused(
+            400,
+            f"the package's files total {total:,} bytes, more than the {gib} GiB "
+            f"({gib * 1024**3:,} bytes) this archive takes",
+        )
+
+
 def create(c: Clients, env: Env, caller: Caller, body: dict[str, Any]) -> dict[str, Any]:
     caller.need(CONTRIBUTOR)
     request = _parse(CreateRequest, body)
     files = cast(list[FileEntry], [f.model_dump() for f in request.files])
+    _within_limit(c, env, files)
     record: dict[str, Any] = {"newVersion": False}
     dataset_id = request.dataset_id
     if dataset_id is not None:
@@ -455,6 +473,7 @@ def uploads(c: Clients, env: Env, caller: Caller, sid: str | None, body: Any) ->
     submission = _load(c, sid)
     _own(caller, submission)
     files = cast(list[FileEntry], [f.model_dump() for f in _parse(FilesRequest, body).files])
+    _within_limit(c, env, files)
     current = int(submission["round"])
     status = submission.get("status")
     expect: Status

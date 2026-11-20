@@ -144,6 +144,66 @@ def test_diagnose_with_no_archive_connected_checks_core_rules_and_says_so(
     assert "weren't available" in result["note"]
 
 
+LIMITED = {**ECOLOGY, "maxPackageGiB": 9}
+
+
+def test_refresh_checks_answers_the_archives_package_limit(archive: Any) -> None:
+    archive.json("GET /archive-checks.json", LIMITED)
+    session = Session()
+    server.connect(session, archive.url)
+
+    assert state.refresh_checks(session) == 9 * 1024**3
+    assert state.saved_checks() == ECOLOGY
+
+
+def test_refresh_checks_answers_none_without_a_limit(archive: Any) -> None:
+    archive.json("GET /archive-checks.json", ECOLOGY)
+    session = Session()
+    server.connect(session, archive.url)
+
+    assert state.refresh_checks(session) is None
+
+    archive.json("GET /archive-checks.json", {"message": "boom"}, 500)
+    assert state.refresh_checks(session) is None
+
+
+def test_refresh_checks_keeps_the_limit_it_has_when_the_archive_cannot_answer(
+    archive: Any,
+) -> None:
+    archive.json("GET /archive-checks.json", LIMITED)
+    session = Session()
+    server.connect(session, archive.url)
+    archive.json("GET /archive-checks.json", {"message": "boom"}, 500)
+
+    assert state.refresh_checks(session) == 9 * 1024**3
+
+
+def test_diagnose_states_the_archives_package_limit_with_its_checks(
+    archive: Any, no_methods: Path
+) -> None:
+    archive.json("GET /archive-checks.json", LIMITED)
+    session = Session()
+    server.connect(session, archive.url)
+
+    answer = local.diagnose(session, str(no_methods))
+
+    assert answer["checks"] == {"archive": archive.url, **ECOLOGY, "maxPackageGiB": 9}
+
+
+def test_diagnose_states_a_limit_the_archive_changed_since_connect(
+    archive: Any, no_methods: Path
+) -> None:
+    archive.json("GET /archive-checks.json", LIMITED)
+    session = Session()
+    server.connect(session, archive.url)
+    archive.json("GET /archive-checks.json", {**ECOLOGY, "maxPackageGiB": 4})
+
+    state.refresh_checks(session)
+
+    assert local.diagnose(session, str(no_methods))["checks"]["maxPackageGiB"] == 4
+    assert Session().known() == archive.url and state.saved()[2] == 4
+
+
 def test_two_sessions_each_diagnose_under_their_own_archives_checks(
     archive: Any, other: Any, no_methods: Path
 ) -> None:

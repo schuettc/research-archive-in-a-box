@@ -5,7 +5,15 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from archive_contract.config import ArchiveConfig, Infrastructure, Stage, load_config
+from archive_contract.config import (
+    DISK_MARGIN_MB,
+    LAMBDA_DISK_MB,
+    MAX_PACKAGE_GIB,
+    ArchiveConfig,
+    Infrastructure,
+    Stage,
+    load_config,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -503,3 +511,28 @@ def test_a_bad_stage_doi_block_is_refused(doi: dict[str, object]) -> None:
                 },
             }
         )
+
+
+def test_the_package_limit_defaults_to_the_ceiling() -> None:
+    assert ArchiveConfig.model_validate({"publisher": "X"}).submissions.max_package_gib == 9
+
+
+def test_the_package_limit_is_read_from_the_file() -> None:
+    config = ArchiveConfig.model_validate({"publisher": "X", "submissions": {"maxPackageGiB": 2}})
+
+    assert config.submissions.max_package_gib == 2
+
+
+def test_the_ceiling_is_the_lambda_disk_less_the_margin() -> None:
+    assert MAX_PACKAGE_GIB * 1024 + DISK_MARGIN_MB == LAMBDA_DISK_MB == 10_240
+
+
+@pytest.mark.parametrize("value", [0, 10, 2.5])
+def test_a_package_limit_outside_1_to_the_ceiling_is_refused(value: object) -> None:
+    with pytest.raises(ValidationError):
+        ArchiveConfig.model_validate({"publisher": "X", "submissions": {"maxPackageGiB": value}})
+
+
+def test_an_unknown_submissions_setting_is_refused() -> None:
+    with pytest.raises(ValidationError):
+        ArchiveConfig.model_validate({"publisher": "X", "submissions": {"maxFiles": 5}})

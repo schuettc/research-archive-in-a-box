@@ -64,9 +64,9 @@ def connect(session: Session, url: str) -> dict[str, Any]:
         isinstance(document.get(k), str) for k in ("region", "webClientId")
     ):
         raise Refused(f"{address} answered, but it doesn't look like a research archive.")
-    archive_checks = state.fetch_checks(address)
-    session.use(address, archive_checks)
-    path = state.save_url(address, archive_checks)
+    archive_checks, limit = state.fetch_published(address)
+    session.use(address, archive_checks, limit)
+    path = state.save_url(address, archive_checks, limit)
     answer: dict[str, Any] = {"url": address, "saved_to": str(path), "note": MOVED}
     if archive_checks is None:
         return {**answer, "checks_note": NO_CHECKS}

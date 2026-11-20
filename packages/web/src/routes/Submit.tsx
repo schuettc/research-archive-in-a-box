@@ -1,4 +1,4 @@
-import { useRef, useState, type DragEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
 import { flushSync } from "react-dom";
 import { Link, useNavigate } from "react-router";
 import {
@@ -6,6 +6,7 @@ import {
   checkManifest,
   createSubmission,
   getDataset,
+  getPackageLimit,
   renewUploads,
   submitRound,
   type Finding,
@@ -133,11 +134,32 @@ export function PackageFlow({
     mode.kind === "round" ? mode.submission.submissionId : null,
   );
   const uploaded = useRef(new Set<string>());
+  // The most a package's files may total, in bytes, once the archive has said.
+  const [limit, setLimit] = useState<number | null>(null);
+  useEffect(() => {
+    let current = true;
+    getPackageLimit().then(
+      (bytes) => current && setLimit(bytes),
+      () => {}, // Asked again when a folder is chosen, which says so if it fails.
+    );
+    return () => {
+      current = false;
+    };
+  }, []);
 
   async function check(files: PackageFile[]) {
     setPhase({ at: "checking", done: 0, total: files.length });
-    const checked = await checkPackage(files, (done, total) =>
-      setPhase({ at: "checking", done, total }),
+    let maxBytes: number;
+    try {
+      maxBytes = limit ?? (await getPackageLimit());
+    } catch {
+      setPhase({ at: "choose", problem: "The archive can't be reached. Try again." });
+      return;
+    }
+    const checked = await checkPackage(
+      files,
+      (done, total) => setPhase({ at: "checking", done, total }),
+      maxBytes,
     );
     if (!checked.ok) {
       setPhase({ at: "choose", problem: checked.problem });
@@ -275,6 +297,7 @@ export function PackageFlow({
           Nothing leaves your computer until you press Upload and submit. Choosing a folder makes
           some browsers ask whether to upload it; dropping the folder here doesn't.
         </p>
+        {limit !== null && <p className="hint">Packages up to {limit / 1024 ** 3} GiB.</p>}
         {phase.at === "checking" ? (
           <p role="status" className="muted">
             Checking the files: {phase.done} of {phase.total}

@@ -307,7 +307,7 @@ test("the SiteDomain output names the distribution's domain, for just smoke and 
   template.hasOutput("SiteDomain", { Value: { "Fn::GetAtt": [distribution, "DomainName"] } });
 });
 
-test("CloudFront is denied the archive bucket's restricted/ prefix", () => {
+test("CloudFront is denied the archive bucket's restricted/ prefix, and no policy names publishing/", () => {
   const { archive: a, stack, template } = archive();
   const policies = template.findResources("AWS::S3::BucketPolicy");
   const archivePolicy = Object.values(policies).find(
@@ -321,6 +321,7 @@ test("CloudFront is denied the archive bucket's restricted/ prefix", () => {
   expect(deny).toBeDefined();
   expect(deny?.Action).toBe("s3:GetObject");
   expect(JSON.stringify(deny?.Resource)).toContain("/restricted/*");
+  expect(JSON.stringify(policies)).not.toContain("publishing/");
 });
 
 // Without s3:ListBucket, S3 answers 403 for a missing key. A missing-key GET carries no s3:prefix,
@@ -431,15 +432,19 @@ test("auth-config.json holds exactly the region and the web client's id", () => 
   expect(stack.resolve(data.region)).toEqual({ Ref: "AWS::Region" });
 });
 
-test("archive-checks.json holds exactly the config's profiles and required fields", () => {
+test("archive-checks.json holds exactly the config's profiles, required fields and package limit", () => {
   const jsonData = vi.spyOn(s3deploy.Source, "jsonData");
-  archive({ profiles: ["core", "ecology"], required: ["keywords"] });
+  archive({
+    profiles: ["core", "ecology"],
+    required: ["keywords"],
+    submissions: { maxPackageGiB: 2 },
+  });
   archive();
 
   const calls = jsonData.mock.calls.filter(([name]) => name === "archive-checks.json");
   expect(calls.map(([, data]) => data)).toEqual([
-    { profiles: ["core", "ecology"], required: ["keywords"] },
-    { profiles: ["core"], required: [] },
+    { profiles: ["core", "ecology"], required: ["keywords"], maxPackageGiB: 2 },
+    { profiles: ["core"], required: [], maxPackageGiB: 9 },
   ]);
 });
 

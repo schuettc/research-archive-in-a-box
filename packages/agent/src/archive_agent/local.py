@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from archive_agent.errors import LocalError
-from archive_agent.state import Session
+from archive_agent.state import LIMIT, Session
 from archive_contract.profile import Profile, load_profile
 from cruise.cli import counts, verdict
 from cruise.diagnose import diagnose as run_diagnose
@@ -38,7 +38,11 @@ def _selection(
     archive_checks = session.checks
     if archive_checks is None or url is None:
         return [load_profile("core")], [], None, NO_CHECKS
-    used = {"archive": url, **archive_checks}
+    used: dict[str, Any] = {"archive": url, **archive_checks}
+    limit = session.limit
+    if limit is not None:
+        # The most a package's files may total; submit refuses a larger one before sending.
+        used[LIMIT] = limit
     profiles: list[Profile] = []
     unknown: list[str] = []
     for name in archive_checks["profiles"]:

@@ -74,6 +74,71 @@ test("the ingest function is durable for a year, with 15 minutes, 2048 MB and 10
   });
 });
 
+test("the ingest function's /tmp is the package limit plus 1 GiB", () => {
+  const small = new Stack(testApp(), "Small");
+  new ResearchArchive(small, "Archive", {
+    config: {
+      publisher: "P",
+      submissions: { maxPackageGiB: 2 },
+      infrastructure: { alertEmail: "a@example.org", stages: [{ name: "prod" }] },
+    },
+    stage: "prod",
+  });
+
+  Template.fromStack(small).hasResourceProperties("AWS::Lambda::Function", {
+    Handler: INGEST,
+    EphemeralStorage: { Size: 3072 },
+  });
+});
+
+test("the ingest may abort a multipart upload under the archive's open/ and restricted/ alone", () => {
+  const archiveId = logicalId(archive.archiveBucket);
+  const aborts = statements(INGEST).filter(
+    (s) =>
+      actions(s).includes("s3:AbortMultipartUpload") &&
+      JSON.stringify(s.Resource).includes(archiveId),
+  );
+  const resources = JSON.stringify(aborts.map((s) => s.Resource));
+
+  // A zip too large for one copy arrives in parts, and the DOI path rewrites one in parts.
+  expect(resources.match(/"\/[^"]*"/g)?.sort()).toEqual(['"/open/*"', '"/restricted/*"']);
+});
+
+test("the ingest's rights in the staging bucket are exactly these", () => {
+  const stagingId = logicalId(archive.stagingBucket);
+  const granted: Record<string, string[]> = {};
+  for (const s of statements(INGEST)) {
+    const resources = JSON.stringify(s.Resource);
+    if (!resources.includes(stagingId)) continue;
+    const prefixes = resources.match(/"\/[^"]*"/g)?.map((m) => m.slice(1, -1)) ?? ["(bucket)"];
+    for (const action of actions(s)) {
+      granted[action] = [...(granted[action] ?? []), ...prefixes].sort();
+    }
+  }
+
+  // A publish builds its version's zips under held/ before anything is in the archive bucket:
+  // a zip too large for one PUT is written there in parts, and aborted when that fails.
+  expect(granted).toEqual({
+    "s3:AbortMultipartUpload": ["/held/*"],
+    "s3:DeleteObject": ["/held/*"],
+    "s3:GetObject": ["/held/*", "/incoming/*"],
+    "s3:GetObjectTagging": ["/incoming/*"],
+    "s3:ListBucket": ["(bucket)"],
+    "s3:PutObject": ["/held/*", "/reports/*"],
+    "s3:PutObjectTagging": ["/held/*"],
+  });
+  const list = statements(INGEST).find(
+    (s) => actions(s).includes("s3:ListBucket") && JSON.stringify(s.Resource).includes(stagingId),
+  );
+  expect(list?.Condition).toEqual({ StringLike: { "s3:prefix": "held/*" } });
+});
+
+test("no right of the ingest names a publishing/ folder", () => {
+  const all = JSON.stringify(statements(INGEST));
+
+  expect(all).not.toContain("publishing/");
+});
+
 test("it is invoked through a live alias, which the IngestFunction output names", () => {
   const aliasId = stack.getLogicalId(archive.ingestFunction.node.defaultChild as CfnAlias);
 
@@ -369,6 +434,34 @@ test("the ingest may claim a version on either catalog table with a conditional 
   for (const table of [archive.catalogTables.a, archive.catalogTables.b]) {
     expect(resources).toContain(stack.getLogicalId(table.node.defaultChild as CfnBucket));
   }
+});
+
+test("the ingest may put and delete the dataset item it claims", () => {
+  // The catalog step's conditional put moves currentVersion; a failed first version's claim is
+  // deleted; a failed version's items are found by a query of its dataset.
+  for (const action of ["dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:Query"]) {
+    const allowed = statements(INGEST).filter((s) => actions(s).includes(action));
+    const resources = JSON.stringify(allowed.map((s) => s.Resource));
+
+    for (const table of [archive.catalogTables.a, archive.catalogTables.b]) {
+      expect(resources).toContain(stack.getLogicalId(table.node.defaultChild as CfnBucket));
+    }
+  }
+});
+
+test("the ingest may delete only under the archive's open/ and restricted/, and no object version", () => {
+  const archiveId = logicalId(archive.archiveBucket);
+  const all = statements(INGEST).filter((s) => JSON.stringify(s.Resource).includes(archiveId));
+  const deletes = all.filter((s) => actions(s).includes("s3:DeleteObject"));
+
+  expect(deletes).toHaveLength(1);
+  const resources = JSON.stringify(deletes.map((s) => s.Resource));
+  expect(resources.match(/"\/[^"]*"/g)?.sort()).toEqual(['"/open/*"', '"/restricted/*"']);
+  // A delete adds a delete marker; the stored version and its Object Lock retention stay.
+  const granted = all.flatMap(actions);
+  expect(granted).not.toContain("s3:DeleteObjectVersion");
+  expect(granted).not.toContain("s3:BypassGovernanceRetention");
+  expect(granted.filter((a) => a.includes("*"))).toEqual([]);
 });
 
 test("the ingest may scan either catalog table, to rewrite the catalog file at publish", () => {

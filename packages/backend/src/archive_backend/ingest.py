@@ -10,13 +10,25 @@ execution timeout ends it without a word. Every call that reads the clock, the n
 value runs inside a named step, every status change writes its event in the same step, and a
 step that fails after its retries ends the submission as `failed` with an admin alert.
 
-Publish is a series of steps, each safe to repeat: assign the version from the active catalog,
-fill in the manifest and regenerate its README and checksums, copy the files to the archive
-bucket (the manifest last), put the catalog items the reindex would build into the active
-table, write the dataset page, rewrite the catalog file search reads and the sitemap, and
-finish. With the DOI module on, after the page the version's DOI is registered with DataCite, its
-address written to `archive:identifier`, and the catalog items and pages rewritten to show it; a
-DataCite failure after the step's retries alerts and the publish finishes without a DOI.
+Publish is a series of steps, each safe to repeat: claim the dataset's next version in the
+active catalog (`claimedBy` on the dataset item, which leaves `currentVersion` alone), fill in
+the manifest and regenerate its README and checksums, build the version's download zips from
+the held files into `held/<id>/.zips/` in the staging bucket, copy the files and the zips
+inside S3 to the version's folder under `open/` or `restricted/` in the archive bucket (each
+file checked against its line in `checksums.sha256`, each zip against the one built, the
+manifest last), put the catalog items the reindex would build into the active table (the
+dataset item last, which moves `currentVersion` and drops the claim), write the dataset page,
+rewrite the catalog file search reads and the sitemap, and finish, which empties
+`held/<id>/`. The unfinished version is built in the staging bucket because the archive
+bucket is versioned and may be locked: whatever is written there stays stored. So until the
+copy step nothing of the version is in the archive bucket, and the reindex, which looks for
+manifests, finds the version only once every file and zip is there. Readers get the version
+before until the catalog step ends; a publish that fails before then releases its claim and
+removes what its copy step wrote of the version, so the live dataset is as it
+was. With the DOI
+module on, after the page the version's DOI is registered with DataCite, its address written to
+`archive:identifier`, and the zips, catalog items and pages rewritten to show it; a DataCite failure
+after the step's retries alerts and the publish finishes without a DOI.
 """
 
 from __future__ import annotations
@@ -56,12 +68,13 @@ from aws_durable_execution_sdk_python.waits import (
 )
 from botocore.exceptions import ClientError
 
-from archive_backend import doi, pages, zips
+from archive_backend import doi, pages, parts, zips
 from archive_backend.catalog_file import write_catalog_file
 from archive_backend.config import read_archive_config
 from archive_backend.embeddings import Bedrock, with_embedding
 from archive_backend.lifecycle import home_prefix
-from archive_backend.reindex import catalog_items, dataset_item, withdrawal_of
+from archive_backend.reindex import PREFIXES, catalog_items, dataset_item, withdrawal_of
+from archive_backend.reindex import _sk as version_key
 from archive_backend.sitemap import write_sitemap
 from archive_backend.submissions import Table, put_event, stored_policy
 from archive_contract import SubmissionFacts, match, reminder_schedule
@@ -86,6 +99,8 @@ DELETE_BATCH = 1000
 README = "README.md"
 CHECKSUMS = "checksums.sha256"
 CATALOG_BATCH = 25
+CATALOG_TRIES = 5
+REFUSED = "ConditionalCheckFailedException"
 SUFFIX = 6
 SLUG_LENGTH = 60
 CHUNK = 1024 * 1024
@@ -99,6 +114,12 @@ class S3(Protocol):
     def copy_object(self, **kwargs: Any) -> Any: ...
     def get_paginator(self, name: str) -> Any: ...
     def delete_objects(self, **kwargs: Any) -> Any: ...
+    def delete_object(self, **kwargs: Any) -> Any: ...
+    def create_multipart_upload(self, **kwargs: Any) -> dict[str, Any]: ...
+    def upload_part(self, **kwargs: Any) -> dict[str, Any]: ...
+    def upload_part_copy(self, **kwargs: Any) -> dict[str, Any]: ...
+    def complete_multipart_upload(self, **kwargs: Any) -> Any: ...
+    def abort_multipart_upload(self, **kwargs: Any) -> Any: ...
 
 
 class SNS(Protocol):
@@ -114,6 +135,9 @@ class DynamoDB(Protocol):
 
     def get_item(self, **kwargs: Any) -> dict[str, Any]: ...
     def update_item(self, **kwargs: Any) -> dict[str, Any]: ...
+    def put_item(self, **kwargs: Any) -> dict[str, Any]: ...
+    def delete_item(self, **kwargs: Any) -> dict[str, Any]: ...
+    def query(self, **kwargs: Any) -> dict[str, Any]: ...
     def batch_write_item(self, **kwargs: Any) -> dict[str, Any]: ...
     def scan(self, **kwargs: Any) -> dict[str, Any]: ...
 
@@ -235,15 +259,15 @@ def _incoming(sid: str, round: int, path: str) -> str:
     return f"incoming/{sid}/{round}/{path}"
 
 
-def _delete_prefix(c: Clients, env: Env, prefix: str) -> None:
+def _delete_prefix(c: Clients, env: Env, prefix: str, bucket: str | None = None) -> None:
+    """Delete every object under the prefix, in the staging bucket unless another is named."""
+    bucket = bucket or env.staging_bucket
     keys: list[str] = []
-    for page in c.s3.get_paginator("list_objects_v2").paginate(
-        Bucket=env.staging_bucket, Prefix=prefix
-    ):
+    for page in c.s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
         keys.extend(item["Key"] for item in page.get("Contents", []))
     for i in range(0, len(keys), DELETE_BATCH):
         c.s3.delete_objects(
-            Bucket=env.staging_bucket,
+            Bucket=bucket,
             Delete={"Objects": [{"Key": k} for k in keys[i : i + DELETE_BATCH]], "Quiet": True},
         )
 
@@ -316,6 +340,41 @@ def _scan_findings(tags: dict[str, str]) -> list[Finding]:
     ]
 
 
+def _size_findings(c: Clients, env: Env, sid: str, round: int, gib: int) -> list[Finding]:
+    """What the round's stored objects weigh against what the submission declared: a finding for
+    each file whose stored size differs, and one when the stored files total more than the
+    archive's limit. The upload link signs a file's SHA-256 and not its size, so the API's check
+    of the declared total holds only for a client that declares true sizes."""
+    files = (_submission(c, sid).get("files") or {}).get(str(round)) or []
+    findings: list[Finding] = []
+    total = 0
+    for entry in files:
+        path, declared = str(entry["path"]), int(entry["size"])
+        head = c.s3.head_object(Bucket=env.staging_bucket, Key=_incoming(sid, round, path))
+        stored = int(head["ContentLength"])
+        total += stored
+        if stored != declared:
+            findings.append(
+                Finding(
+                    rule_id="upload.size",
+                    severity="error",
+                    message=f"{path} is {stored:,} bytes as uploaded, not the {declared:,} bytes "
+                    "the submission declared.",
+                    target=Target(path=path),
+                )
+            )
+    if total > gib * 1024**3:
+        findings.append(
+            Finding(
+                rule_id="upload.total",
+                severity="error",
+                message=f"The package's files total {total:,} bytes as uploaded, more than the "
+                f"{gib} GiB ({gib * 1024**3:,} bytes) this archive takes.",
+            )
+        )
+    return findings
+
+
 def _download(c: Clients, env: Env, sid: str, round: int, paths: list[str], into: Path) -> None:
     for path in paths:
         target = into / path
@@ -378,12 +437,17 @@ def _check(
     paths: list[str],
     tags: dict[str, str],
 ) -> dict[str, Any]:
-    """Diagnose the round (unless the scan blocked it), store the report, block on an error."""
+    """Diagnose the round (unless the scan blocked it, or its stored files are not the sizes
+    declared or total more than the archive takes: then nothing is downloaded), store the
+    report, block on an error."""
     report: dict[str, Any] = {"round": round, "validation": None, "quality": None}
     findings = _scan_findings(tags)
     facts = _facts({})
+    config = None
     if not findings:
         config = read_archive_config(c.ssm, env.archive_config_parameter)
+        findings = _size_findings(c, env, sid, round, config.submissions.max_package_gib)
+    if config is not None and not findings:
         with tempfile.TemporaryDirectory(prefix="ingest-") as tmp:
             folder = Path(tmp)
             _download(c, env, sid, round, paths, folder)
@@ -581,40 +645,161 @@ def _meta(c: Clients, table: str, dataset_id: str) -> dict[str, Any] | None:
     return item
 
 
-def _claim(c: Clients, table: str, dataset_id: str, version: int, sid: str) -> None:
-    """Claim the version on the dataset item, so no other publish takes the same one.
+def _refused(error: ClientError) -> bool:
+    return bool(error.response["Error"]["Code"] == REFUSED)
 
-    The catalog step's put of the whole dataset item replaces it, dropping `claimedBy`.
+
+def _claim(
+    c: Clients, table: str, dataset_id: str, version: int, sid: str, holder: str | None = None
+) -> None:
+    """Claim the version on the dataset item, so no other publish takes the same one; with a
+    `holder`, take the claim over from that submission.
+
+    The claim is `claimedBy` alone: `currentVersion` moves in the catalog step, whose put of the
+    whole dataset item also drops the claim. A first version's claim is an item with no
+    `currentVersion`, which every reader takes as no dataset.
     """
-    values = {":v": {"N": str(version)}, ":sid": {"S": sid}}
+    values = {":sid": {"S": sid}}
     if version == 1:
-        condition = "attribute_not_exists(PK)"
+        live = "attribute_not_exists(currentVersion)"
     else:
-        condition = "currentVersion = :prev"
+        live = "currentVersion = :prev"
         values[":prev"] = {"N": str(version - 1)}
+    if holder is None:
+        free = "attribute_not_exists(claimedBy)"
+    else:
+        free = "claimedBy = :holder"
+        values[":holder"] = {"S": holder}
     try:
         c.dynamodb.update_item(
             TableName=table,
             Key=_meta_key(dataset_id),
-            UpdateExpression="SET currentVersion = :v, claimedBy = :sid",
-            ConditionExpression=condition,
+            UpdateExpression="SET claimedBy = :sid",
+            ConditionExpression=f"{live} AND {free}",
             ExpressionAttributeValues=values,
         )
     except ClientError as error:
-        if error.response["Error"]["Code"] != "ConditionalCheckFailedException":
+        if not _refused(error):
             raise
         raise PublishConflict(
             f"version {version} of dataset {dataset_id} was taken by another publish"
         ) from None
 
 
+def _live_version(meta: dict[str, Any] | None) -> int | None:
+    """The dataset's live version; None for no item and for a first version's claim."""
+    if meta is None or "currentVersion" not in meta:
+        return None
+    return int(meta["currentVersion"]["N"])
+
+
+def _clear_version(c: Clients, env: Env, table: str, dataset_id: str, version: int) -> None:
+    """Remove what a publish left of a version that never went live: its version and file items
+    in the catalog and its folders in the archive bucket. Only ever called by the holder of the
+    claim on that version, which is what says the version is not live: its items in the catalog
+    and, for a publish that stopped during or after its copy step, its folder under `open/` or
+    `restricted/`. The bucket is versioned, so each delete adds a delete marker and the stored
+    bytes stay."""
+    query: dict[str, Any] = {
+        "TableName": table,
+        "KeyConditionExpression": "PK = :pk AND begins_with(SK, :sk)",
+        "ExpressionAttributeValues": {
+            ":pk": {"S": f"DATASET#{dataset_id}"},
+            ":sk": {"S": version_key(version)},
+        },
+        "ProjectionExpression": "PK, SK",
+    }
+    keys: list[dict[str, Any]] = []
+    while True:
+        page = c.dynamodb.query(**query)
+        keys.extend({"PK": item["PK"], "SK": item["SK"]} for item in page.get("Items", []))
+        last = page.get("LastEvaluatedKey")
+        if not last:
+            break
+        query["ExclusiveStartKey"] = last
+    _write(c, table, [{"DeleteRequest": {"Key": key}} for key in keys])
+    for prefix in PREFIXES:
+        _delete_prefix(c, env, f"{prefix}/{dataset_id}/{version}/", env.archive_bucket)
+
+
+def _active_table(c: Clients, env: Env) -> str:
+    active = c.ssm.get_parameter(Name=env.active_catalog_parameter)["Parameter"]["Value"]
+    return env.catalog_table_a if active == "A" else env.catalog_table_b
+
+
+# A claim being released reads `releasing#<submission id>`: its holder failed and is removing
+# what it wrote of the version. No publish may take it over until the release has dropped it.
+RELEASING = "releasing#"
+
+
+def _release(c: Clients, env: Env, sid: str, item: dict[str, Any]) -> None:
+    """Give up the submission's claim, if it holds one, after removing what it wrote of the
+    claimed version; a first version's claim-only item is deleted. A submission that holds no
+    claim (it never claimed, or its version went live) changes nothing.
+
+    Before anything is removed the claim is swapped to the releasing marker, under the condition
+    that it is still this submission's (or already its marker, from a try of the fail step that
+    stopped part-way). A takeover refuses a claim in that state, so nothing another publish
+    wrote can be under the version while it is cleared; a refused swap removes nothing."""
+    dataset_id = item.get("datasetId")
+    if not dataset_id:
+        return
+    dataset_id = str(dataset_id)
+    table = _active_table(c, env)
+    meta = _meta(c, table, dataset_id)
+    marker = {"S": RELEASING + sid}
+    if meta is None or meta.get("claimedBy") not in ({"S": sid}, marker):
+        return
+    live = _live_version(meta)
+    held: dict[str, Any] = {"TableName": table, "Key": _meta_key(dataset_id)}
+    values: dict[str, Any] = {":marker": marker}
+    if live is None:
+        same = "attribute_not_exists(currentVersion)"
+    else:
+        # The version read above is the one cleared below, so it must still be the live one.
+        same = "currentVersion = :v"
+        values[":v"] = {"N": str(live)}
+    try:
+        c.dynamodb.update_item(
+            UpdateExpression="SET claimedBy = :marker",
+            ConditionExpression=f"(claimedBy = :sid OR claimedBy = :marker) AND {same}",
+            ExpressionAttributeValues=values | {":sid": {"S": sid}},
+            **held,
+        )
+    except ClientError as error:
+        # Refused: the claim is no longer this submission's, so nothing of the version is its.
+        if not _refused(error):
+            raise
+        return
+    _clear_version(c, env, table, dataset_id, (live or 0) + 1)
+    try:
+        if live is None:
+            c.dynamodb.delete_item(
+                ConditionExpression=f"claimedBy = :marker AND {same}",
+                ExpressionAttributeValues=values,
+                **held,
+            )
+        else:
+            c.dynamodb.update_item(
+                UpdateExpression="REMOVE claimedBy",
+                ConditionExpression=f"claimedBy = :marker AND {same}",
+                ExpressionAttributeValues=values,
+                **held,
+            )
+    except ClientError as error:
+        # Refused: the marker is gone, so there is nothing left to release.
+        if not _refused(error):
+            raise
+
+
 @durable_step
 def _version(_: StepContext, c: Clients, env: Env, sid: str) -> dict[str, Any]:
     """The dataset id (minted from the title when none was given) and its next version, read
-    from the active catalog table and claimed there."""
+    from the active catalog table and claimed there. A claim left by a submission that failed
+    is taken over, and what that publish left of the version is removed; one that submission is
+    still releasing is refused like a running publish's, for the step's retry to find free."""
     item = _submission(c, sid)
-    active = c.ssm.get_parameter(Name=env.active_catalog_parameter)["Parameter"]["Value"]
-    table = env.catalog_table_a if active == "A" else env.catalog_table_b
+    table = _active_table(c, env)
     dataset_id = item.get("datasetId")
     if not dataset_id:
         manifest = json.loads(_read(c, env.staging_bucket, _held(sid, MANIFEST)))
@@ -623,15 +808,28 @@ def _version(_: StepContext, c: Clients, env: Env, sid: str) -> dict[str, Any]:
         _set(c, sid, {"datasetId": dataset_id})
     dataset_id = str(dataset_id)
     meta = _meta(c, table, dataset_id)
-    if meta is not None and meta.get("claimedBy") == {"S": sid}:
-        # This step's own claim, from a try that failed after it.
-        version = int(meta["currentVersion"]["N"])
-    else:
-        if bool(item.get("newVersion")) != (meta is not None):
-            state = "is not" if meta is None else "already is"
-            raise PublishConflict(f"dataset {dataset_id} {state} in the catalog")
-        version = int(meta["currentVersion"]["N"]) + 1 if meta is not None else 1
-        _claim(c, table, dataset_id, version, sid)
+    live = _live_version(meta)
+    if bool(item.get("newVersion")) != (live is not None):
+        state = "is not" if live is None else "already is"
+        raise PublishConflict(f"dataset {dataset_id} {state} in the catalog")
+    version = (live or 0) + 1
+    holder = (meta or {}).get("claimedBy", {}).get("S")
+    # A claim that is already this submission's is this step's own, from a try that failed.
+    if holder != sid:
+        if holder is not None:
+            # A claim being released is held: its holder is still removing what it wrote.
+            releasing = holder.startswith(RELEASING)
+            name = holder.removeprefix(RELEASING)
+            other = c.submissions.get_item(Key={"submissionId": name}).get("Item") or {}
+            if releasing or other.get("status") != "failed":
+                raise PublishConflict(
+                    f"dataset {dataset_id} is being published by submission {name}"
+                )
+        _claim(c, table, dataset_id, version, sid, holder)
+    if holder is not None:
+        # Taken over, or this step's retry of a takeover: the failed publish's leftovers go
+        # before this one copies anything.
+        _clear_version(c, env, table, dataset_id, version)
     _set(c, sid, {"datasetId": dataset_id, "status": "publishing"})
     return {"datasetId": dataset_id, "version": version, "table": table}
 
@@ -675,6 +873,8 @@ def _fill(_: StepContext, c: Clients, env: Env, sid: str, target: dict[str, Any]
         Bucket=env.staging_bucket, Prefix=held
     ):
         files.extend(item["Key"][len(held) :] for item in page.get("Contents", []))
+    # The zips a try of this publish built are kept there too, and are no file of the package.
+    files = [path for path in files if not path.startswith(HELD_ZIPS)]
     withdrawn = withdrawal_of(_meta(c, target["table"], dataset_id)) is not None
     embargo = manifest.embargo_until.isoformat() if manifest.embargo_until else None
     return {
@@ -689,6 +889,54 @@ def _root(filled: dict[str, Any], target: dict[str, Any]) -> str:
     return f"{filled['prefix']}/{target['datasetId']}/{target['version']}/"
 
 
+# Where a publish keeps the version's zips until its copy step: in the staging bucket, in a
+# folder of `held/<id>/` whose name starts with a dot. A package never holds a hidden file or
+# folder (the API refuses one in a round's file list and the check refuses one in a package),
+# so no file of a submission can be under it and nothing that reads `held/<id>/` can take a
+# zip for one. The hold step, a closing decision and the finish step empty `held/<id>/` whole,
+# zips included.
+HELD_ZIPS = ".zips/"
+
+
+class CopyMismatch(Exception):
+    """A file arrived in the archive bucket with other bytes than `checksums.sha256` lists, or
+    a zip with other bytes than the one built."""
+
+
+@durable_step
+def _held_zips(_: StepContext, c: Clients, env: Env, sid: str) -> int:
+    """The version's download zips, built from the held files and kept beside them in the
+    staging bucket for the copy step. How many were written: a zip a try of this step already
+    built from the same files is left as it is."""
+    root = _held(sid)
+    manifest = json.loads(_read(c, env.staging_bucket, root + MANIFEST))
+    written = zips.write_zips(c.s3, env.staging_bucket, root, manifest, root + HELD_ZIPS)
+    return len(written)
+
+
+def _copy_zip(c: Clients, env: Env, source: str, key: str, path: str) -> None:
+    """One built zip from the staging bucket to its key in the archive bucket, with the type
+    and fingerprint it was written with. A zip of one request is checked against the SHA-256
+    stored with the one built; a larger one was written in parts, is copied in parts and has no
+    whole-file SHA-256 to compare."""
+    head = c.s3.head_object(Bucket=env.staging_bucket, Key=source, ChecksumMode="ENABLED")
+    size = int(head["ContentLength"])
+    if size > parts.ONE_REQUEST_MAX:
+        parts.copy(c.s3, env.archive_bucket, source, key, size, source_bucket=env.staging_bucket)
+        return
+    copied = c.s3.copy_object(
+        Bucket=env.archive_bucket,
+        Key=key,
+        CopySource={"Bucket": env.staging_bucket, "Key": source},
+        ChecksumAlgorithm="SHA256",
+        # With no tags given, so the role needs no right to read the source's.
+        TaggingDirective="REPLACE",
+    )
+    stored = copied.get("CopyObjectResult", {}).get("ChecksumSHA256")
+    if not stored or stored != head.get("ChecksumSHA256"):
+        raise CopyMismatch(f"the copy of {path} differs from the zip that was built")
+
+
 @durable_step
 def _copy(
     _: StepContext,
@@ -698,64 +946,133 @@ def _copy(
     target: dict[str, Any],
     filled: dict[str, Any],
 ) -> int:
-    """One checksummed PUT per file into the archive bucket, the manifest last."""
-    paths = sorted(filled["files"], key=lambda p: (p == MANIFEST, p))
+    """One copy per object inside S3, from the staging bucket to the version's folder in the
+    archive bucket: every file but the manifest, each checked against its line in the held
+    `checksums.sha256`; then the zips; then the manifest, so the reindex finds the version only
+    once it is whole. How many were copied. No file passes through the function.
+
+    Safe to run again: each copy writes the same bytes to the same key, so a run after a partial
+    one or a complete one ends in the same state. This is the first step to write anything of
+    the version to the archive bucket."""
+    files = sorted(path for path in filled["files"] if path != MANIFEST)
     root = _root(filled, target)
-    for path in paths:
-        with tempfile.TemporaryFile() as stream:
-            body = c.s3.get_object(Bucket=env.staging_bucket, Key=_held(sid, path))["Body"]
-            digest = hashlib.sha256()
-            while chunk := body.read(CHUNK):
-                digest.update(chunk)
-                stream.write(chunk)
-            stream.seek(0)
-            put: dict[str, Any] = {
-                "Bucket": env.archive_bucket,
-                "Key": root + path,
-                "Body": stream,
-                "ChecksumSHA256": base64.b64encode(digest.digest()).decode("ascii"),
-            }
-            kind = mimetypes.guess_type(path)[0]
-            if kind:
-                put["ContentType"] = kind
-            c.s3.put_object(**put)
-    return len(paths)
+    # The fill step has just rewritten it, so it lists every file but itself.
+    listed = _read(c, env.staging_bucket, _held(sid, CHECKSUMS))
+    expected = zips.checksum_lines(listed.decode("utf-8"))
+    expected[CHECKSUMS] = hashlib.sha256(listed).hexdigest()
+
+    def copy_file(path: str) -> None:
+        copy: dict[str, Any] = {
+            "Bucket": env.archive_bucket,
+            "Key": root + path,
+            "CopySource": {"Bucket": env.staging_bucket, "Key": _held(sid, path)},
+            "ChecksumAlgorithm": "SHA256",
+            "MetadataDirective": "REPLACE",
+            # With no tags given: the scan's tag stays out of the archive.
+            "TaggingDirective": "REPLACE",
+        }
+        kind = mimetypes.guess_type(path)[0]
+        if kind:
+            copy["ContentType"] = kind
+        stored = c.s3.copy_object(**copy).get("CopyObjectResult", {}).get("ChecksumSHA256")
+        if not stored or base64.b64decode(stored).hex() != expected.get(path):
+            raise CopyMismatch(f"the copy of {path} differs from its line in checksums.sha256")
+
+    for path in files:
+        copy_file(path)
+    manifest = json.loads(_read(c, env.staging_bucket, _held(sid, MANIFEST)))
+    zipped = zips.zip_paths(manifest)
+    for path in zipped:
+        _copy_zip(c, env, _held(sid, HELD_ZIPS + path), root + path, path)
+    copy_file(MANIFEST)
+    return len(files) + len(zipped) + 1
+
+
+@durable_step
+def _zips(_: StepContext, c: Clients, env: Env, root: str) -> int:
+    """The download zips of the live version at `root` in the archive bucket, rewritten beside
+    it where a DOI has changed what they hold."""
+    text = _read(c, env.archive_bucket, root + MANIFEST).decode("utf-8")
+    return len(zips.write_zips(c.s3, env.archive_bucket, root, json.loads(text)))
+
+
+def _write(c: Clients, table: str, requests: list[dict[str, Any]]) -> None:
+    """Batch-write the put and delete requests, sending again whatever DynamoDB left out."""
+    for i in range(0, len(requests), CATALOG_BATCH):
+        left: dict[str, Any] = {table: requests[i : i + CATALOG_BATCH]}
+        attempt = 0
+        while left:
+            if attempt:
+                time.sleep(min(0.05 * 2**attempt, 5))
+            left = c.dynamodb.batch_write_item(RequestItems=left).get("UnprocessedItems", {})
+            attempt += 1
 
 
 def _write_items(c: Clients, table: str, items: list[dict[str, Any]]) -> None:
-    for i in range(0, len(items), CATALOG_BATCH):
-        requests: dict[str, Any] = {
-            table: [{"PutRequest": {"Item": item}} for item in items[i : i + CATALOG_BATCH]]
-        }
-        attempt = 0
-        while requests:
-            if attempt:
-                time.sleep(min(0.05 * 2**attempt, 5))
-            requests = c.dynamodb.batch_write_item(RequestItems=requests).get(
-                "UnprocessedItems", {}
-            )
-            attempt += 1
+    _write(c, table, [{"PutRequest": {"Item": item}} for item in items])
 
 
 @durable_step
 def _catalog(
-    _: StepContext, c: Clients, env: Env, target: dict[str, Any], filled: dict[str, Any]
+    _: StepContext,
+    c: Clients,
+    env: Env,
+    sid: str,
+    target: dict[str, Any],
+    filled: dict[str, Any],
 ) -> int:
-    """The version, file and dataset items, built as the reindex builds them."""
+    """The version, file and dataset items, built as the reindex builds them. The dataset item
+    goes last and alone, in the one write that moves `currentVersion` and drops the claim: it
+    is refused unless this submission holds the claim, or the version is already live (this
+    step's own retry, and the DOI path's second run, which keeps a later publish's claim)."""
     dataset_id, version, prefix = target["datasetId"], int(target["version"]), filled["prefix"]
+    table = target["table"]
     text = _read(c, env.archive_bucket, _root(filled, target) + MANIFEST).decode("utf-8")
     manifest = json.loads(text)
     items = catalog_items(prefix, dataset_id, version, text)
-    # A new version of a withdrawn dataset stays withdrawn: the put replaces the dataset item.
-    withdrawn = withdrawal_of(_meta(c, target["table"], dataset_id))
-    item = dataset_item(dataset_id, [(prefix, version, manifest)], withdrawn)
+    _write_items(c, table, items)
     infrastructure = read_archive_config(c.ssm, env.archive_config_parameter).infrastructure
+    embedding: dict[str, Any] | None = None
     if infrastructure is not None and infrastructure.modules.embeddings is not None:
         # Set before the put, so no later write can drop it.
-        item = with_embedding(item, manifest, c.bedrock)
-    items.append(item)
-    _write_items(c, target["table"], items)
-    return len(items)
+        embedding = with_embedding({}, manifest, c.bedrock)
+    lost = PublishConflict(
+        f"the claim on dataset {dataset_id} was lost before version {version} went live"
+    )
+    for _try in range(CATALOG_TRIES):
+        meta = _meta(c, table, dataset_id) or {}
+        # A new version of a withdrawn dataset stays withdrawn: the put replaces the dataset item.
+        item = dataset_item(dataset_id, [(prefix, version, manifest)], withdrawal_of(meta))
+        item |= embedding or {}
+        values: dict[str, Any] = {":sid": {"S": sid}, ":v": {"N": str(version)}}
+        held, withdrawn = meta.get("claimedBy"), meta.get("withdrawn")
+        if held is not None and held != {"S": sid}:
+            # A later publish claimed after this version went live: its claim stays.
+            item["claimedBy"] = values[":held"] = held
+            live = "currentVersion = :v AND claimedBy = :held"
+        else:
+            live = "currentVersion = :v AND attribute_not_exists(claimedBy)"
+        # A withdrawal that landed since the read above must not be written over.
+        if withdrawn is None:
+            same = "attribute_not_exists(withdrawn)"
+        else:
+            same = "withdrawn = :withdrawn"
+            values[":withdrawn"] = withdrawn
+        try:
+            c.dynamodb.put_item(
+                TableName=table,
+                Item=item,
+                ConditionExpression=f"(claimedBy = :sid OR ({live})) AND {same}",
+                ExpressionAttributeValues=values,
+            )
+        except ClientError as error:
+            if not _refused(error):
+                raise
+            if (_meta(c, table, dataset_id) or {}).get("withdrawn") == withdrawn:
+                raise lost from None
+            continue
+        return len(items) + 1
+    raise lost
 
 
 @durable_step
@@ -765,7 +1082,6 @@ def _page(
     dataset_id, version = target["datasetId"], int(target["version"])
     root = _root(filled, target)
     text = _read(c, env.archive_bucket, root + MANIFEST).decode("utf-8")
-    zips.write_zips(c.s3, env.archive_bucket, root, json.loads(text))
     manifest = Manifest.model_validate_json(text)
     brand = pages.page_brand(read_archive_config(c.ssm, env.archive_config_parameter))
     withdrawn = withdrawal_of(_meta(c, target["table"], dataset_id))
@@ -873,6 +1189,7 @@ def _register_doi(
     context: DurableContext,
     c: Clients,
     env: Env,
+    sid: str,
     target: dict[str, Any],
     filled: dict[str, Any],
     name: Callable[[str], str],
@@ -890,7 +1207,8 @@ def _register_doi(
     address = found["address"]
     try:
         context.step(_doi_identifier(c, env, target, filled, address), name=name("doi-identifier"))
-        context.step(_catalog(c, env, target, filled), name=name("doi-catalog"))
+        context.step(_zips(c, env, _root(filled, target)), name=name("doi-zips"))
+        context.step(_catalog(c, env, sid, target, filled), name=name("doi-catalog"))
         context.step(_page(c, env, target, filled), name=name("doi-page"))
     except Exception as error:
         failed = str(error) or type(error).__name__
@@ -931,11 +1249,12 @@ def publish(
 
     target = context.step(_version(c, env, sid), name=name("version"))
     filled = context.step(_fill(c, env, sid, target), name=name("fill"))
+    context.step(_held_zips(c, env, sid), name=name("zips"))
     context.step(_copy(c, env, sid, target, filled), name=name("copy"))
-    context.step(_catalog(c, env, target, filled), name=name("catalog"))
+    context.step(_catalog(c, env, sid, target, filled), name=name("catalog"))
     context.step(_page(c, env, target, filled), name=name("page"))
     if filled.get("dois"):
-        _register_doi(context, c, env, target, filled, name)
+        _register_doi(context, c, env, sid, target, filled, name)
     context.step(_catalog_file(c, env, target), name=name("catalog-file"))
     context.step(_sitemap(c, env, target), name=name("sitemap"))
     context.step(_finish(c, env, sid, round, rule, target), name=name("finish"))
@@ -944,6 +1263,7 @@ def publish(
 
 @durable_step
 def _fail(_: StepContext, c: Clients, env: Env, sid: str, error: str) -> None:
+    """End the submission as `failed` and alert the admins. The release step follows."""
     item = _submission(c, sid)
     round = int(item.get("round") or 1)
     _set(c, sid, {"status": "failed"}, remove=("callbackId",))
@@ -954,6 +1274,15 @@ def _fail(_: StepContext, c: Clients, env: Env, sid: str, error: str) -> None:
         f"Ingest failed: submission {sid}",
         f"Submission {sid} round {round} failed: {error}",
     )
+
+
+@durable_step
+def _released(_: StepContext, c: Clients, env: Env, sid: str) -> None:
+    """Release the failed submission's claim on a version that never went live, removing what
+    it wrote of that version. Its own step, after the fail step: the admins have been told of
+    the failure even when this cannot finish, and a later publish may take over the claim of a
+    submission that is already `failed`."""
+    _release(c, env, sid, _submission(c, sid))
 
 
 def _store_callback(c: Clients, sid: str) -> Any:
@@ -1160,6 +1489,7 @@ def run(event: dict[str, Any], context: DurableContext) -> dict[str, Any]:
         return _ingest(context, c, env, sid)
     except (DurableOperationError, BadCallback) as error:
         context.step(_fail(c, env, sid, str(error) or type(error).__name__), name="fail")
+        context.step(_released(c, env, sid), name="release")
         return {"submissionId": sid, "status": "failed"}
 
 

@@ -1,14 +1,18 @@
 """The version's zips: `all/package.zip` and one `<resource>.zip` per multi-file resource.
 
 They sit beside the version, at `<open|restricted>/<datasetId>/<version>/_zips/`, and are
-written by the page step at publish and by the reindex. The version's zip is in its own
+written by the zips step at publish and by the reindex. At publish they are built before the
+version is in the archive bucket at all: from the held files in the staging bucket, into a
+folder beside them, and the copy step puts them at their keys. The version's zip is in its own
 folder because a resource name may be any string without a `/` (the contract sets no
 pattern), so `_zips/<resource>.zip` can never be `_zips/all/package.zip`, even for a resource
 named `package`; it still downloads as `package.zip`. `package.zip` holds every file
 `checksums.sha256` lists, and `checksums.sha256` itself; a resource's zip holds its paths and
-`archive:files` members. Each zip is built in a temporary file and written in one PUT with its
-full-object SHA-256, like every archived object, and carries the hash of its members' checksum
-lines as metadata, so a zip whose members haven't changed is left as it is.
+`archive:files` members. Each zip is built in a temporary file. One that fits a single S3
+request is written in one PUT with its full-object SHA-256, like every archived object; a larger
+one is written in parts, each with its own SHA-256, and its stored checksum is then a composite
+of the parts'. Either way the zip carries the hash of its members' checksum lines as metadata,
+so a zip whose members haven't changed is left as it is.
 """
 
 from __future__ import annotations
@@ -21,6 +25,8 @@ from dataclasses import dataclass
 from typing import IO, Any, Protocol
 
 from botocore.exceptions import ClientError
+
+from archive_backend import parts
 
 CHECKSUMS = "checksums.sha256"
 FOLDER = "_zips/"
@@ -36,6 +42,11 @@ class S3(Protocol):
     def get_object(self, **kwargs: Any) -> dict[str, Any]: ...
     def head_object(self, **kwargs: Any) -> dict[str, Any]: ...
     def put_object(self, **kwargs: Any) -> Any: ...
+    def create_multipart_upload(self, **kwargs: Any) -> dict[str, Any]: ...
+    def upload_part(self, **kwargs: Any) -> dict[str, Any]: ...
+    def upload_part_copy(self, **kwargs: Any) -> dict[str, Any]: ...
+    def complete_multipart_upload(self, **kwargs: Any) -> Any: ...
+    def abort_multipart_upload(self, **kwargs: Any) -> Any: ...
 
 
 @dataclass(frozen=True)
@@ -131,9 +142,13 @@ def _build(s3: S3, bucket: str, root: str, members: tuple[str, ...], into: IO[by
                     entry.write(chunk)
 
 
-def write_zips(s3: S3, bucket: str, root: str, manifest: dict[str, Any]) -> list[str]:
+def write_zips(
+    s3: S3, bucket: str, root: str, manifest: dict[str, Any], into: str | None = None
+) -> list[str]:
     """Write the zips of the version at `root` (`<prefix>/<id>/<version>/`) whose members
-    changed, and return the keys written. A version with no checksums.sha256 gets none."""
+    changed, and return the keys written. A version with no checksums.sha256 gets none. The
+    zips go under `into` when it is given (a folder to keep them apart from the version's own
+    files) and under `root` otherwise."""
     try:
         text = s3.get_object(Bucket=bucket, Key=root + CHECKSUMS)["Body"].read()
     except ClientError as error:
@@ -144,24 +159,36 @@ def write_zips(s3: S3, bucket: str, root: str, manifest: dict[str, Any]) -> list
     hashes = {**listed, CHECKSUMS: hashlib.sha256(text).hexdigest()}
     written: list[str] = []
     for item in plan(manifest, listed):
-        key = root + item.path
+        key = (root if into is None else into) + item.path
         mark = fingerprint(item.members, hashes)
         if _current(s3, bucket, key) == mark:
             continue
         with tempfile.TemporaryFile() as stream:
             _build(s3, bucket, root, item.members, stream)
+            stream.seek(0, 2)
+            size = stream.tell()
             stream.seek(0)
-            digest = hashlib.sha256()
-            while chunk := stream.read(CHUNK):
-                digest.update(chunk)
-            stream.seek(0)
-            s3.put_object(
-                Bucket=bucket,
-                Key=key,
-                Body=stream,
-                ChecksumSHA256=base64.b64encode(digest.digest()).decode("ascii"),
-                ContentType="application/zip",
-                Metadata={FINGERPRINT: mark},
-            )
+            if size > parts.ONE_REQUEST_MAX:
+                parts.upload(
+                    s3,
+                    bucket,
+                    key,
+                    stream,
+                    content_type="application/zip",
+                    metadata={FINGERPRINT: mark},
+                )
+            else:
+                digest = hashlib.sha256()
+                while chunk := stream.read(CHUNK):
+                    digest.update(chunk)
+                stream.seek(0)
+                s3.put_object(
+                    Bucket=bucket,
+                    Key=key,
+                    Body=stream,
+                    ChecksumSHA256=base64.b64encode(digest.digest()).decode("ascii"),
+                    ContentType="application/zip",
+                    Metadata={FINGERPRINT: mark},
+                )
         written.append(key)
     return written

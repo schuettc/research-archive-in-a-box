@@ -33,12 +33,19 @@ export class Storage extends Construct {
 
     this.stagingBucket = new s3.Bucket(this, "Staging", {
       ...common,
-      // Only uploads expire: held/ and reports/ stay until publish, reject or abandon removes them.
-      lifecycleRules: [{ prefix: "incoming/", expiration: Duration.days(30) }],
+      // Only uploads expire: reports/ stays, and held/ stays until publish, reject or abandon empties
+      // it. A failed publish leaves its held files, with the zips it built.
+      // Parts of a zip's multipart upload under held/ that died are not kept and billed.
+      lifecycleRules: [
+        { prefix: "incoming/", expiration: Duration.days(30) },
+        { abortIncompleteMultipartUploadAfter: Duration.days(1) },
+      ],
     });
     this.archiveBucket = new s3.Bucket(this, "Archive", {
       ...common,
       versioned: true,
+      // Parts of a multipart upload that died are not kept and billed. Nothing stored expires.
+      lifecycleRules: [{ abortIncompleteMultipartUploadAfter: Duration.days(1) }],
       ...(props.objectLock && {
         objectLockEnabled: true,
         objectLockDefaultRetention: s3.ObjectLockRetention.governance(

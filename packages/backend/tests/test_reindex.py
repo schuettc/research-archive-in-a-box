@@ -961,3 +961,14 @@ def test_dois_on_a_new_domain_point_each_doi_at_the_name(monkeypatch: pytest.Mon
     [(sent, attributes)] = dc.puts()
     assert sent == name
     assert attributes["url"] == f"https://{NEW_DOMAIN}/datasets/ds-1/v1"
+
+
+def test_a_claim_only_item_is_left_out() -> None:
+    manifest = {"title": "Kept"}
+    items = [
+        *catalog_items("open", "kept", 1, json.dumps(manifest)),
+        dataset_item("kept", [("open", 1, manifest)]),
+        {"PK": {"S": "DATASET#stream"}, "SK": {"S": "META"}, "claimedBy": {"S": "sub-a"}},
+    ]
+
+    assert [found[0] for found in reindex.current_versions(items)] == ["kept"]

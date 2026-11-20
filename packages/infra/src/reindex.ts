@@ -24,7 +24,8 @@ export class Reindex extends Construct {
       handler: "archive_backend.reindex.handler",
       timeout: Duration.minutes(15),
       memorySize: 1024,
-      // Each version's zips are built in /tmp before their one PUT.
+      // Each version's zips are built in /tmp before they are written. Not sized from the
+      // package limit: it rebuilds zips for packages published under any earlier setting.
       ephemeralStorageSize: Size.gibibytes(10),
       durableConfig: { executionTimeout: Duration.hours(12), retentionPeriod: Duration.days(30) },
       environment: {
@@ -44,6 +45,15 @@ export class Reindex extends Construct {
     // The zips beside each version, and nothing else in the archive bucket.
     archive.archiveBucket.grantPut(fn, "open/*/_zips/*");
     archive.archiveBucket.grantPut(fn, "restricted/*/_zips/*");
+    // A zip too large for one PUT is written in parts; an upload that fails is aborted.
+    fn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ["s3:AbortMultipartUpload"],
+        resources: ["open", "restricted"].map((prefix) =>
+          archive.archiveBucket.arnForObjects(`${prefix}/*/_zips/*`),
+        ),
+      }),
+    );
     if (archive.doiPasswordParameter) {
       // `just reindex <stage> --dois` writes each new DOI into its version's manifest and the
       // manifest's checksum line.

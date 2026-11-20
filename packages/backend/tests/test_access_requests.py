@@ -121,7 +121,13 @@ class FakeTable:
 
 
 def _dataset(dataset_id: str, title: str, level: str) -> dict[str, Any]:
-    return {"PK": f"DATASET#{dataset_id}", "SK": "META", "title": title, "access": level}
+    return {
+        "PK": f"DATASET#{dataset_id}",
+        "SK": "META",
+        "title": title,
+        "access": level,
+        "currentVersion": 1,
+    }
 
 
 class World:
@@ -591,3 +597,12 @@ def test_the_access_routes_are_in_the_openapi_spec() -> None:
     assert "AccessRequestBody" in schemas
     assert "DecisionBody" in schemas
     assert re.search(r"date", json.dumps(schemas["DecisionBody"]))
+
+
+def test_access_to_a_claim_only_id_is_refused_as_no_dataset(world: World) -> None:
+    # A first version being published: the claim, with no currentVersion yet.
+    world.catalog.put_item(Item={"PK": "DATASET#stream-abcdef", "SK": "META", "claimedBy": "sub-a"})
+
+    status, answer = world.call("POST", ASK, body={"reason": "x"}, dataset="stream-abcdef")
+
+    assert status == 404, answer

@@ -162,6 +162,14 @@ test("the lifecycle moves data files, rewrites pages and the catalog, and invali
   });
 });
 
+test("the lifecycle may abort a multipart copy in the archive's open/ and restricted/", () => {
+  const found = grants(LIFECYCLE, "s3:AbortMultipartUpload").join(" ");
+
+  expect(found).toContain("/open/*");
+  expect(found).toContain("/restricted/*");
+  expect(grants(CURATION, "s3:AbortMultipartUpload")).toEqual([]);
+});
+
 test("a lifecycle run whose retries all fail is sent to the alerts topic", () => {
   const topics = Object.keys(template.findResources("AWS::SNS::Topic")).filter((id) =>
     id.includes("AlertTopic"),

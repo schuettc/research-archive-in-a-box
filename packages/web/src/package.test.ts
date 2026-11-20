@@ -274,3 +274,48 @@ test("an edit of a field the manifest doesn't have applies nothing", () => {
   const raw = { resources: [{ name: "logger", schema: { fields: [{ name: "battery_v" }] } }] };
   expect(applyEdit(raw, { resource: "logger", field: "ghost", description: "x" })).toBeNull();
 });
+
+/** What the sample's listed files and its checksums.sha256 total, in bytes. */
+async function sampleTotal(): Promise<number> {
+  const checked = await checkPackage(fromFileList(sampleFiles()));
+  if (!checked.ok) throw new Error(checked.problem);
+  return checked.files.reduce((sum, file) => sum + file.size, 0);
+}
+
+test("a package over the archive's limit is refused before hashing", async () => {
+  const total = await sampleTotal();
+  const onHashed = vi.fn();
+
+  const checked = await checkPackage(fromFileList(sampleFiles()), onHashed, total - 1);
+
+  if (checked.ok) throw new Error("the package passed");
+  expect(checked.problem).toMatch(
+    /^This package's files total .+, more than the .+ GiB this archive takes\.$/,
+  );
+  expect(onHashed).not.toHaveBeenCalled();
+});
+
+test("the refusal names the package's size and the archive's limit", async () => {
+  const big = new File(["x"], "big.bin");
+  Object.defineProperty(big, "size", { value: 2 * 1024 ** 3 });
+  const sums = new File([`${"0".repeat(64)}  big.bin\n`], "checksums.sha256");
+  const manifest = new File(['{"id": "big"}'], "datapackage.json");
+  const files: PackageFile[] = [
+    { path: "big.bin", file: big },
+    { path: "checksums.sha256", file: sums },
+    { path: "datapackage.json", file: manifest },
+  ];
+
+  const checked = await checkPackage(files, () => {}, 1024 ** 3);
+
+  if (checked.ok) throw new Error("the package passed");
+  expect(checked.problem).toBe(
+    "This package's files total 2.1 GB, more than the 1 GiB this archive takes.",
+  );
+});
+
+test("a package of exactly the limit is checked as usual", async () => {
+  const checked = await checkPackage(fromFileList(sampleFiles()), () => {}, await sampleTotal());
+
+  expect(checked.ok).toBe(true);
+});

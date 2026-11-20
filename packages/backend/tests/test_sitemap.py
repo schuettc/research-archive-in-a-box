@@ -98,3 +98,11 @@ def test_write_sitemap_puts_site_sitemap_xml() -> None:
     )
     assert KEY == "site/sitemap.xml"
     assert f"https://{DOMAIN}/datasets/a/v1" in put["Body"].decode()
+
+
+def test_a_claim_only_item_is_left_out() -> None:
+    claim = {"PK": {"S": "DATASET#stream"}, "SK": {"S": "META"}, "claimedBy": {"S": "sub-a"}}
+
+    assert [loc for loc, _ in _urls(sitemap_xml([*_items("kept"), claim], DOMAIN))] == [
+        f"https://{DOMAIN}/datasets/kept/v1"
+    ]

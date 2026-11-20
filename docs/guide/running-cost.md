@@ -13,7 +13,7 @@ Each stage is its own stack, so each stage bills separately: a `dev` stage besid
 These grow with how much the archive is used, and are near zero when no one uses it:
 
 - **Amazon CloudFront**, which serves the site, the dataset pages and the public files: per request and per gigabyte of transfer. Downloads of large datasets are usually the biggest item of a busy archive.
-- **AWS Lambda**, which runs the API, the checks on each submission, publishing, the reindex and the scheduled jobs: per call and per second of running time. Checking a large submission runs longest.
+- **AWS Lambda**, which runs the API, the checks on each submission, publishing, the reindex and the scheduled jobs: per call and per second of running time. Checking a large submission runs longest. The checking function's temporary disk is sized from [`submissions.maxPackageGiB`](archive-yaml.md#submissionsmaxpackagegib) and is billed for the seconds the function runs, so a lower limit costs slightly less.
 - **Amazon API Gateway**, the API behind the web app: per request.
 - **Amazon DynamoDB**, which holds the catalog, the submissions, the settings, the download counts and the access requests: billed on demand, per read and per write, with nothing reserved.
 - **Amazon Cognito**, which holds the accounts: free up to its free tier of monthly active users, then per active user.

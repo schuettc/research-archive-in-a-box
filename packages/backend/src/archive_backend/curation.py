@@ -249,7 +249,8 @@ def _meta_key(dataset_id: str) -> dict[str, Any]:
 
 def _meta(table: str, dataset_id: str) -> dict[str, Any]:
     item = clients().dynamodb.get_item(TableName=table, Key=_meta_key(dataset_id)).get("Item")
-    if not item:
+    # An item with no currentVersion is a first version's claim: nothing is published yet.
+    if not item or "currentVersion" not in item:
         raise NotFoundError(f"no dataset {dataset_id}")
     return cast(dict[str, Any], item)
 

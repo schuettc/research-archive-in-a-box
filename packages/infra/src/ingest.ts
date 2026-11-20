@@ -11,7 +11,15 @@ import type { ResearchArchive } from "./research-archive";
 export interface IngestProps {
   readonly archive: ResearchArchive;
   readonly stage: string;
+  /** The archive's package-size limit, `submissions.maxPackageGiB`. */
+  readonly maxPackageGiB: number;
 }
+
+/**
+ * The room the ingest function's /tmp has beyond the package limit, in MiB. The contract's
+ * DISK_MARGIN_MB repeated: the schema's maximum plus this is a Lambda's largest disk.
+ */
+export const DISK_MARGIN_MIB = 1024;
 
 const GUARDDUTY_PLAN_SERVICE = "malware-protection-plan.guardduty.amazonaws.com";
 
@@ -73,8 +81,9 @@ export class Ingest extends Construct {
       handler: "archive_backend.ingest.handler",
       timeout: Duration.minutes(15),
       memorySize: 2048,
-      // diagnose downloads the whole round to /tmp.
-      ephemeralStorageSize: Size.gibibytes(10),
+      // The check step downloads the whole round to /tmp, and the zips step builds package.zip
+      // there: the package limit plus a fixed margin.
+      ephemeralStorageSize: Size.mebibytes(props.maxPackageGiB * 1024 + DISK_MARGIN_MIB),
       durableConfig: { executionTimeout: Duration.days(365), retentionPeriod: Duration.days(30) },
       environment: {
         ...recordEnv,
@@ -104,19 +113,34 @@ export class Ingest extends Construct {
     fn.addToRolePolicy(
       allow(["s3:ListBucket"], [staging.bucketArn], { StringLike: { "s3:prefix": "held/*" } }),
     );
-    // Publish writes each file, then reads the manifest it just wrote for the page.
+    // Publish builds a version's zips under held/ before anything of it is in the archive
+    // bucket; a zip too large for one PUT is written in parts, and aborted when that fails.
+    fn.addToRolePolicy(allow(["s3:AbortMultipartUpload"], objects(staging, "held/")));
+    // The copy step writes each file and zip to the version's public folder; later steps read
+    // the manifest there for the catalog and the page.
     fn.addToRolePolicy(
       allow(
         ["s3:PutObject", "s3:GetObject"],
         objects(archive.archiveBucket, "open/", "restricted/"),
       ),
     );
-    // The page step HEADs each zip to see whether it changed; without list rights S3 answers a
-    // missing key with 403 instead of 404.
+    // A zip too large for one copy is copied in parts, and the DOI path rewrites one in parts
+    // where it is; either is aborted when it fails.
+    fn.addToRolePolicy(
+      allow(["s3:AbortMultipartUpload"], objects(archive.archiveBucket, "open/", "restricted/")),
+    );
+    // The DOI path's zips step HEADs each zip to see whether it changed; without list rights S3
+    // answers a missing key with 403 instead of 404. A failed publish lists what to remove.
     fn.addToRolePolicy(
       allow(["s3:ListBucket"], [archive.archiveBucket.bucketArn], {
         StringLike: { "s3:prefix": ["open/*", "restricted/*"] },
       }),
+    );
+    // A publish that fails before its version is live hides what it copied to the public folder,
+    // and a later publish that takes over its claim does the same. The bucket is versioned, so the delete
+    // adds a delete marker: no right to delete a version or to bypass Object Lock.
+    fn.addToRolePolicy(
+      allow(["s3:DeleteObject"], objects(archive.archiveBucket, "open/", "restricted/")),
     );
     fn.addToRolePolicy(allow(["s3:PutObject"], objects(archive.derivedBucket, "site/datasets/")));
     // Publish's catalog-file and sitemap steps rewrite the catalog file search reads and the
@@ -133,13 +157,18 @@ export class Ingest extends Construct {
     archive.submissions.grant(fn, "dynamodb:GetItem", "dynamodb:UpdateItem");
     archive.reviews.grant(fn, "dynamodb:PutItem");
     archive.settings.grant(fn, "dynamodb:GetItem");
-    // Publish claims its version with a conditional update of the dataset item, and its
-    // catalog-file step scans the active table for every row.
+    // Publish claims its version with a conditional update of the dataset item, and its catalog
+    // step moves currentVersion with a conditional put of it. A publish that fails deletes the
+    // claim-only item of a first version, and the version's items, which it finds by a query.
+    // The catalog-file step scans the active table for every row.
     for (const table of catalogTables) {
       table.grant(
         fn,
         "dynamodb:GetItem",
         "dynamodb:UpdateItem",
+        "dynamodb:PutItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Query",
         "dynamodb:BatchWriteItem",
         "dynamodb:Scan",
       );

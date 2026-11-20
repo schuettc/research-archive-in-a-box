@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import io
 import json
@@ -90,6 +91,8 @@ class FakeS3:
         self.pending: dict[str, str] = {}
         self.copies: list[tuple[str, str]] = []
         self.fail_copy = False
+        self.sizes: dict[str, int] = {}
+        self.downloads: list[str] = []
 
     def get_object_tagging(self, *, Bucket: str, Key: str) -> dict[str, Any]:
         assert Bucket == STAGING
@@ -100,6 +103,7 @@ class FakeS3:
     def get_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:
         if Bucket != STAGING:
             return {"Body": io.BytesIO(self.published[(Bucket, Key)])}
+        self.downloads.append(Key)
         return {"Body": io.BytesIO(self.objects[Key])}
 
     def put_object(self, *, Bucket: str, Key: str, Body: Any, **_: Any) -> dict[str, Any]:
@@ -111,17 +115,36 @@ class FakeS3:
             self.objects[Key] = body
         return {}
 
-    def head_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:
+    def head_object(self, *, Bucket: str, Key: str, **_: Any) -> dict[str, Any]:
+        if Bucket == STAGING and Key in self.objects:
+            return {
+                "Metadata": {},
+                "ContentLength": self.sizes.get(Key, len(self.objects[Key])),
+                "ChecksumSHA256": self._sha256(self.objects[Key]),
+            }
         if (Bucket, Key) not in self.published:
             raise ClientError({"Error": {"Code": "404"}}, "HeadObject")
-        return {"Metadata": {}}
+        body = self.published[(Bucket, Key)]
+        return {"Metadata": {}, "ContentLength": len(body), "ChecksumSHA256": self._sha256(body)}
+
+    @staticmethod
+    def _sha256(body: bytes) -> str:
+        return base64.b64encode(hashlib.sha256(body).digest()).decode()
 
     def copy_object(
         self, *, Bucket: str, Key: str, CopySource: dict[str, str], **_: Any
     ) -> dict[str, Any]:
         if self.fail_copy:
             raise RuntimeError("copy refused")
-        assert Bucket == STAGING and CopySource["Bucket"] == STAGING
+        if Bucket == ARCHIVE:
+            # The publish's copy into the archive bucket, which S3 answers with the SHA-256 of
+            # what it stored.
+            assert CopySource["Bucket"] == STAGING
+            body = self.objects[CopySource["Key"]]
+            self.published[(Bucket, Key)] = body
+            return {"CopyObjectResult": {"ChecksumSHA256": self._sha256(body)}}
+        assert CopySource["Bucket"] == STAGING
+        assert Bucket == STAGING
         self.objects[Key] = self.objects[CopySource["Key"]]
         self.copies.append((CopySource["Key"], Key))
         return {}
@@ -131,13 +154,19 @@ class FakeS3:
         return self
 
     def paginate(self, *, Bucket: str, Prefix: str) -> Iterator[dict[str, Any]]:
-        keys = sorted(k for k in self.objects if k.startswith(Prefix))
+        if Bucket == STAGING:
+            keys = sorted(k for k in self.objects if k.startswith(Prefix))
+        else:
+            keys = sorted(k for b, k in self.published if b == Bucket and k.startswith(Prefix))
         for start in range(0, len(keys), 3):
             yield {"Contents": [{"Key": k} for k in keys[start : start + 3]]}
 
     def delete_objects(self, *, Bucket: str, Delete: dict[str, Any]) -> dict[str, Any]:
         for entry in Delete["Objects"]:
-            self.objects.pop(entry["Key"], None)
+            if Bucket == STAGING:
+                self.objects.pop(entry["Key"], None)
+            else:
+                self.published.pop((Bucket, entry["Key"]), None)
         return {}
 
     def keys(self, prefix: str) -> list[str]:
@@ -221,11 +250,16 @@ class FakeDynamoDB:
         # The version claim on a dataset item none of these runs has published before.
         key = (TableName, Key["PK"]["S"], Key["SK"]["S"])
         assert key not in self.items
-        self.items[key] = {
-            **Key,
-            "currentVersion": ExpressionAttributeValues[":v"],
-            "claimedBy": ExpressionAttributeValues[":sid"],
-        }
+        self.items[key] = {**Key, "claimedBy": ExpressionAttributeValues[":sid"]}
+        return {}
+
+    def put_item(
+        self, *, TableName: str, Item: dict[str, Any], ExpressionAttributeValues: Any, **_: Any
+    ) -> dict[str, Any]:
+        # The dataset item going live, written by the submission that claimed it.
+        key = (TableName, Item["PK"]["S"], Item["SK"]["S"])
+        assert self.items[key]["claimedBy"] == ExpressionAttributeValues[":sid"]
+        self.items[key] = Item
         return {}
 
     def batch_write_item(self, *, RequestItems: dict[str, Any]) -> dict[str, Any]:
@@ -530,6 +564,32 @@ def test_request_changes_then_approve_publishes_round_two(world: World) -> None:
     assert world.item["approvals"] == ["dave"]
 
 
+def test_zips_left_under_held_are_no_part_of_the_next_round(world: World) -> None:
+    left = f"held/{SID}/.zips/_zips/all/package.zip"
+
+    def changes() -> dict[str, Any]:
+        # As a publish that built its zips leaves held/: a zip beside the held files, here one
+        # that alone weighs more than the archive takes.
+        world.s3.objects[left] = b"PK"
+        world.s3.sizes[left] = 20 * 1024**3
+        return _decision("request-changes", note="Add units")
+
+    def approve() -> dict[str, Any]:
+        # The round was checked and held without the zip: the hold step replaced held/ whole.
+        assert world.item["status"] == "in-review"
+        assert world.s3.keys(f"held/{SID}/") == sorted(f"held/{SID}/{p}" for p in _package())
+        # The fake keeps a size apart from its object; the zip this publish builds is its own.
+        del world.s3.sizes[left]
+        return _decision("approve", by="dave")
+
+    result, _ = world.run([changes, world.resubmit(2, _package()), approve])
+
+    assert result["status"] == "published"
+    checked = [e for e in world.reviews.events if e["type"] == "checked"]
+    assert [e["blocked"] for e in checked] == [False, False]
+    assert left not in world.s3.downloads
+
+
 def test_a_blocking_error_returns_the_round_without_review(world: World) -> None:
     world.s3.objects = {}
     world.upload(1, _package(broken=True))
@@ -564,6 +624,47 @@ def test_a_threat_tag_blocks_the_round_with_a_scan_finding(world: World) -> None
         ("scan.THREATS_FOUND", "error", {"path": "data/logger.csv"})
     ]
     assert world.s3.copies == []
+
+
+def test_a_stored_file_of_another_size_than_declared_blocks_the_round_unread(
+    world: World,
+) -> None:
+    # The upload link signs only the SHA-256, so a client may declare a size it does not send.
+    world.s3.sizes[f"incoming/{SID}/1/data/logger.csv"] = 7
+
+    result, _ = world.run(["timeout"])
+
+    assert result["status"] == "abandoned"
+    report = json.loads(world.s3.objects[f"reports/{SID}/1.json"])
+    declared = next(e["size"] for e in world.item["files"]["1"] if e["path"] == "data/logger.csv")
+    assert [
+        (f["ruleId"], f["severity"], f["target"], f["message"]) for f in report["findings"]
+    ] == [
+        (
+            "upload.size",
+            "error",
+            {"path": "data/logger.csv"},
+            f"data/logger.csv is 7 bytes as uploaded, not the {declared:,} bytes the submission"
+            " declared.",
+        )
+    ]
+    assert world.reviews.events[1]["blocked"] is True
+    assert world.s3.downloads == [] and world.s3.copies == []
+
+
+def test_stored_files_totalling_more_than_the_limit_block_the_round_unread(world: World) -> None:
+    for entry in world.item["files"]["1"][:2]:
+        entry["size"] = 5 * 1024**3
+        world.s3.sizes[f"incoming/{SID}/1/{entry['path']}"] = 5 * 1024**3
+
+    result, _ = world.run(["timeout"])
+
+    assert result["status"] == "abandoned"
+    report = json.loads(world.s3.objects[f"reports/{SID}/1.json"])
+    [finding] = report["findings"]
+    assert (finding["ruleId"], finding["severity"]) == ("upload.total", "error")
+    assert "more than the 9 GiB (9,663,676,416 bytes) this archive takes" in finding["message"]
+    assert world.s3.downloads == []
 
 
 def test_a_scan_that_never_finishes_ends_failed_after_a_day(world: World) -> None:

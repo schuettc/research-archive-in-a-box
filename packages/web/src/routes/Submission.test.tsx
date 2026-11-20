@@ -41,6 +41,9 @@ beforeEach(() => {
   fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     if (url === REPORT_URL) return Response.json(report);
     const path = new URL(url, "https://site").pathname;
+    if (path === "/archive-checks.json") {
+      return Response.json({ profiles: ["core"], required: [], maxPackageGiB: 9 });
+    }
     if (path === "/api/checks") {
       return Response.json({ findings: checksFor(JSON.parse(String(init?.body))) });
     }

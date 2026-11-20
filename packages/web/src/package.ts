@@ -4,6 +4,7 @@
  * to their presigned links.
  */
 import type { Finding, SubmittedFile, Upload } from "./api";
+import { formatSize } from "./labels";
 
 /** A file of the package, by its path from the package folder's root. */
 export interface PackageFile {
@@ -124,11 +125,13 @@ export async function sha256Hex(file: Blob): Promise<string> {
  * Check a package before anything is sent: it holds `datapackage.json` and `checksums.sha256`,
  * every file the checksums list is there and matches, and the manifest names its dataset.
  * The files sent are the listed ones and `checksums.sha256` itself. `onHashed` hears how many
- * files have been hashed, of how many.
+ * files have been hashed, of how many. With `maxBytes`, the archive's limit, a package whose
+ * files total more is refused before any is hashed.
  */
 export async function checkPackage(
   files: PackageFile[],
   onHashed: (done: number, total: number) => void = () => {},
+  maxBytes: number | null = null,
 ): Promise<Checked> {
   const byPath = new Map(files.map((entry) => [entry.path, entry.file]));
   const manifestFile = byPath.get("datapackage.json");
@@ -171,6 +174,13 @@ export async function checkPackage(
   }
   const ready: ReadyFile[] = [];
   const listed = [...sums.keys(), "checksums.sha256"];
+  const total = listed.reduce((sum, path) => sum + byPath.get(path)!.size, 0);
+  if (maxBytes !== null && total > maxBytes) {
+    return {
+      ok: false,
+      problem: `This package's files total ${formatSize(total)}, more than the ${maxBytes / 1024 ** 3} GiB this archive takes.`,
+    };
+  }
   let done = 0;
   onHashed(done, listed.length);
   for (const path of listed) {

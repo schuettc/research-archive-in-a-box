@@ -19,7 +19,7 @@ import { Auth } from "./auth";
 import { Curation } from "./curation";
 import { Email, REGIONS_WITHOUT_SES } from "./email";
 import { loginBrand } from "./brand";
-import { stagesOf } from "./config";
+import { maxPackageGiB, stagesOf } from "./config";
 import type { ArchiveConfig } from "./generated/archive-config";
 import { Ingest } from "./ingest";
 import { IntegrityCheck } from "./integrity";
@@ -286,7 +286,11 @@ export class ResearchArchive extends Construct {
         webClientId: this.userPoolClients.web.userPoolClientId,
       },
       // The contract's defaults when the config names none, as ingest applies them.
-      { profiles: props.config.profiles ?? ["core"], required: props.config.required ?? [] },
+      {
+        profiles: props.config.profiles ?? ["core"],
+        required: props.config.required ?? [],
+        maxPackageGiB: maxPackageGiB(props.config),
+      },
     );
 
     new IntegrityCheck(this, "IntegrityCheck", {
@@ -308,7 +312,11 @@ export class ResearchArchive extends Construct {
 
     this.reindexFunction = new Reindex(this, "Reindex", { archive: this }).alias;
 
-    const ingest = new Ingest(this, "Ingest", { archive: this, stage: props.stage });
+    const ingest = new Ingest(this, "Ingest", {
+      archive: this,
+      stage: props.stage,
+      maxPackageGiB: maxPackageGiB(props.config),
+    });
     this.ingestFunction = ingest.alias;
     this.curatorTopic = ingest.curatorTopic;
 

@@ -19,6 +19,12 @@ const CONTRIBUTOR = ["contributor"];
 /** What the next `/api/checks` adds to the findings it works out from the manifest. */
 let extraFindings: Finding[] = [];
 let checked: Record<string, unknown>[] = [];
+/** The limit the archive publishes in `/archive-checks.json`. */
+let maxPackageGiB = 9;
+/** Whether `/archive-checks.json` can be read. */
+let checksReadable = true;
+/** Whether the sample's dataset is already in the catalog. */
+let published = false;
 
 const STAGING = "https://staging.example/incoming/s-1/1/";
 const b64 = (hex: string) =>
@@ -36,15 +42,24 @@ beforeEach(() => {
   progressAtSubmit = null;
   extraFindings = [];
   checked = [];
+  maxPackageGiB = 9;
+  checksReadable = true;
+  published = false;
   fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     const path = new URL(url, "https://site").pathname;
+    if (path === "/archive-checks.json") {
+      if (!checksReadable) return Response.json({}, { status: 503 });
+      return Response.json({ profiles: ["core"], required: [], maxPackageGiB });
+    }
     if (path === "/api/checks" && init?.method === "POST") {
       const manifest = JSON.parse(String(init.body)) as Record<string, unknown>;
       checked.push(manifest);
       return Response.json({ findings: [...checksFor(manifest), ...extraFindings] });
     }
     if (path === "/api/datasets/stream-temperature-sample")
-      return Response.json({}, { status: 404 });
+      return published
+        ? Response.json({ id: "stream-temperature-sample" })
+        : Response.json({}, { status: 404 });
     if (path === "/api/submissions" && init?.method === "POST") {
       created = JSON.parse(String(init.body));
       return Response.json(
@@ -118,7 +133,7 @@ test("the sample folder is checked, created as a new dataset, uploaded with each
 });
 
 test("a folder that is already published reads as a new version", async () => {
-  fetchMock.mockImplementationOnce(async () => Response.json({ id: "stream-temperature-sample" }));
+  published = true;
   renderSubmit();
   choose(sampleFiles());
 
@@ -131,7 +146,10 @@ test("a folder without checksums.sha256 is refused before anything is sent", asy
 
   expect((await screen.findByRole("alert")).textContent).toMatch(/no checksums\.sha256/);
   expect(screen.queryByRole("button", { name: "Upload and submit" })).toBeNull();
-  expect(fetchMock).not.toHaveBeenCalled();
+  // Nothing but the read of the archive's limit.
+  expect(new Set(fetchMock.mock.calls.map(([url]) => url))).toEqual(
+    new Set(["/archive-checks.json"]),
+  );
 });
 
 /** The bytes of the file sent to `path`'s link. */
@@ -362,4 +380,55 @@ test("the submit page says nothing is sent until Upload and submit, and that dro
     await screen.findByText(/Nothing leaves your computer until you press Upload and submit/),
   ).toBeDefined();
   expect(screen.getByText(/dropping the folder here doesn't/)).toBeDefined();
+});
+
+test("the page says how large a package may be", async () => {
+  renderSubmit();
+
+  expect(await screen.findByText("Packages up to 9 GiB.")).toBeDefined();
+});
+
+test("a folder over the archive's limit is refused before anything is hashed or sent", async () => {
+  maxPackageGiB = 0;
+  renderSubmit();
+  choose(sampleFiles());
+
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toMatch(
+    /^This package's files total .+, more than the 0 GiB this archive takes\.$/,
+  );
+  expect(created).toBeNull();
+});
+
+test("a folder chosen while the archive's limit can't be read is not checked, and says to try again", async () => {
+  checksReadable = false;
+  renderSubmit();
+  choose(sampleFiles());
+
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toBe("The archive can't be reached. Try again.");
+  expect(screen.queryByText(/Packages up to/)).toBeNull();
+  expect(screen.queryByRole("button", { name: "Upload and submit" })).toBeNull();
+  expect(checked).toEqual([]);
+  expect(created).toBeNull();
+
+  checksReadable = true;
+  choose(sampleFiles());
+
+  expect(await screen.findByText("New dataset")).toBeDefined();
+});
+
+test("a folder over a limit of several GiB is refused with the message that names the limit", async () => {
+  maxPackageGiB = 2;
+  renderSubmit();
+  const large = sampleFiles();
+  Object.defineProperty(large[0], "size", { value: 3 * 1024 ** 3 });
+  choose(large);
+
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toMatch(
+    /^This package's files total 3\.2 GB, more than the 2 GiB this archive takes\.$/,
+  );
+  expect(checked).toEqual([]);
+  expect(created).toBeNull();
 });

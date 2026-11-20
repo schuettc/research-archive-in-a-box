@@ -14,6 +14,8 @@ from archive_agent.archive import Archive
 from archive_agent.errors import ArchiveError, NotAllowed, NotConnected, Refused
 from archive_client.signin import AuthConfig, Tokens, sign_in
 
+LIMIT = "maxPackageGiB"
+
 
 def config_file() -> Path:
     """`archive.json` under `$XDG_CONFIG_HOME/research-archive-in-a-box`, else `~/.config/...`."""
@@ -30,12 +32,16 @@ def _saved() -> dict[str, Any]:
     return document if isinstance(document, dict) else {}
 
 
-def saved() -> tuple[str | None, dict[str, list[str]] | None]:
-    """The default archive's URL and its checks, from one read of the saved file; each is None
-    when the file doesn't hold it."""
+def saved() -> tuple[str | None, dict[str, list[str]] | None, int | None]:
+    """The default archive's URL, its checks and its package limit in GiB, from one read of the
+    saved file; each is None when the file doesn't hold it."""
     document = _saved()
     url = document.get("url")
-    return (url if isinstance(url, str) and url else None), checks(document.get("checks"))
+    return (
+        (url if isinstance(url, str) and url else None),
+        checks(document.get("checks")),
+        limit_gib(document),
+    )
 
 
 def saved_url() -> str | None:
@@ -56,14 +62,22 @@ def checks(document: object) -> dict[str, list[str]] | None:
     return lists
 
 
-def fetch_checks(url: str) -> dict[str, list[str]] | None:
-    """The profiles and required fields the archive at `url` publishes, or None when it
-    publishes none. An archive deployed before /archive-checks.json existed answers 404 (or 403)
-    for it. Unreachable still raises."""
+def limit_gib(document: object) -> int | None:
+    """`/archive-checks.json`'s `maxPackageGiB`, the most a package's files may total, or None
+    when the archive publishes none."""
+    value = document.get(LIMIT) if isinstance(document, dict) else None
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+
+def fetch_published(url: str) -> tuple[dict[str, list[str]] | None, int | None]:
+    """The profiles and required fields the archive at `url` publishes, and its package limit
+    in GiB, each None when it publishes none. An archive deployed before /archive-checks.json
+    existed answers 404 (or 403) for it. Unreachable still raises."""
     try:
-        return checks(Archive(url).get("/archive-checks.json"))
+        document = Archive(url).get("/archive-checks.json")
     except (Refused, NotAllowed):
-        return None
+        return None, None
+    return checks(document), limit_gib(document)
 
 
 def saved_checks() -> dict[str, list[str]] | None:
@@ -71,11 +85,16 @@ def saved_checks() -> dict[str, list[str]] | None:
     return saved()[1]
 
 
-def save_url(url: str, archive_checks: dict[str, list[str]] | None = None) -> Path:
-    """Save the archive URL and the checks it publishes, if any, replacing the file whole."""
+def save_url(
+    url: str, archive_checks: dict[str, list[str]] | None = None, limit: int | None = None
+) -> Path:
+    """Save the archive URL with the checks and the package limit (GiB) it publishes, if any,
+    replacing the file whole."""
     document: dict[str, Any] = {"url": url}
     if archive_checks is not None:
         document["checks"] = archive_checks
+    if limit is not None:
+        document[LIMIT] = limit
     path = config_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
@@ -99,21 +118,25 @@ class Session:
     """This window's archive, fixed at its first use or its own connect."""
     checks: dict[str, list[str]] | None = None
     """The requirement sets that archive publishes, as this window last read them."""
+    limit: int | None = None
+    """The most a package's files may total there, in GiB, as this window last read it."""
 
     def known(self) -> str | None:
         """This window's archive, taken with its checks from the saved default in one read when
         the window has none yet. None when nothing is saved: nothing is fixed, and the next call
         looks again."""
         if self.address is None:
-            url, archive_checks = saved()
+            url, archive_checks, limit = saved()
             if url is None:
                 return None
-            self.address, self.checks = url, archive_checks
+            self.address, self.checks, self.limit = url, archive_checks, limit
         return self.address
 
-    def use(self, address: str, checks: dict[str, list[str]] | None) -> None:
+    def use(
+        self, address: str, checks: dict[str, list[str]] | None, limit: int | None = None
+    ) -> None:
         """Move this window to another archive, signed out. Only connect calls it."""
-        self.address, self.checks = address, checks
+        self.address, self.checks, self.limit = address, checks, limit
         self.tokens = None
         self.groups = []
 
@@ -130,17 +153,18 @@ class Session:
         return Archive(self.url(), self.tokens)
 
 
-def refresh_checks(session: Session) -> None:
-    """Take the session's archive's current checks when they changed; keep what the session has
-    when the archive can't answer them. The saved file is rewritten only while that archive is
-    still the default, so a window on another archive leaves the default alone."""
+def refresh_checks(session: Session) -> int | None:
+    """Take the session's archive's current checks and package limit when they changed; keep
+    what the session has when the archive can't answer them. The saved file is rewritten only
+    while that archive is still the default, so a window on another archive leaves the default
+    alone. Answers the limit in bytes, or None when the archive publishes none."""
     url = session.url()
     try:
-        current = fetch_checks(url)
+        current, limit = fetch_published(url)
     except ArchiveError:
-        return
-    if current is None or current == session.checks:
-        return
-    session.checks = current
-    if saved_url() == session.address:
-        save_url(url, current)
+        current, limit = None, session.limit
+    if current is not None and (current, limit) != (session.checks, session.limit):
+        session.checks, session.limit = current, limit
+        if saved_url() == session.address:
+            save_url(url, current, limit)
+    return session.limit * 1024**3 if session.limit is not None else None
