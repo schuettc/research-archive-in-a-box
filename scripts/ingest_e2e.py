@@ -6,7 +6,7 @@ a curator who is also an admin, and a second curator), signs them in through the
 client, sets a review policy, and drives the sample package through the submissions API:
 approve, reject, request changes then approve, a blocking error, a skip rule, two curators and
 a reminder. Three more runs check the publish path: a second version of a live dataset, read
-once a second through its publish, which must answer version 1 and then version 2 and never
+four times a second through its publish, which must answer version 1 and then version 2 and never
 "not found"; a package one byte over `submissions.maxPackageGiB`, which the API must refuse
 before any upload; and, only with `--large`, a package of random bytes just under that limit,
 which takes the stage's whole disk and a zip of more than 5 GiB. Each run checks the event
@@ -68,7 +68,7 @@ LARGE_PATHS = ("data/large-1.bin", "data/large-2.bin")
 LARGE_SLACK = 1024**2
 CHUNK = 8 * 1024**2
 PACKAGE_ZIP = "_zips/all/package.zip"
-VERSION_POLL_SECONDS = 1
+VERSION_POLL_SECONDS = 0.25
 
 REVIEWED = ["created", "submitted", "scanned", "checked", "held", "entered-review"]
 ROUND = ["scanned", "checked", "held", "entered-review"]
@@ -634,7 +634,9 @@ def run_new_version(s: Stage) -> str:
     dataset_id = str(s.wait(first, "published")["datasetId"])
     sid = s.submit(s.folder(), dataset_id)
     s.wait(sid, "in-review")
-    seen: list[tuple[int, int | None]] = []
+    # Read once before the decision: the publish takes a few seconds, less than the read API's
+    # first answer can.
+    seen: list[tuple[int, int | None]] = [s.dataset(dataset_id)]
     published = threading.Event()
 
     def read() -> None:
