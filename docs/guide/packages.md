@@ -59,9 +59,9 @@ A **finding** is one thing `cruise diagnose` noticed about a package, such as "C
 - a **warning** is worth fixing, but the package can be published with it;
 - a **note** is for information only.
 
-Each finding also names the **rule** that raised it, such as `field.description-missing`, and the part of the package it is about, such as `logger.battery_v` (the `battery_v` column of the `logger` file). The findings are grouped under four questions a reader would ask: the package's structure, whether they can find, cite and reuse it, whether they can understand each column, and whether they can trust the values.
+Each finding also names the **rule** that raised it, such as `field.description-missing`, and the part of the package it is about, such as `logger.battery_v` (the `battery_v` column of the `logger` file). The findings are grouped under four headings: the package's structure, then three questions a reader would ask, which are whether they can find, cite and reuse it, whether they can understand each column, and whether they can trust the values. Only a heading with a finding under it is printed.
 
-The **score** at the end counts how many of the checks under three of those questions passed, and the **verdict** says whether the package can be published.
+The **score** at the end counts how many of the checks under the three questions passed, and the **verdict** says whether the package can be published.
 
 A CSV table that can't be parsed is an error, `values.malformed`, and blocks publishing: a file that is not UTF-8, a row with more or fewer cells than the schema has fields, or a quote that is never closed. Nothing else can check such a table, so fix the file first. A table `cruise` leaves unread on purpose, such as one in a format other than CSV, gets the note `values.unreadable` and does not block.
 

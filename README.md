@@ -34,7 +34,7 @@ Your first command checks one package folder. In a clone of this repository, try
 cruise diagnose examples/sample-package
 ```
 
-It answers in three groups of questions (can I find it, can I understand each column, can I trust the values), gives each problem a fix, and ends with a score and a verdict. On the sample package the verdict is `publishable, with 4 warnings`; one of them is that the column `battery_v` has no description. `cruise set` writes a fix into the manifest and rewrites `README.md` and `checksums.sha256` to match. Copy the sample package somewhere first, so the fix doesn't change the repository:
+It groups what it finds under four headings (the package's structure, then three questions: can I find, cite and reuse it, can I understand each column, can I trust the values), showing only those with something to report. It gives each problem a fix, and ends with a score and a verdict. On the sample package the verdict is `publishable, with 4 warnings`; one of them is that the column `battery_v` has no description. `cruise set` writes a fix into the manifest and rewrites `README.md` and `checksums.sha256` to match. Copy the sample package somewhere first, so the fix doesn't change the repository:
 
 ```
 mkdir -p /tmp/guide

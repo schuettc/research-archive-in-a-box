@@ -10,13 +10,13 @@ This page covers what most often goes wrong while setting up an archive, during 
 gh run list --commit $(git rev-parse HEAD) --workflow CI --json databaseId --jq '.[0].databaseId'
 ```
 
-**Why:** GitHub Actions is off for the fork, so GitHub runs no workflow for the push. This prints `false` when it is off:
+**Why:** GitHub Actions is off for the fork, or its workflows are not enabled there, so GitHub runs no workflow for the push. This prints `false` when Actions is off:
 
 ```
 gh api repos/<owner>/<name>/actions/permissions --jq .enabled
 ```
 
-**What to do:** turn Actions on under the fork's Settings › Actions, then push a new commit to `main`.
+**What to do:** when it prints `false`, turn Actions on under the fork's Settings › Actions. It can print `true` while pushes still start no run: open the fork's **Actions** tab, and if it shows a notice that workflows aren't being run on this fork, enable them with the button there. Then push a new commit to `main`.
 
 ## CI can't assume the deploy role
 
@@ -53,7 +53,7 @@ Three kinds of email go through Amazon SNS, the AWS service that sends a message
 
 **What you see:** an alert, an access request notice or a review message reaches nobody, though the address is right.
 
-**Why:** SNS sends nothing to an address until its owner confirms the subscription. AWS emails a confirmation link when the address is subscribed: the alert email after the first deploy, an admin when they are given the admin role, and a curator when you run `just add-curator`. Until the link is clicked, no message reaches that address.
+**Why:** SNS sends nothing to an address until its owner confirms the subscription. AWS emails a confirmation link when the address is subscribed: the alert email after the first deploy, an admin when they are invited as an admin (on the People page or with `just invite-user`) or given the admin role on the People page, and a curator when you run `just add-curator`. `just set-roles` subscribes nobody, so an account made an admin with it gets no notices of access requests. Until the link is clicked, no message reaches that address.
 
 **What to do:** find the confirmation email from AWS and click its link. A curator who was never subscribed gets no review messages at all: giving the curator role doesn't subscribe anyone, so run `just add-curator <stage> <email> <userId>` for them, as [The first admin](deploying.md#6--the-first-admin) explains.
 

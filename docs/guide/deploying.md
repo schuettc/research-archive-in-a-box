@@ -96,7 +96,7 @@ just set-roles <stage> <email> contributor
 
 With `selfSignUp: false` only invited people get an account, so `limited` means the people you invited. On a public stage with sign-up on, use `email: ses`.
 
-Giving someone the curator role does not email them about submissions. The archive sends its review messages (a submission is waiting for review, a reminder, a review gone stale) to a notification topic in Amazon SNS, the stage's curators' topic, and a new stage's topic has no one subscribed to it. Subscribe each curator's email address with:
+Giving someone the curator role does not email them about submissions. The archive sends its review messages (a submission is waiting for review, a reminder, a review gone stale) to a notification topic in Amazon SNS, the stage's curators' topic, and a new stage's topic has no one subscribed to it. Subscribe each curator's email address with this recipe, which needs `jq` installed:
 
 ```
 just add-curator <stage> <email> <userId>
@@ -140,6 +140,12 @@ Bootstrap CDK in the account and Region, unless `aws cloudformation describe-sta
 
 ```
 cd packages/infra && npx cdk bootstrap aws://<account>/<region>
+```
+
+When a stage in the account has `email: ses`, ask whether the account is still in the SES sandbox in that stage's Region. An answer of `false` means it is: until AWS grants production access, the archive can email only addresses verified in SES, so invitations and sign-up codes reach no one else. [SES's sandbox](../email.md#sess-sandbox) says how to request access and how to verify an address meanwhile.
+
+```
+aws sesv2 get-account --region <region> --query ProductionAccessEnabled
 ```
 
 Ask whether the account already has GitHub's OIDC provider, since IAM allows only one. When the answer is `NoSuchEntity`, there is none. When it lists `sts.amazonaws.com`, add `-c githubOidcProvider=existing` to the deploy below, which then uses that provider and leaves it alone. When it lists client ids without `sts.amazonaws.com`, stop: the existing provider doesn't accept AWS STS (the service that hands out the temporary credentials), and changing it is a decision for whoever owns it.

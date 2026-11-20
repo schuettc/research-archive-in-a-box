@@ -54,12 +54,10 @@ reaches you with no edit here: `packages/web/src/schema/archive-contract.schema.
 tell the person.
 
 1. Ask about the archive first: the publisher's name, the alert email (budget and failure alerts
-   go there), the monthly budget in US dollars, the profiles, the licenses offered and the access
-   levels offered. The access levels are `public` (anyone downloads the files), `limited` (any
-   signed-in account downloads them), `restricted` (an admin approves each person's request) and
-   `description-only` (the page and its description are published, with no files).
+   go there), the monthly budget in US dollars and the profiles.
 2. Then walk through every other setting, one at a time, with its default, and keep the default
-   unless they want something else. The WAF is on unless they set `waf: false`: say it costs
+   unless they want something else. Leave out `vocabularies`, `themes`, `licenses` and `access`
+   without asking: they are reserved, and nothing reads them yet. The WAF is on unless they set `waf: false`: say it costs
    about $12 a month per stage, and that with `false` every caller of a stage shares one
    allowance of 50 requests a second. The other optional modules (such as object lock) are off
    unless they switch them on; say what each adds.
@@ -164,8 +162,12 @@ stage names, signed in to that account):
    fails, `cd packages/infra && npx cdk bootstrap aws://<account>/us-east-1`. Say this adds a
    second bootstrap stack (and its bucket) in us-east-1.
 
-   When a stage in this account has `email: ses`, run
-   `aws sesv2 get-account --region <region> --query ProductionAccessEnabled` for its region.
+   When a stage in this account has `email: ses`, run this for its region:
+
+   ```
+   aws sesv2 get-account --region <region> --query ProductionAccessEnabled
+   ```
+
    When it is `false`, say that until AWS grants SES production access the archive can only email
    addresses verified in SES, so sign-up codes and invitations reach no one else. Offer either:
    - ✋ requesting production access, a request to AWS under their name and contact address
@@ -353,7 +355,7 @@ each curator. Read the account's user id, its `sub` in Cognito, in the stage's a
 aws cognito-idp admin-get-user --user-pool-id "$(just _user-pool <stage>)" --username <email> --query "UserAttributes[?Name=='sub'].Value" --output text
 ```
 
-Then subscribe the address; they confirm from the email AWS sends:
+Then subscribe the address (the recipe needs `jq` installed); they confirm from the email AWS sends:
 
 ```
 just add-curator <stage> <email> <userId>
