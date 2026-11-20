@@ -1239,6 +1239,14 @@ def _finish(
     )
 
 
+def _own_invocation(context: DurableContext, step: str) -> None:
+    """Give the step named `step` an invocation of its own. A wait ends the invocation, and the
+    next one starts at the step after it, so a step that reads or writes a whole package (check,
+    hold, zips, copy) has the function's full time limit instead of what the steps before it
+    left. One second is the shortest wait there is."""
+    context.wait(Duration.from_seconds(1), name=f"{step}-own-invocation")
+
+
 def publish(
     context: DurableContext, c: Clients, env: Env, sid: str, round: int, rule: int | None
 ) -> dict[str, Any]:
@@ -1249,7 +1257,9 @@ def publish(
 
     target = context.step(_version(c, env, sid), name=name("version"))
     filled = context.step(_fill(c, env, sid, target), name=name("fill"))
+    _own_invocation(context, name("zips"))
     context.step(_held_zips(c, env, sid), name=name("zips"))
+    _own_invocation(context, name("copy"))
     context.step(_copy(c, env, sid, target, filled), name=name("copy"))
     context.step(_catalog(c, env, sid, target, filled), name=name("catalog"))
     context.step(_page(c, env, target, filled), name=name("page"))
@@ -1464,6 +1474,7 @@ def _rounds(
         context.step(_scanned(c, sid, round, tags), name=f"scanned-{round}")
         checked = context.step(_check(c, env, sid, round, paths, tags), name=f"check-{round}")
         if not checked["blocked"]:
+            _own_invocation(context, f"hold-{round}")
             context.step(_hold(c, env, sid, round, paths), name=f"hold-{round}")
             policy = context.step(_policy(c, env, sid, round, checked), name=f"policy-{round}")
             outcome = "approved"

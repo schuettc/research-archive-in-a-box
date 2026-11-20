@@ -310,6 +310,9 @@ class FakeContext:
         self.log.append(("step", name, result))
         return result
 
+    def wait(self, duration: Any, name: str | None = None) -> None:
+        self.log.append(("wait", name, duration.to_seconds()))
+
     def wait_for_condition(
         self,
         check: Callable[[Any, Any], Any],
@@ -374,6 +377,9 @@ class ReplayContext:
 
     def step(self, func: Callable[[Any], Any], name: str | None = None) -> Any:
         return self._next("step", name)
+
+    def wait(self, duration: Any, name: str | None = None) -> None:
+        self._next("wait", name)
 
     def wait_for_condition(self, check: Any, config: Any, name: str | None = None) -> Any:
         return self._next("condition", name)
@@ -778,6 +784,17 @@ def test_a_failing_step_ends_failed_with_an_admin_alert(world: World) -> None:
     assert "copy refused" in world.reviews.events[-1]["error"]
     [alert] = world.sns.to(ALERTS)
     assert SID in alert["Subject"]
+
+
+def test_each_long_step_starts_in_an_invocation_of_its_own(world: World) -> None:
+    """A wait ends the invocation, so the step after it has the function's whole time limit."""
+    _, context = world.run([_decision("approve")])
+
+    log = [(kind, name) for kind, name, _ in context.log]
+    for long in ("hold-1", "publish-1-zips", "publish-1-copy"):
+        at = log.index(("step", long))
+        assert log[at - 1] == ("wait", f"{long}-own-invocation")
+    assert {result for kind, _, result in context.log if kind == "wait"} == {1}
 
 
 def test_a_replay_repeats_no_step_and_names_each_operation_once(world: World) -> None:
