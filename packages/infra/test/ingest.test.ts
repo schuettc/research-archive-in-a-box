@@ -122,7 +122,7 @@ test("the ingest's rights in the staging bucket are exactly these", () => {
     "s3:AbortMultipartUpload": ["/held/*"],
     "s3:DeleteObject": ["/held/*"],
     "s3:GetObject": ["/held/*", "/incoming/*"],
-    "s3:GetObjectTagging": ["/incoming/*"],
+    "s3:GetObjectTagging": ["/held/*", "/incoming/*"],
     "s3:ListBucket": ["(bucket)"],
     "s3:PutObject": ["/held/*", "/reports/*"],
     "s3:PutObjectTagging": ["/held/*"],

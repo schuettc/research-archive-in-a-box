@@ -340,17 +340,30 @@ def _scan_findings(tags: dict[str, str]) -> list[Finding]:
     ]
 
 
-def _size_findings(c: Clients, env: Env, sid: str, round: int, gib: int) -> list[Finding]:
+def _hex(checksum: object) -> str | None:
+    """S3's base64 SHA-256 as hex, or None when S3 gave none."""
+    if not isinstance(checksum, str) or not checksum:
+        return None
+    try:
+        return base64.b64decode(checksum).hex()
+    except ValueError:
+        return None
+
+
+def _upload_findings(c: Clients, env: Env, sid: str, round: int, gib: int) -> list[Finding]:
     """What the round's stored objects weigh against what the submission declared: a finding for
     each file whose stored size differs, and one when the stored files total more than the
     archive's limit. The upload link signs a file's SHA-256 and not its size, so the API's check
-    of the declared total holds only for a client that declares true sizes."""
+    of the declared total holds only for a client that declares true sizes. And a finding for
+    each file whose stored SHA-256 is not the one the submission declared for it."""
     files = (_submission(c, sid).get("files") or {}).get(str(round)) or []
     findings: list[Finding] = []
     total = 0
     for entry in files:
         path, declared = str(entry["path"]), int(entry["size"])
-        head = c.s3.head_object(Bucket=env.staging_bucket, Key=_incoming(sid, round, path))
+        head = c.s3.head_object(
+            Bucket=env.staging_bucket, Key=_incoming(sid, round, path), ChecksumMode="ENABLED"
+        )
         stored = int(head["ContentLength"])
         total += stored
         if stored != declared:
@@ -360,6 +373,15 @@ def _size_findings(c: Clients, env: Env, sid: str, round: int, gib: int) -> list
                     severity="error",
                     message=f"{path} is {stored:,} bytes as uploaded, not the {declared:,} bytes "
                     "the submission declared.",
+                    target=Target(path=path),
+                )
+            )
+        if _hex(head.get("ChecksumSHA256")) != str(entry["sha256"]).lower():
+            findings.append(
+                Finding(
+                    rule_id="upload.checksum",
+                    severity="error",
+                    message=f"{path} as uploaded has another SHA-256 than the submission declared.",
                     target=Target(path=path),
                 )
             )
@@ -438,15 +460,15 @@ def _check(
     tags: dict[str, str],
 ) -> dict[str, Any]:
     """Diagnose the round (unless the scan blocked it, or its stored files are not the sizes
-    declared or total more than the archive takes: then nothing is downloaded), store the
-    report, block on an error."""
+    declared or total more than the archive takes, or are not the files declared: then nothing
+    is downloaded), store the report, block on an error."""
     report: dict[str, Any] = {"round": round, "validation": None, "quality": None}
     findings = _scan_findings(tags)
     facts = _facts({})
     config = None
     if not findings:
         config = read_archive_config(c.ssm, env.archive_config_parameter)
-        findings = _size_findings(c, env, sid, round, config.submissions.max_package_gib)
+        findings = _upload_findings(c, env, sid, round, config.submissions.max_package_gib)
     if config is not None and not findings:
         with tempfile.TemporaryDirectory(prefix="ingest-") as tmp:
             folder = Path(tmp)
@@ -481,17 +503,35 @@ def _check(
     return {"blocked": blocked, **facts}
 
 
+class HeldMismatch(Exception):
+    """A file arrived in held/ with other bytes than the round declared, or with no clean scan
+    result."""
+
+
 @durable_step
 def _hold(_: StepContext, c: Clients, env: Env, sid: str, round: int, paths: list[str]) -> None:
-    """Replace `held/<id>/` with this round's files."""
+    """Replace `held/<id>/` with this round's files, each copy checked against the SHA-256 the
+    round declared for it and carrying the scan's clean result."""
     held = f"held/{sid}/"
     _delete_prefix(c, env, held)
+    files = (_submission(c, sid).get("files") or {}).get(str(round)) or []
+    declared = {str(f["path"]): str(f["sha256"]).lower() for f in files}
     for path in paths:
-        c.s3.copy_object(
+        # With no TaggingDirective, so the copy carries the source's scan tag.
+        copied = c.s3.copy_object(
             Bucket=env.staging_bucket,
             Key=held + path,
             CopySource={"Bucket": env.staging_bucket, "Key": _incoming(sid, round, path)},
+            ChecksumAlgorithm="SHA256",
         )
+        stored = _hex(copied.get("CopyObjectResult", {}).get("ChecksumSHA256"))
+        if stored is None or stored != declared.get(path):
+            _delete_prefix(c, env, held)
+            raise HeldMismatch(f"the held copy of {path} differs from the file the round declared")
+        tagging = c.s3.get_object_tagging(Bucket=env.staging_bucket, Key=held + path)
+        if not any(t["Key"] == SCAN_TAG and t["Value"] == CLEAN for t in tagging["TagSet"]):
+            _delete_prefix(c, env, held)
+            raise HeldMismatch(f"the held copy of {path} has no clean scan result")
     put_event(c.reviews, sid, "held", PIPELINE, round, files=len(paths))
 
 

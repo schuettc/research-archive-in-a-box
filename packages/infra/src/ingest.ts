@@ -103,9 +103,10 @@ export class Ingest extends Construct {
     this.alias = new lambda.Alias(this, "Live", { aliasName: "live", version });
 
     // Scan reads the tags; check reads the round; hold copies it to held/; reports/ keeps the
-    // diagnosis; reject, abandon, expire and publish empty held/.
+    // diagnosis; reject, abandon, expire and publish empty held/; hold reads the scan's result
+    // on each copy.
     fn.addToRolePolicy(allow(["s3:GetObject"], objects(staging, "incoming/", "held/")));
-    fn.addToRolePolicy(allow(["s3:GetObjectTagging"], objects(staging, "incoming/")));
+    fn.addToRolePolicy(allow(["s3:GetObjectTagging"], objects(staging, "incoming/", "held/")));
     fn.addToRolePolicy(allow(["s3:PutObject"], objects(staging, "held/", "reports/")));
     // copy_object copies the source's scan tag, which needs PutObjectTagging on the copy.
     fn.addToRolePolicy(allow(["s3:PutObjectTagging"], objects(staging, "held/")));

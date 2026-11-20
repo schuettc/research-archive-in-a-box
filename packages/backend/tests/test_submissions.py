@@ -630,6 +630,22 @@ def test_a_round_1_draft_gets_new_links_for_its_submitter_only(world: World) -> 
     assert (item["status"], item["round"]) == ("draft", 1)
 
 
+def test_a_submitted_rounds_declared_files_no_longer_change(world: World) -> None:
+    sid = world.create("alice")
+    world.s3.upload_all()
+    world.call("POST", "/api/submissions/{id}/submit", "alice", "contributor", sid=sid)
+    other = [{"path": "data/a.csv", "size": 4, "sha256": "0" * 64}]
+
+    status, body = world.call(
+        "POST", "/api/submissions/{id}/uploads", "alice", "contributor", {"files": other}, sid=sid
+    )
+
+    assert (status, body["error"]) == (409, "no uploads while checking")
+    assert world.submissions.items[(sid,)]["files"] == {
+        "1": [{"path": "data/a.csv", "size": 4, "sha256": DIGEST}]
+    }
+
+
 def _in_review(world: World, submitter: str = "alice") -> str:
     sid = world.create(submitter)
     world.submissions.items[(sid,)].update(status="in-review", callbackId="cb-review")
