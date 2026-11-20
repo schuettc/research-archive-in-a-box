@@ -5,6 +5,7 @@ doesn't fit its declared type becomes a finding in a rule's SQL rather than a fa
 Parquet later is one more branch here.
 """
 
+import codecs
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,25 @@ class UnreadableTable(ValueError):
 
 class MalformedTable(UnreadableTable):
     """A CSV table the reader tried to read and could not parse."""
+
+
+NOT_UTF8 = "the file is not UTF-8 text"
+"""Why a table is malformed when its bytes, not its rows, are the cause."""
+
+
+def _is_utf8_text(path: Path) -> bool:
+    """Whether the file decodes as UTF-8 and holds no NUL, which UTF-16 text and binary do."""
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    try:
+        with path.open("rb") as stream:
+            while chunk := stream.read(1 << 20):
+                if b"\0" in chunk:
+                    return False
+                decoder.decode(chunk)
+            decoder.decode(b"", final=True)
+    except (UnicodeDecodeError, OSError):
+        return False
+    return True
 
 
 def connect() -> duckdb.DuckDBPyConnection:
@@ -113,6 +133,9 @@ def read_table(
         relation.aggregate("count(COLUMNS(*))").fetchall()
         return relation
     except duckdb.Error as exc:
-        # DuckDB ends its message with advice on reader options, which nobody here can set.
-        reason = str(exc).split("\n\nPossible Solution", 1)[0].strip()
-        raise MalformedTable(f"{resource.name} can't be read: {reason}") from exc
+        if not _is_utf8_text(root / resource.path):
+            raise MalformedTable(NOT_UTF8) from exc
+        # DuckDB ends its message with advice on reader options, which nobody here can set,
+        # and the file's path on this machine.
+        reason = " ".join(str(exc).split("\nPossible ", 1)[0].split())
+        raise MalformedTable(reason) from exc

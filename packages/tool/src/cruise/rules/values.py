@@ -25,7 +25,7 @@ from archive_contract.fields import Field, TableSchema
 from archive_contract.manifest import SpatialCoverage, TemporalCoverage
 from archive_contract.resources import Resource
 from cruise.rules.registry import EVIDENCE_LIMIT, Context, Outcome, Problem, rule
-from cruise.tables import ROW, quote_identifier, quote_literal, select, working
+from cruise.tables import NOT_UTF8, ROW, quote_identifier, quote_literal, select, working
 
 PLACEHOLDERS = (-9999, -999, -99, 9999, 99999)
 """Numbers that stand for "no value" in legacy data."""
@@ -533,7 +533,7 @@ def malformed(ctx: Context) -> Outcome:
             path=resource.path if isinstance(resource.path, str) else None,
             fix=(
                 "Save the file as UTF-8 text."
-                if "not utf-8" in reason
+                if reason == NOT_UTF8
                 else "Write the table as a well-formed CSV file: every row with one cell per "
                 "field in the schema, and every quote closed."
             ),

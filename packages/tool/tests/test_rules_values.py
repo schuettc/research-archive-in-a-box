@@ -3,6 +3,8 @@
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from archive_contract.manifest import Manifest
 from cruise.rules import REGISTRY, Context, RuleResult
 
@@ -23,6 +25,12 @@ def run(
     resource = {"name": "t", "path": "t.csv", "type": "table", "format": "csv", "schema": schema}
     manifest = Manifest.model_validate({"resources": [resource], **(package or {})})
     return REGISTRY.get(rule).run(Context.for_package(tmp_path, manifest))
+
+
+def context_of(tmp_path: Path, fields: list[dict[str, Any]]) -> Context:
+    schema = {"fields": fields}
+    resource = {"name": "t", "path": "t.csv", "type": "table", "format": "csv", "schema": schema}
+    return Context.for_package(tmp_path, Manifest.model_validate({"resources": [resource]}))
 
 
 def only(result: RuleResult) -> tuple[str | None, list[int] | None, list[Any] | None, int | None]:
@@ -195,9 +203,44 @@ def test_a_csv_that_cannot_be_parsed_is_an_error_and_a_failed_check(tmp_path: Pa
 
     finding = result.findings[0]
     assert (finding.severity, finding.target and finding.target.resource) == ("error", "t")
-    assert "can't be read" in finding.message and finding.suggested_fix
+    assert finding.message.count("can't be read") == 1
+    assert "Expected Number of Columns: 2 Found: 3" in finding.message
+    # None of the reader's own advice or options, and no path on this machine.
+    for leaked in ("Possible", "strict_mode", "ignore_errors", str(tmp_path)):
+        assert leaked not in finding.message
+    assert "well-formed CSV" in (finding.suggested_fix or "")
     assert (len(result.findings), result.checks, result.passed) == (1, 1, 0)
     assert run("values.unreadable", tmp_path, csv, fields).findings == []
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        "a,b\n1,\u00f6k\n".encode("latin-1"),
+        "a,b\n1,ok\n".encode("utf-16"),
+        "a,b\n1,ok\n".encode("utf-16-le"),
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR",
+    ],
+    ids=["latin-1", "utf-16", "utf-16 without a mark", "an image"],
+)
+def test_a_table_that_is_not_utf8_text_is_told_to_be_saved_as_utf8(
+    tmp_path: Path, data: bytes
+) -> None:
+    fields = [{"name": "a", "type": "string"}, {"name": "b", "type": "string"}]
+    run("values.malformed", tmp_path, "", fields)
+    (tmp_path / "t.csv").write_bytes(data)
+
+    finding = REGISTRY.get("values.malformed").run(context_of(tmp_path, fields)).findings[0]
+
+    assert finding.suggested_fix == "Save the file as UTF-8 text."
+    assert "is not UTF-8 text" in finding.message and "Possible" not in finding.message
+
+
+def test_a_ragged_row_past_the_readers_sample_is_still_malformed(tmp_path: Path) -> None:
+    csv = "a,b\n" + "1,x\n" * 25_000 + "1,x,y\n"
+    fields = [{"name": "a", "type": "string"}, {"name": "b", "type": "string"}]
+
+    assert len(run("values.malformed", tmp_path, csv, fields).findings) == 1
 
 
 def test_a_table_left_unread_on_purpose_is_a_note_not_an_error(tmp_path: Path) -> None:
@@ -234,7 +277,7 @@ def test_a_column_in_the_readers_namespace_is_unreadable_not_a_failure(tmp_path:
     assert result.findings[0].rule_id == "values.unreadable"
 
 
-def test_a_table_that_is_not_utf8_is_unreadable_not_a_failed_check(tmp_path: Path) -> None:
+def test_a_table_that_is_not_utf8_is_malformed_not_a_failed_check(tmp_path: Path) -> None:
     (tmp_path / "t.csv").write_bytes("a,b\n1,ok\n2,\u00f6k\n".encode("latin-1"))
     fields = [{"name": "a", "type": "integer"}, {"name": "b", "type": "string"}]
     resource = {
