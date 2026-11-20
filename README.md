@@ -50,7 +50,7 @@ To run one you need:
 
 - an AWS account the archive will live in, with the AWS CLI signed in to it;
 - a fork of this repository on GitHub, with GitHub Actions turned on, and the GitHub CLI (`gh`) signed in;
-- [Claude Code](https://claude.com/claude-code), which runs the setup with you;
+- [Claude Code](https://claude.com/claude-code), which runs the setup with you, unless you run the same commands by hand, as [docs/guide/deploying.md](docs/guide/deploying.md#doing-it-by-hand) shows;
 - on your machine, [uv](https://docs.astral.sh/uv/), Node 24 or later and [just](https://just.systems/).
 
 Running an archive incurs AWS costs in your own account; [docs/guide/running-cost.md](docs/guide/running-cost.md) lists what it pays for.
