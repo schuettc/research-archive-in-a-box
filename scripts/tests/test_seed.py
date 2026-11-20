@@ -269,22 +269,21 @@ def test_a_package_that_stops_fails_the_run_after_the_rest_are_tried(
     assert out.splitlines()[-1] == f"https://{DOMAIN}/datasets/second"
 
 
-def test_with_no_package_named_it_publishes_every_sample_package_in_name_order(
+def test_with_no_package_named_it_publishes_only_the_sample_package(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _package(tmp_path, "b-package")
-    _package(tmp_path, "a-package")
-    (tmp_path / "not-a-package").mkdir()
-    (tmp_path / "archive.yaml").write_text("publisher: x\n", encoding="utf-8")
+    _package(tmp_path, "sample-package")
+    _package(tmp_path, "another-package")
     monkeypatch.setattr(seed, "EXAMPLES", tmp_path)
+    monkeypatch.setattr(seed, "SAMPLE", tmp_path / "sample-package")
     archive = FakeArchive([{"status": "published", "datasetId": DATASET}], [])
 
     code = _run(archive)
 
     assert code == 0
     out = capsys.readouterr().out.splitlines()
-    assert [line for line in out if line.endswith("-package:")] == ["a-package:", "b-package:"]
-    assert len(archive.sids) == 2
+    assert [line for line in out if line.endswith("-package:")] == ["sample-package:"]
+    assert len(archive.sids) == 1
 
 
 def test_the_sample_packages_are_the_six_example_folders_with_a_manifest() -> None:

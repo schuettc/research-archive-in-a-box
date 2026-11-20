@@ -116,7 +116,7 @@ The curator then gets the messages meant for every curator and those meant for t
 just seed <stage>
 ```
 
-publishes the repository's six sample packages, the folders under `examples/` with a `datapackage.json`: invented stream temperature readings and five smaller invented datasets, all under CC-BY-4.0 with access `public`. Each goes through the archive's own submit-and-publish path, one after the other, on one sign-in. Before it submits anything, a new browser tab opens by itself on the archive's own sign-in page, because the seed submits and approves as the admin, and the terminal never sees the admin's password: the admin signs in there and presses **Sign in the command line**, which hands the sign-in back to the terminal. The terminal says `signing in: finish it on the archive's sign-in page in the browser` while it waits, for up to five minutes. They are then public data on your archive, so the skill asks first. To take one down later, an admin withdraws it from its page, as [Curating published datasets](../curating.md#withdrawing-and-restoring) describes.
+publishes the repository's sample package, invented stream temperature readings under CC-BY-4.0 with access `public`, through the archive's own submit-and-publish path. Before it submits anything, a new browser tab opens by itself on the archive's own sign-in page, because the seed submits and approves as the admin, and the terminal never sees the admin's password: the admin signs in there and presses **Sign in the command line**, which hands the sign-in back to the terminal. The terminal says `signing in: finish it on the archive's sign-in page in the browser` while it waits, for up to five minutes. It is then public data on your archive, so the skill asks first. To take it down later, an admin withdraws it from its page, as [Curating published datasets](../curating.md#withdrawing-and-restoring) describes.
 
 ### 8. The smoke test
 
@@ -237,7 +237,7 @@ just add-curator <stage> <email> <userId>
 
 ### Seed and smoke test
 
-Publish the sample packages as the admin. A browser tab opens on the archive's sign-in page: sign in there and press **Sign in the command line**.
+Publish the sample package as the admin. A browser tab opens on the archive's sign-in page: sign in there and press **Sign in the command line**.
 
 ```
 just seed <stage>

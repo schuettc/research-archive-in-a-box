@@ -1,7 +1,9 @@
-"""Publish the sample packages on a deployed archive as its admin: `just seed <stage>`.
+"""Publish the sample package on a deployed archive as its admin: `just seed <stage>`.
 
-The sample packages are the folders directly under `examples/` that hold a `datapackage.json`;
-`--package <folder>`, which may be given several times, publishes those folders instead.
+It publishes `examples/sample-package`; `--package <folder>`, which may be given several times,
+publishes those folders instead. The other folders under `examples/` that hold a
+`datapackage.json` are sample packages too (`sample_packages()` lists them all), published only
+when named, so a new archive starts with one invented dataset.
 
 It signs in once on the archive's own sign-in page in the browser with `archive_client`. Then,
 for each package in turn, it creates a submission for the package's files, uploads each to its
@@ -201,7 +203,7 @@ def main(
         type=Path,
         action="append",
         help="a package folder to publish; may be given several times "
-        "(default: every sample package under examples/)",
+        "(default: examples/sample-package)",
     )
     args = parser.parse_args(argv)
     try:
@@ -212,7 +214,7 @@ def main(
         return 1
     seed = Seed(args.domain, tokens.id_token, send, sleep, clock, poll_seconds, timeout_seconds)
     stopped = False
-    for folder in args.package or sample_packages():
+    for folder in args.package or [SAMPLE]:
         print(f"{folder.name}:")
         try:
             sid = seed.submit(folder)
