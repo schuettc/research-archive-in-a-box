@@ -24,7 +24,7 @@ body:
     id: version
     attributes:
       label: Version or commit
-      description: A release tag such as v0.1.1, what `cruise --version` prints, or the commit your fork is on.
+      description: A release tag such as v0.1.2, what `cruise --version` prints, or the commit your fork is on.
     validations:
       required: true
   - type: textarea

@@ -24,7 +24,7 @@ A dataset travels as a package. A package is a plain folder holding the data fil
 `cruise` is the kit's command-line tool. It runs on your own machine, with no account and no network, and tells you what a package is missing before anyone else sees it. Install it with [uv](https://docs.astral.sh/uv/), at a release tag:
 
 ```
-uv tool install "git+https://github.com/schuettc/research-archive-in-a-box@v0.1.1#subdirectory=packages/tool"
+uv tool install "git+https://github.com/schuettc/research-archive-in-a-box@v0.1.2#subdirectory=packages/tool"
 cruise --version
 ```
 
