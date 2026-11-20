@@ -22,7 +22,7 @@ import {
   type VersionsAnswer,
   type Withdrawal,
 } from "../api";
-import { apiToken, groups, signIn, subscribe } from "../auth";
+import { apiToken, groups, selfSignUp, signIn, subscribe } from "../auth";
 import { bibtex, citation, citedAddress, creatorNames, doiOf, personName, ris } from "../citation";
 import { Coverage } from "../Coverage";
 import type {
@@ -59,6 +59,8 @@ interface View {
   withdrawn: Withdrawal | null;
   /** The dataset's own embargo date, `YYYY-MM-DD`, if it has one. */
   embargoUntil: string | null;
+  /** Whether people can create their own account on this stage, which the access box words by. */
+  selfSignUp: boolean;
 }
 
 /** The dataset is there but not this version: the page links to the current one. */
@@ -66,7 +68,16 @@ class NoSuchVersion extends Error {}
 
 const byVersion = (a: VersionEntry, b: VersionEntry) => a.version - b.version;
 
+/** The dataset and the stage's sign-up setting together, so the access box is drawn once. */
 async function load(id: string, version: number | undefined): Promise<View> {
+  const [view, signUp] = await Promise.all([loadDataset(id, version), selfSignUp()]);
+  return { ...view, selfSignUp: signUp };
+}
+
+async function loadDataset(
+  id: string,
+  version: number | undefined,
+): Promise<Omit<View, "selfSignUp">> {
   if (version === undefined) {
     const [answer, versions] = await Promise.all([
       getDataset(id),
@@ -181,6 +192,10 @@ const ACCESS_MEANS: Record<string, string> = {
     "The files are shared with people an admin approves. The description and the columns stay public.",
   "description-only": "This archive holds the description of this dataset, not its files.",
 };
+
+/** What limited means on a stage where accounts come only by invitation. */
+const LIMITED_BY_INVITATION =
+  "The files need an account. Accounts for this archive are by invitation; the description and the columns stay public.";
 
 /** The sign-in page's create-account view, coming back here once the account is made. */
 export const createAccountHref = (next: string) =>
@@ -364,12 +379,15 @@ function AccessCallout({
   id,
   access,
   signedIn,
+  selfSignUp,
   standing,
   onStanding,
 }: {
   id: string;
   access: string;
   signedIn: boolean;
+  /** Whether people can create their own account on this stage. */
+  selfSignUp: boolean;
   standing: Standing | null;
   onStanding: (next: DatasetAccess) => void;
 }) {
@@ -381,18 +399,28 @@ function AccessCallout({
     <section className="callout" aria-label={label}>
       <p>
         <span className={accessClass(access)}>{label}</span>{" "}
-        {ACCESS_MEANS[access] ?? "The files aren't open to everyone."}
+        {access === "limited" && !selfSignUp
+          ? LIMITED_BY_INVITATION
+          : (ACCESS_MEANS[access] ?? "The files aren't open to everyone.")}
       </p>
       {hasFiles && !signedIn && (
         <>
-          {access === "restricted" && <p>Sign in or create an account to ask for access.</p>}
+          {access === "restricted" && (
+            <p>
+              {selfSignUp
+                ? "Sign in or create an account to ask for access."
+                : "Sign in to ask for access."}
+            </p>
+          )}
           <p className="actions">
             <button type="button" className="primary" onClick={() => void signIn(here)}>
               Sign in
             </button>
-            <Link className="button" to={createAccountHref(here)}>
-              Create an account
-            </Link>
+            {selfSignUp && (
+              <Link className="button" to={createAccountHref(here)}>
+                Create an account
+              </Link>
+            )}
           </p>
         </>
       )}
@@ -1115,6 +1143,7 @@ function DatasetPage({ id, view, onWithdraw }: { id: string; view: View; onWithd
               id={id}
               access={view.access}
               signedIn={signedIn}
+              selfSignUp={view.selfSignUp}
               standing={standing}
               onStanding={setStanding}
             />

@@ -444,3 +444,20 @@ test("forgot password for an invited person who hasn't signed in yet points to t
     "This account hasn't been used yet: sign in with the temporary password from your invitation email.",
   );
 });
+
+test("selfSignUp is true when the config has no such field", async () => {
+  const auth = await import("./auth");
+  expect(await auth.selfSignUp()).toBe(true);
+});
+
+test("selfSignUp is false when the config says so", async () => {
+  fetchMock.mockImplementation(async () => Response.json({ ...CONFIG, selfSignUp: false }));
+  const auth = await import("./auth");
+  expect(await auth.selfSignUp()).toBe(false);
+});
+
+test("selfSignUp is true when the config can't be read", async () => {
+  fetchMock.mockImplementation(async () => Response.json({}, { status: 503 }));
+  const auth = await import("./auth");
+  expect(await auth.selfSignUp()).toBe(true);
+});

@@ -511,6 +511,25 @@ infrastructure:
     - name: prod
 ```
 
+### `infrastructure.stages[].selfSignUp`
+
+Whether anyone can create an account on the stage. With `true`, the sign-in page offers **Create an account**, and a new account has no role. With `false`, accounts come only from an invitation (`just invite-user`, or **Settings › People**), and the sign-in page says accounts are by invitation.
+
+With `false`, `limited` means the people you invited: a limited dataset's files can be downloaded only by accounts your team made.
+
+On a public stage with sign-up on, set [`email: ses`](#infrastructurestagesemail): Cognito's own email stops at about 50 a day, and sign-up codes, invitations and password resets share it. The WAF limits how fast one address can ask for emails, not how many addresses ask.
+
+- **Type:** `true` or `false`.
+- **Default:** `true`.
+
+```yaml
+infrastructure:
+  alertEmail: archive-admin@example.org
+  stages:
+    - name: prod
+      selfSignUp: false
+```
+
 ### `infrastructure.stages[].account`
 
 The 12-digit id of the AWS account the stage deploys into. A stage in another account needs its own deploy access, set up while signed in to that account (see [Deploying](deploying.md#3--connect-github-to-aws)), and `just destroy` refuses to run while you are signed in to a different account.
@@ -588,7 +607,7 @@ The id of the Route 53 public hosted zone that holds the name, in the stage's ac
 
 ### `infrastructure.stages[].email`
 
-`ses` sends the stage's account emails (sign-up codes, invitations and password resets) through Amazon SES from `no-reply@<domain>`, with DKIM records added to the domain's hosted zone. It needs a `domain`, and isn't supported in the ten Regions where Cognito can't send through SES in its own Region. Without it, Cognito sends them itself, with a low daily cap. [Email through SES](../email.md) explains SES's sandbox and production access.
+`ses` sends the stage's account emails (sign-up codes, invitations and password resets) through Amazon SES from `no-reply@<domain>`, with DKIM records added to the domain's hosted zone. It needs a `domain`, and isn't supported in the ten Regions where Cognito can't send through SES in its own Region. Without it, Cognito sends them itself, with a low daily cap of about 50, so set it on a public stage with sign-up on ([`selfSignUp`](#infrastructurestagesselfsignup)). [Email through SES](../email.md) explains SES's sandbox and production access.
 
 - **Type:** the text `ses`.
 - **Default:** none: Cognito's own email.

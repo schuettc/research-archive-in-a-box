@@ -25,14 +25,17 @@ const BRAND = loginBrand(
   REPO,
 );
 
-function archive(stage = "prod"): Template {
+function archive(stage = "prod", selfSignUp?: boolean): Template {
   const stack = new Stack(testApp(), "S");
   new ResearchArchive(stack, "Archive", {
     config: {
       publisher: "P",
       infrastructure: {
         alertEmail: "a@example.org",
-        stages: [{ name: "prod" }, { name: "dev", keepData: false }],
+        stages: [
+          { name: "prod", ...(selfSignUp === undefined ? {} : { selfSignUp }) },
+          { name: "dev", keepData: false },
+        ],
       },
     },
     stage,
@@ -42,10 +45,16 @@ function archive(stage = "prod"): Template {
 
 function authWithClients(): Template {
   const stack = new Stack(testApp(), "S");
-  const auth = new Auth(stack, "Auth", { keepData: false, brand: BRAND });
+  const auth = new Auth(stack, "Auth", { keepData: false, selfSignUp: true, brand: BRAND });
   auth.addAppClients();
   return Template.fromStack(stack);
 }
+
+test("a stage with selfSignUp: false has a user pool only an admin can add people to", () => {
+  archive("prod", false).hasResourceProperties("AWS::Cognito::UserPool", {
+    AdminCreateUserConfig: { AllowAdminCreateUserOnly: true },
+  });
+});
 
 test("the user pool signs in with email, lets anyone sign up with an emailed code, and has contributor, curator and admin groups", () => {
   const template = archive();
@@ -179,6 +188,7 @@ test("a change to the pool's settings calls SetUserPoolMfaConfig again", () => {
     const stack = new Stack(testApp(), "S");
     const auth = new Auth(stack, "Auth", {
       keepData: false,
+      selfSignUp: true,
       brand: { ...BRAND, name: subject },
     });
     auth.setRelyingParty("d123.cloudfront.net");
@@ -204,6 +214,7 @@ test("the sign-up code email speaks in the archive's name, escaped in its HTML b
   const stack = new Stack(testApp(), "S");
   new Auth(stack, "Auth", {
     keepData: false,
+    selfSignUp: true,
     brand: { ...BRAND, name: "Lake & <Archive>" },
   });
   const [pool] = Object.values(Template.fromStack(stack).findResources("AWS::Cognito::UserPool"));
@@ -262,6 +273,7 @@ test("the ingest-test config makes only the ingest-test stack, with the e2e clie
 test("the e2e client refuses the pool of a stage that keeps its data", () => {
   const auth = new Auth(new Stack(testApp(), "S"), "Auth", {
     keepData: true,
+    selfSignUp: true,
     brand: BRAND,
   });
 
@@ -291,7 +303,12 @@ test("the app's archive.yaml synthesizes no user pool domain and no managed logi
 
 function inviteBody(siteAddress?: string, name = "Lake Archive"): string {
   const stack = new Stack(testApp(), "S");
-  new Auth(stack, "Auth", { keepData: false, brand: { ...BRAND, name }, siteAddress });
+  new Auth(stack, "Auth", {
+    keepData: false,
+    selfSignUp: true,
+    brand: { ...BRAND, name },
+    siteAddress,
+  });
   const [pool] = Object.values(Template.fromStack(stack).findResources("AWS::Cognito::UserPool"));
   return pool?.Properties.AdminCreateUserConfig.InviteMessageTemplate.EmailMessage as string;
 }
@@ -358,6 +375,7 @@ test("the brand's name on the From line is the one the emails speak in", () => {
   const ready = new Construct(stack, "Ready");
   new Auth(stack, "Auth", {
     keepData: false,
+    selfSignUp: true,
     brand: BRAND,
     email: { domain: "data.example.org", ready },
   });

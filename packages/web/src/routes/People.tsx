@@ -10,7 +10,7 @@ import {
   type AccountEvent,
   type Role,
 } from "../api";
-import { signedInSub, subscribe } from "../auth";
+import { selfSignUp, signedInSub, subscribe } from "../auth";
 import { Modal, PageHeading, useTitle } from "../page";
 import { usePeople } from "../People";
 import { SettingsTabs } from "./Settings";
@@ -365,6 +365,8 @@ export function People() {
   useTitle("People");
   const me = useSyncExternalStore(subscribe, signedInSub);
   const [accounts, setAccounts] = useState<Account[] | "failed" | null>(null);
+  // Whether people can create their own account on this stage, read with the list.
+  const [signUp, setSignUp] = useState(true);
   const [events, setEvents] = useState<AccountEvent[] | null>([]);
   const [attempt, setAttempt] = useState(0);
   const [eventsRead, setEventsRead] = useState(0);
@@ -374,8 +376,12 @@ export function People() {
 
   useEffect(() => {
     let current = true;
-    listAccounts().then(
-      (people) => current && setAccounts(people),
+    Promise.all([listAccounts(), selfSignUp()]).then(
+      ([people, open]) => {
+        if (!current) return;
+        setSignUp(open);
+        setAccounts(people);
+      },
       () => current && setAccounts("failed"),
     );
     return () => {
@@ -543,9 +549,11 @@ export function People() {
             </table>
           )}
           <p className="hint">
-            Anyone can create an account; it has no role until you give one. Disabling signs the
-            person out everywhere and stops their downloads. You can't remove your own admin role or
-            disable yourself.
+            {signUp
+              ? "Anyone can create an account; it has no role until you give one."
+              : "Only people you invite get an account; one has no role until you give it one."}{" "}
+            Disabling signs the person out everywhere and stops their downloads. You can't remove
+            your own admin role or disable yourself.
           </p>
           <RecentChanges events={events} name={name} />
         </>

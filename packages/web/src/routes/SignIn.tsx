@@ -9,6 +9,7 @@ import {
   forgotPassword,
   PASSWORD_RULES,
   resendCode,
+  selfSignUp,
   setFirstPassword,
   signedInEmail,
   signInProblem,
@@ -122,7 +123,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 /**
  * `/sign-in`: the email, then the password; an invited person's first password; the two
- * forgot-password steps; and Create an account (`?view=create`): the email and a password, the
+ * forgot-password steps; and, unless the stage is by invitation, Create an account (`?view=create`): the email and a password, the
  * emailed code, then signed in and offered a passkey. Cognito checks every password; this page only asks for them. The
  * passwords stay in this page's state and the one request; nothing logs or keeps them. Opened by
  * the command line (`?cli=<port>&state=<state>`), the page then asks before handing the sign-in to
@@ -139,6 +140,8 @@ export function SignIn() {
   const [step, setStep] = useState<Step>(() =>
     params.get("view") === "create" ? { name: "create" } : { name: "email" },
   );
+  // Whether this stage lets people create their own account: null until the page has read it.
+  const [canSignUp, setCanSignUp] = useState<boolean | null>(null);
   const creating = CREATING.has(step.name);
   useTitle(
     handedBack ? "The command line is signed in" : creating ? "Create an account" : "Sign in",
@@ -156,6 +159,19 @@ export function SignIn() {
     if (signedIn && !offering.current && !cli && !handedBack)
       void navigate(next, { replace: true });
   }, [signedIn, next, navigate, cli, handedBack]);
+
+  useEffect(() => {
+    let current = true;
+    void selfSignUp().then((answer) => {
+      if (!current) return;
+      setCanSignUp(answer);
+      // A stage that is by invitation has no Create an account: a link to it lands on Sign in.
+      if (!answer) setStep((at) => (CREATING.has(at.name) ? { name: "email" } : at));
+    });
+    return () => {
+      current = false;
+    };
+  }, []);
 
   /** Signed in and done with the passkey offer: on to next, or to the command line's question. */
   function finish() {
@@ -581,6 +597,17 @@ export function SignIn() {
               {action}
             </button>
           )}
+          {step.name === "email" && canSignUp === true && (
+            <span>
+              New here?{" "}
+              <button type="button" className="link-button" onClick={() => go({ name: "create" })}>
+                Create an account
+              </button>
+            </span>
+          )}
+          {step.name === "email" && canSignUp === false && (
+            <span className="muted small">Accounts are by invitation.</span>
+          )}
           {step.name === "create" && (
             <button type="button" className="link-button" onClick={() => go({ name: "email" })}>
               I have an account
@@ -654,14 +681,6 @@ export function SignIn() {
           <p className="hint">
             By creating an account you agree to how the archive handles your details:{" "}
             <Link to="/privacy">Privacy</Link>.
-          </p>
-        )}
-        {step.name === "email" && (
-          <p>
-            New here?{" "}
-            <button type="button" className="link-button" onClick={() => go({ name: "create" })}>
-              Create an account
-            </button>
           </p>
         )}
         {step.name === "welcome" && (

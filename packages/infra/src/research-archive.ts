@@ -224,6 +224,7 @@ export class ResearchArchive extends Construct {
     }
     const auth = new Auth(this, "Auth", {
       keepData: this.keepData,
+      selfSignUp: stage.selfSignUp ?? true,
       brand,
       siteAddress: stage.domain?.name,
       ...(this.email && this.domain
@@ -286,6 +287,7 @@ export class ResearchArchive extends Construct {
       {
         region: Stack.of(this).region,
         webClientId: this.userPoolClients.web.userPoolClientId,
+        selfSignUp: stage.selfSignUp ?? true,
       },
       // The contract's defaults when the config names none, as ingest applies them.
       {

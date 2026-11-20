@@ -72,6 +72,10 @@ export type Email = "ses" | null;
 export type Keepdata = boolean;
 export type Name2 = string;
 export type Region = string | null;
+/**
+ * true: anyone can create an account on the sign-in page; a new account has no role. false: accounts come only from an invitation (just invite-user, or Settings › People), and limited then means the people you invited. On a public stage with sign-up on, set email: ses: Cognito's own email stops at about 50 a day. Left out: true.
+ */
+export type Selfsignup = boolean;
 export type Licenses = string[];
 export type Profiles = string[];
 export type Publisher = string;
@@ -171,6 +175,7 @@ export interface Stage {
   keepData?: Keepdata;
   name: Name2;
   region?: Region;
+  selfSignUp?: Selfsignup;
 }
 /**
  * A stage's own DOI settings, each over the archive-wide `doi` block, which it needs. Test

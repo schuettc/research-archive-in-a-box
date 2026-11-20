@@ -111,6 +111,14 @@ class Stage(_Strict):
         "conveniences (uploads from a local web app at http://localhost:5199, and the sign-in "
         "client the end-to-end test uses). Left out: true.",
     )
+    self_sign_up: bool = PydanticField(
+        default=True,
+        alias="selfSignUp",
+        description="true: anyone can create an account on the sign-in page; a new account has no "
+        "role. false: accounts come only from an invitation (just invite-user, or Settings › "
+        "People), and limited then means the people you invited. On a public stage with sign-up "
+        "on, set email: ses: Cognito's own email stops at about 50 a day. Left out: true.",
+    )
 
     @model_validator(mode="after")
     def _domain_and_email_rules(self) -> Self:

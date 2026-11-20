@@ -84,13 +84,15 @@ just invite-user <stage> <email> admin,curator,contributor
 
 Cognito, the AWS service that holds the archive's accounts, emails them a temporary password. A **role** decides what a signed-in person can do: a **contributor** submits packages, a **curator** reviews them, and an **admin** changes the settings, people and access. The first admin gets all three.
 
-Sign-up is open: anyone can create an account on the site's sign-in page. A new account has no role, so it can download `limited` datasets and ask for `restricted` ones, but can't submit, review or change anything until an admin gives it a role, in the site's **Settings › People** or with:
+Sign-up is open unless the stage says `selfSignUp: false`: anyone can create an account on the site's sign-in page. A new account has no role, so it can download `limited` datasets and ask for `restricted` ones, but can't submit, review or change anything until an admin gives it a role, in the site's **Settings › People** or with:
 
 ```
 just set-roles <stage> <email> contributor
 ```
 
 `set-roles` makes the person's roles exactly the comma-separated list given; `""` removes every role.
+
+With `selfSignUp: false` only invited people get an account, so `limited` means the people you invited. On a public stage with sign-up on, use `email: ses`.
 
 ### 7. ✋ The seed
 

@@ -6,7 +6,7 @@ import type { Root } from "react-dom/client";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, test, vi, type Mock } from "vitest";
 import type { DatasetAccess, DatasetAnswer, VersionAnswer, VersionsAnswer } from "../api";
-import { apiToken, groups, signIn } from "../auth";
+import { apiToken, groups, selfSignUp, signIn } from "../auth";
 import type { Manifest } from "../generated/manifest";
 import { mount } from "../main";
 import { Dataset } from "./Dataset";
@@ -18,6 +18,7 @@ vi.mock("../auth", () => ({
   subscribe: vi.fn(() => () => {}),
   signedInEmail: vi.fn(() => null),
   groups: vi.fn(() => NO_GROUPS),
+  selfSignUp: vi.fn(),
 }));
 
 const SAMPLE = join(import.meta.dirname, "../../../../examples/sample-package");
@@ -168,6 +169,7 @@ beforeEach(() => {
   access = NONE;
   vi.mocked(apiToken).mockReturnValue(null);
   vi.mocked(signIn).mockClear();
+  vi.mocked(selfSignUp).mockResolvedValue(true);
 });
 
 afterEach(() => {
@@ -471,6 +473,33 @@ test("signed out, a limited page offers Sign in and Create an account", async ()
 
   fireEvent.click(signIns[0]!);
   expect(signIn).toHaveBeenCalledWith(`/datasets/${RESTRICTED_ID}`);
+});
+
+test("on a stage with sign-up off, a limited page says accounts are by invitation and offers only Sign in", async () => {
+  vi.mocked(selfSignUp).mockResolvedValue(false);
+  renderDataset(undefined, RESTRICTED_ID);
+  await filesList();
+
+  const banner = callout("Limited")!;
+  expect(banner.textContent).toContain(
+    "The files need an account. Accounts for this archive are by invitation; the description and the columns stay public.",
+  );
+  expect(within(banner).getByRole("button", { name: "Sign in" })).toBeDefined();
+  expect(within(banner).queryByRole("link", { name: "Create an account" })).toBeNull();
+});
+
+test("on a stage with sign-up off, a restricted page says to sign in to ask for access", async () => {
+  vi.mocked(selfSignUp).mockResolvedValue(false);
+  renderDataset(undefined, CLOSED_ID);
+  await filesList();
+
+  const banner = callout("Restricted")!;
+  expect(within(banner).getByText("Sign in to ask for access.")).toBeDefined();
+  expect(banner.textContent).toContain(
+    "The files are shared with people an admin approves. The description and the columns stay public.",
+  );
+  expect(within(banner).getByRole("button", { name: "Sign in" })).toBeDefined();
+  expect(within(banner).queryByRole("link", { name: "Create an account" })).toBeNull();
 });
 
 test("the page no longer says accounts are by invitation", async () => {

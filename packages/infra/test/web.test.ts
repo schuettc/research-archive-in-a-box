@@ -457,14 +457,24 @@ test("robots.txt names the sitemap and keeps search engines out of the signed-in
   }
 });
 
-test("auth-config.json holds exactly the region and the web client's id", () => {
+test("auth-config.json holds exactly the region, the web client's id and whether people can sign up", () => {
   const jsonData = vi.spyOn(s3deploy.Source, "jsonData");
   const { archive: a, stack } = archive();
 
   const call = jsonData.mock.calls.find(([name]) => name === "auth-config.json");
   expect(call).toBeDefined();
   const data = call?.[1] as Json;
-  expect(Object.keys(data).sort()).toEqual(["region", "webClientId"]);
+  expect(Object.keys(data).sort()).toEqual(["region", "selfSignUp", "webClientId"]);
+  expect(data.selfSignUp).toBe(true);
+  jsonData.mockClear();
+  archive({
+    infrastructure: {
+      alertEmail: "a@example.org",
+      stages: [{ name: "prod", selfSignUp: false }],
+    },
+  });
+  const off = jsonData.mock.calls.find(([name]) => name === "auth-config.json")?.[1] as Json;
+  expect(off.selfSignUp).toBe(false);
   const ref = (client: { node: { defaultChild: unknown } }) => ({
     Ref: stack.getLogicalId(client.node.defaultChild as CfnUserPoolClient),
   });

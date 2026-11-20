@@ -114,6 +114,13 @@ tell the person.
    isn't one of the ten `docs/email.md` lists, where it isn't supported yet. Point them to
    `docs/email.md` for what it changes.
 
+   Then, for each stage, ask: "Should anyone be able to create an account on this stage? The
+   default is yes." Read `selfSignUp`'s `description` from `$defs.Stage`. A no writes
+   `selfSignUp: false` on the stage; say that `limited` then means the people they invite. A yes
+   leaves `selfSignUp` out; on a stage the public will reach, recommend `email: ses`, since
+   Cognito's own email stops at about 50 a day and sign-up codes share it with invitations and
+   password resets.
+
 7. Write `archive.yaml` and validate it before going on:
 
    ```
@@ -296,8 +303,10 @@ Cognito emails a temporary password to the address.
 
 **What it costs.** Nothing.
 
-Before inviting, warn them: **anyone can create an account** from the sign-in page's Create an
-account form, and the stage is open to sign-up from the moment it deploys. A new account has no
+Before inviting, on a stage with sign-up on (`selfSignUp` left out or `true`), warn them:
+**anyone can create an account** from the sign-in page's Create an account form, and the stage is
+open to sign-up from the moment it deploys. On a stage with `selfSignUp: false` nobody can sign
+themselves up: say that accounts come only from an invitation. A new account has no
 role: it can read what any visitor reads, and sign in to download `limited` files and to ask for
 `restricted` ones, but it can't submit, review or change settings until an admin gives it a role.
 The first admin gives roles on the site under **Settings → People**, or from the terminal with

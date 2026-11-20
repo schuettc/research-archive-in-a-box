@@ -110,6 +110,11 @@ def test_infrastructure_defaults_to_prod_only() -> None:
     assert infrastructure.modules.embeddings is None
 
 
+def test_a_stage_lets_people_sign_up_unless_it_says_not() -> None:
+    assert Stage.model_validate({"name": "prod"}).self_sign_up is True
+    assert Stage.model_validate({"name": "prod", "selfSignUp": False}).self_sign_up is False
+
+
 def test_waf_is_on_unless_turned_off_and_the_limit_defaults_to_2000() -> None:
     left_out = Infrastructure.model_validate({"alertEmail": "a@b.c"})
     assert left_out.modules.waf is True
@@ -267,7 +272,7 @@ def test_a_stage_with_no_email_has_none() -> None:
     ],
 )
 def test_stages_without_email_validate_unchanged(stage: dict[str, object]) -> None:
-    assert Stage.model_validate(stage).dump() == {**stage, "keepData": True}
+    assert Stage.model_validate(stage).dump() == {**stage, "keepData": True, "selfSignUp": True}
 
 
 def test_root_archive_yaml_is_valid() -> None:

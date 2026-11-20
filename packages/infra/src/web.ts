@@ -18,11 +18,13 @@ const WEB_BUILD = fileURLToPath(new URL("../../web/dist", import.meta.url));
 
 /**
  * What /auth-config.json tells the web app: the user pool's region and the web client, which its
- * sign-in page calls Cognito's API with. The plugin reads it to tell an archive from another site.
+ * sign-in page calls Cognito's API with, and whether people can create their own account. The
+ * plugin reads it to tell an archive from another site.
  */
 export interface AuthConfig {
   readonly region: string;
   readonly webClientId: string;
+  readonly selfSignUp: boolean;
 }
 
 /**
