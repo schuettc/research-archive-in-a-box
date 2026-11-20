@@ -1,0 +1,49 @@
+name: Bug
+description: Something in the kit does the wrong thing, such as cruise, the web app, the API or the ingest.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please report a vulnerability privately, as [SECURITY.md](https://github.com/schuettc/research-archive-in-a-box/blob/main/SECURITY.md) says, not here.
+  - type: dropdown
+    id: part
+    attributes:
+      label: Which part is it in?
+      options:
+        - cruise (the command-line tool)
+        - The web app
+        - The API
+        - Ingest and publishing
+        - The CDK construct or the deploy workflow
+        - The Claude Code plugin or the deploy skill
+        - Something else, or not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: A release tag such as v0.1.1, what `cruise --version` prints, or the commit your fork is on.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: What did you do?
+      description: The steps that show it, with the command or the page, so someone else can do the same.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened instead?
+      description: Paste any error message or log lines as text. Leave out account ids, tokens and anything else private.
+    validations:
+      required: true

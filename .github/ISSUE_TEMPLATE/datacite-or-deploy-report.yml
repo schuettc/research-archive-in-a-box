@@ -1,0 +1,49 @@
+name: DataCite or deploy report
+description: Tell us how the DOI module went against DataCite itself, or how a deploy went in your account. A report that it worked is as useful as one that it didn't.
+labels: [deploy]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The DOI module is tested against a stand-in for DataCite's REST API, as [docs/dois.md](https://github.com/schuettc/research-archive-in-a-box/blob/main/docs/dois.md) says, so a report from a real DataCite account tells us what the tests can't. Leave out passwords, tokens and AWS account ids.
+  - type: dropdown
+    id: about
+    attributes:
+      label: What is the report about?
+      options:
+        - DOIs with DataCite
+        - Deploying or updating a stage
+    validations:
+      required: true
+  - type: dropdown
+    id: system
+    attributes:
+      label: Which DataCite system?
+      description: "The test system is `test: true` in the `doi` block of archive.yaml; live is `test: false`."
+      options:
+        - DataCite's test system
+        - DataCite's live system
+        - Not about DataCite
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: The release tag or the upstream commit your fork is on.
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: What did you try?
+      description: For example, published one dataset and opened its DOI, corrected a version, withdrew one, ran `just reindex <stage> --dois`, or deployed a new stage with the skill.
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened?
+      description: Whether the publish registered its DOI and the DOI resolves to the dataset's page, or what went wrong. Paste DataCite's answer or the log lines as text.
+    validations:
+      required: true
