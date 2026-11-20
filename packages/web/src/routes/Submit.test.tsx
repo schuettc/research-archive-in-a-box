@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, test, vi, type Mock } from "vitest";
 import type { Finding } from "../api";
 import { AppRoutes } from "../App";
 import { checksFor, editedSample, FakeXhr, sampleFiles } from "../test-fixtures";
+import { PACKAGES_GUIDE } from "../site";
 import { Submit } from "./Submit";
 
 vi.mock("../auth", async (importOriginal) => ({
@@ -361,6 +362,22 @@ test("the submit page sits under Submissions, with a trail back and no intro lin
   );
   expect(trail.getByText("Submit a package").getAttribute("aria-current")).toBe("page");
   expect(screen.queryByRole("link", { name: "My submissions" })).toBeNull();
+});
+
+test("under the introduction, a link to the packages guide opens in a new tab and says so", () => {
+  renderSubmit();
+
+  const link = screen.getByRole("link", {
+    name: "How to make one with cruise (opens in a new tab)",
+  });
+  expect(link.getAttribute("href")).toBe(PACKAGES_GUIDE);
+  expect(PACKAGES_GUIDE).toBe(
+    "https://github.com/schuettc/research-archive-in-a-box/blob/main/docs/guide/packages.md",
+  );
+  expect(link.getAttribute("target")).toBe("_blank");
+  expect(link.getAttribute("rel")).toBe("noreferrer");
+  expect(link.closest("p")?.textContent).toMatch(/^New to packages\? How to make one with cruise/);
+  expect(link.closest("p")?.previousElementSibling?.className).toBe("lede");
 });
 
 test("an axe check of the choose and ready steps finds no violations", async () => {

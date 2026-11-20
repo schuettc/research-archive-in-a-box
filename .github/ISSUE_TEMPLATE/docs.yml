@@ -1,0 +1,34 @@
+name: Docs problem
+description: A page of the README or the guide is wrong, unclear or missing something.
+labels: [docs]
+body:
+  - type: input
+    id: page
+    attributes:
+      label: Which page?
+      description: The file or its address, such as docs/guide/packages.md, and the heading if you can.
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What is the problem?
+      options:
+        - It says something that is wrong
+        - A step didn't work as written
+        - It is unclear
+        - Something is missing
+    validations:
+      required: true
+  - type: textarea
+    id: detail
+    attributes:
+      label: What did you read, and what did you find?
+      description: Quote the sentence or the step, then say what happened or what you needed to know.
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: What should it say?
+      description: Optional. Your wording, if you have one.
