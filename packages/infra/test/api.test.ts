@@ -263,7 +263,7 @@ test("with WAF on, the web ACL takes API requests only with the key CloudFront s
           {
             ByteMatchStatement: {
               FieldToMatch: { SingleHeader: { Name: "host" } },
-              PositionalConstraint: "ENDS_WITH",
+              PositionalConstraint: "CONTAINS",
               TextTransformations: [{ Priority: 0, Type: "LOWERCASE" }],
             },
           },

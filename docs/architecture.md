@@ -81,7 +81,7 @@ All of a stage is one CloudFormation stack, `ResearchArchive-<stage>`, built by 
 
 - **Storage:** three S3 buckets. The staging bucket takes uploads (`incoming/`), keeps checked rounds (`held/`, with a version's zips while it is being published) and reports (`reports/`). The archive bucket keeps published data (`open/` and `restricted/`), each withdrawal's record (`state/`) and project records (`projects/`). The derived bucket keeps the site (`site/`), reindex files (`reindex/`) and CloudFront's logs (`logs/`).
 - **Tables:** DynamoDB tables on demand: two catalog tables, A and B, with a parameter naming the active one, and one table per kind of record (submissions, review events, settings, access requests, user profiles, account events, download counts, usage responses).
-- **Accounts:** a Cognito user pool. Anyone can sign up with a confirmed email and gets no role; an admin gives roles.
+- **Accounts:** a Cognito user pool. Anyone can sign up with a confirmed email, unless the stage is by invitation, and gets no role; an admin gives roles.
 - **API:** an API Gateway REST API under `/api`, with throttling and a Cognito authorizer, in front of the read, submissions, access and curation functions.
 - **Web:** one CloudFront distribution serving the web app and dataset pages from `site/`, open data from `open/` under `/data`, and the API under `/api`.
 - **Pipeline:** the durable ingest function and GuardDuty Malware Protection on the staging bucket's `incoming/` prefix; the durable reindex function; the lifecycle function.

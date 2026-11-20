@@ -517,7 +517,7 @@ Whether anyone can create an account on the stage. With `true`, the sign-in page
 
 With `false`, `limited` means the people you invited: a limited dataset's files can be downloaded only by accounts your team made.
 
-On a public stage with sign-up on, set [`email: ses`](#infrastructurestagesemail): Cognito's own email stops at about 50 a day, and sign-up codes, invitations and password resets share it. The WAF limits how fast one address can ask for emails, not how many addresses ask.
+On a public stage with sign-up on, set [`email: ses`](#infrastructurestagesemail): Cognito's own email stops at about 50 a day, and sign-up codes, invitations and password resets share it. The WAF limits how fast one address can ask for emails.
 
 - **Type:** `true` or `false`.
 - **Default:** `true`.
@@ -696,7 +696,7 @@ infrastructure:
 
 On unless it is `false`. It puts one AWS WAF web ACL in front of the stage's API and its sign-in: AWS's managed rule groups for common attacks, known bad inputs and addresses with a poor reputation, rate limits on sign-up, sign-in and the calls that send email, and a limit on the API requests one address may make ([`requestsPerAddressPerFiveMinutes`](#infrastructurerequestsperaddressperfiveminutes)). With it on, the API answers only requests that come through the site's address. A web ACL bills monthly whether or not it is used ([Running cost](running-cost.md)).
 
-`false` turns it off for every stage in the file: a stage without it shares one allowance of 50 requests a second among all its callers, so one busy caller can use it all.
+`false` turns it off for every stage in the file: a stage without it shares one allowance of 50 requests a second among all its callers.
 
 - **Type:** true or false.
 - **Default:** `true`.

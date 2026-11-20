@@ -508,7 +508,7 @@ A package's **access level**, `archive:access` in its manifest, says who may dow
 | Level | Who can download the files |
 | --- | --- |
 | `public` | Anyone, with no account. A manifest that names no level is public. |
-| `limited` | Anyone signed in to the archive. Anyone can create an account. |
+| `limited` | Anyone signed in to the archive: anyone who makes an account or, on an archive by invitation, the people its team invited. |
 | `restricted` | People an admin approves, after they ask for access with a reason. |
 | `description-only` | No one: the archive holds the description, not the files. |
 

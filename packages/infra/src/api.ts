@@ -200,7 +200,8 @@ export class Api extends Construct {
                   {
                     byteMatchStatement: {
                       fieldToMatch: { singleHeader: { Name: "host" } },
-                      positionalConstraint: "ENDS_WITH",
+                      // Contains, not ends with: a host may carry a port or a closing dot.
+                      positionalConstraint: "CONTAINS",
                       searchString: `.execute-api.${stack.region}.${stack.urlSuffix}`,
                       textTransformations: [{ priority: 0, type: "LOWERCASE" }],
                     },
