@@ -6,6 +6,10 @@ research-archive-in-a-box is a kit for running a research data archive: a place 
 
 ![The search page of an example archive, the Invented Research Cooperative: its introduction, a search box, filters by access, licence and format, and two published datasets.](docs/images/reading-room.png)
 
+This 95-second video, with captions and no sound, follows one dataset from a laptop to a published page: an agent checks, fixes and submits it, a curator approves it, and it is published with a citation.
+
+https://github.com/user-attachments/assets/4042458b-b19b-4407-bef0-152918983721
+
 | If you are                         | Start with                                                                                                         |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | Deciding whether to run an archive | [What a dataset looks like here](#what-a-dataset-looks-like-here), then [Running cost](docs/guide/running-cost.md) |
