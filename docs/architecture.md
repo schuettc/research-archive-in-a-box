@@ -91,6 +91,42 @@ All of a stage is one CloudFormation stack, `ResearchArchive-<stage>`, built by 
 
 Two more stacks belong to the account rather than to a stage. `ResearchArchiveDeploy` holds GitHub's OIDC provider and the one IAM role GitHub Actions assumes to deploy; it is the only stack deployed from a laptop. `CDKToolkit` is CDK's own bootstrap stack, made once per account and region.
 
+### Who can reach what
+
+Every request from outside comes in by one of the paths below. A path marked **public** needs no account; **signed-in** needs a token from the stage's user pool; **admin** needs a signed-in caller in the `admin` group.
+
+```mermaid
+flowchart TD
+  reader["Browser, or a command-line program"]
+  reader -- "public" --> cf["CloudFront distribution"]
+  cf -- "public: every other path" --> site["Derived bucket: site/"]
+  cf -- "public: /data/*" --> open["Archive bucket: open/"]
+  cf -- "/api/*" --> api["API Gateway REST API"]
+  api -- "public: no authorizer" --> readRoutes["Lambda: search, dataset, version and project reads, usage answers, health"]
+  api -- "every other route" --> authorizer{"Cognito authorizer: is the token valid?"}
+  authorizer -- "signed-in" --> signedRoutes["Lambda: downloads, access requests, submissions, review and corrections. The function checks the role a route needs"]
+  authorizer -- "admin" --> adminRoutes["Lambda: /api/admin/*, the review policy and the curator list. The function checks the admin group"]
+  reader -- "public: sign-in through Cognito's API" --> pool["Cognito user pool"]
+  pool -. "issues the token" .-> authorizer
+  waf["WAF web ACL, unless switched off"] -. "guards" .-> api
+  waf -. "guards" .-> pool
+  signedRoutes -. "signs the links" .-> links["Presigned S3 links: an hour for an upload, five minutes for a download"]
+  reader -- "signed-in: with a presigned link" --> links
+  links -- "PUT, one per file" --> incoming["Staging bucket: incoming/"]
+  links -- "GET" --> restricted["Archive bucket: restricted/"]
+  guardduty["GuardDuty Malware Protection"] -- "scans and tags each new object" --> incoming
+  github["GitHub Actions, in the stage's GitHub environment"] -- "OIDC token" --> role["Deploy role, in the ResearchArchiveDeploy stack"]
+  role -- "assumes" --> bootstrap["CDK's bootstrap roles, which deploy the stage"]
+```
+
+- **CloudFront** is the one way in to the site, the open data and the API. It reads `site/` and `open/` through origin access control, and the archive bucket's policy denies it `restricted/` outright. No bucket is public.
+- **The Cognito authorizer** only checks that a request carries a valid token of the user pool. Which role a route needs is checked by the Lambda function behind it: `contributor` for submitting, `curator` for review, `curator` or `admin` for a correction, and `admin` for everything under `/api/admin/`, the review policy and the curator list. The functions that check a role read it from the token and from the user pool at that moment, so a role taken away stops working before the token runs out.
+- **Presigned links** are the only way a browser reaches a bucket directly. The submissions function gives a contributor one PUT link per file, each bound to the file's SHA-256, into `incoming/`. The download route gives a link to a file under `restricted/` after checking the dataset's access level, and for a restricted dataset the caller's approval. The submissions function also signs links to a submission's report under `reports/`, and for a curator to its files under `held/`.
+- **WAF** is drawn because it is on unless `modules.waf` is switched off. With it on, the API answers only requests that carry the key CloudFront adds, so the API's own address is closed, and the web ACL limits requests per address on the API and on the user pool's sign-up and sign-in calls.
+- **GitHub Actions** is the only deployer. The deploy role trusts GitHub's OIDC tokens from this repository's GitHub environments for the listed stages and nothing else, and may only assume CDK's bootstrap roles.
+
+A stage with a custom domain answers on that name through the same distribution; the diagram leaves the domain out.
+
 ## Design decisions
 
 - **Generic Frictionless packages.** A package is a standard Frictionless Data Package with a few `archive:` additions, and nothing in the core is specific to one field of research, so existing Frictionless tools can read every package, and domain rules live in profiles such as `ecology` that an archive turns on.
