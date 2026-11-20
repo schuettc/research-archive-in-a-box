@@ -19,7 +19,7 @@ from archive_contract.findings import Evidence, Finding, Severity, Target
 from archive_contract.manifest import CORE_FIELDS, Manifest
 from archive_contract.profile import Profile
 from archive_contract.resources import Resource
-from cruise.tables import UnreadableTable, connect, read_table
+from cruise.tables import MalformedTable, UnreadableTable, connect, read_table
 
 Question = Literal["find", "understand", "trust"]
 QUESTIONS: tuple[Question, ...] = ("find", "understand", "trust")
@@ -29,6 +29,15 @@ TableReader = Callable[[Resource], duckdb.DuckDBPyRelation]
 
 EVIDENCE_LIMIT = 20
 """The most rows or values a finding lists."""
+
+CHECK_FAILED = "check-failed"
+"""The last part of the id of the finding a rule that could not run becomes."""
+
+
+def failed_id(rule_id: str) -> str:
+    """The id of the finding for a rule that failed: the rule's own prefix, so a failed
+    manifest rule's finding is replaced when the manifest rules run again."""
+    return f"{rule_id.split('.')[0]}.{CHECK_FAILED}"
 
 
 @dataclass(frozen=True)
@@ -67,7 +76,8 @@ class Context:
     def read(self, resource: Resource) -> duckdb.DuckDBPyRelation | None:
         """The resource's rows, or None when it is skipped, not a table or can't be read.
 
-        A table that can't be read is reported once, by `values.unreadable`."""
+        A table that can't be read is reported once, by `values.malformed` or
+        `values.unreadable`."""
         if resource.name in self.skip or resource.table_schema is None:
             return None
         try:
@@ -89,8 +99,9 @@ class Context:
             if relation is not None and resource.table_schema is not None:
                 yield resource, resource.table_schema, relation
 
-    def unreadable(self) -> Iterator[tuple[Resource, str]]:
-        """Every table resource the value rules can't read, with the reason.
+    def unreadable(self, *, malformed: bool = False) -> Iterator[tuple[Resource, str]]:
+        """Every table resource the value rules don't read, with the reason: those left unread
+        on purpose (not CSV, no single file), or with `malformed` those whose CSV can't be parsed.
 
         A resource whose files failed the structure check is not listed: its structure
         finding already says why."""
@@ -98,7 +109,8 @@ class Context:
             try:
                 self.reader(resource)
             except UnreadableTable as exc:
-                yield resource, str(exc)
+                if isinstance(exc, MalformedTable) == malformed:
+                    yield resource, str(exc)
 
 
 @dataclass(frozen=True)
@@ -152,6 +164,29 @@ def _finding(rule: "Rule", problem: Problem) -> Finding:
     )
 
 
+CAUSE_LIMIT = 300
+"""The most characters of a failure's cause a finding quotes."""
+
+
+def _failed(rule: "Rule", exc: Exception) -> Finding:
+    """The finding for a rule that could not run: an error whatever the rule's severity."""
+    text = str(exc).splitlines()
+    cause = f"{type(exc).__name__}: {text[0] if text else ''}"[:CAUSE_LIMIT]
+    return Finding(
+        rule_id=failed_id(rule.id),
+        severity="error",
+        message=(
+            f"The check {rule.id} could not run on this package, so what it looks at was not "
+            f"checked. This is a fault in cruise, not a problem in your data: {cause}"
+        ),
+        evidence=Evidence(values=[rule.id]),
+        suggested_fix=(
+            "Send this message to the archive's maintainers. "
+            "Every other check's result still stands."
+        ),
+    )
+
+
 @dataclass(frozen=True)
 class Rule:
     id: str
@@ -162,9 +197,14 @@ class Rule:
     check: RuleFunction
 
     def run(self, ctx: Context) -> RuleResult:
-        outcome = self.check(ctx)
-        if len(outcome.problems) > outcome.checks:
-            raise RuntimeError(f"{self.id} found more problems than it applied checks")
+        """The rule's findings and checks. A rule that fails, in SQL or in Python, becomes
+        one blocking finding and one failed check, so every other rule's result stands."""
+        try:
+            outcome = self.check(ctx)
+            if len(outcome.problems) > outcome.checks:
+                raise RuntimeError(f"{self.id} found more problems than it applied checks")
+        except Exception as exc:
+            return RuleResult(self, [_failed(self, exc)], 1)
         return RuleResult(self, [_finding(self, p) for p in outcome.problems], outcome.checks)
 
 

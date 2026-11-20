@@ -3,6 +3,7 @@ import io
 import json
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import Path
 from typing import Any, cast
 
@@ -20,6 +21,9 @@ from botocore.exceptions import ClientError
 from archive_backend import ingest, submissions
 from archive_backend.embeddings import Bedrock
 from archive_backend.ingest import Clients, Env
+from archive_contract.config import ArchiveConfig
+from cruise.diagnose import diagnose
+from cruise.rules import Context, Outcome, Registry
 
 SAMPLE = Path(__file__).parents[3] / "examples" / "sample-package"
 SID = "sub-1"
@@ -734,3 +738,21 @@ def test_a_wait_past_the_cap_ends_expired_before_it_starts(world: World) -> None
     assert result["status"] == "expired"
     assert world.types() == [*REVIEWED, "expired"]
     assert [n for n, _ in context.timeouts] == ["review-1-1"]
+
+
+def test_a_failed_check_is_an_error_in_the_stored_report(monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = Registry()
+
+    @registry.rule("values.broken", question="trust", scope="table", severity="warning")
+    def broken(ctx: Context) -> Outcome:
+        raise RuntimeError("no such thing")
+
+    monkeypatch.setattr("archive_backend.ingest.diagnose", partial(diagnose, registry=registry))
+
+    report, findings = ingest.diagnosed(SAMPLE, ArchiveConfig(publisher="x"), 1)
+
+    assert [f["ruleId"] for f in report["findings"] if f["severity"] == "error"] == [
+        "values.check-failed"
+    ]
+    assert report["quality"]["errors"] == 1
+    assert [f.rule_id for f in findings] == ["values.check-failed"]

@@ -8,8 +8,10 @@ from typing import Any
 import pytest
 
 from archive_contract import write_checksums
-from archive_contract.findings import Finding
+from archive_contract.findings import Finding, Target
+from archive_contract.resources import Resource
 from archive_contract.validate import (
+    is_csv_table,
     is_hidden,
     package_files,
     readable_member,
@@ -459,3 +461,212 @@ def test_vector_with_no_dbf_member_is_not_checked(tmp_path: Path) -> None:
     root = edited(tmp_path, edit)
 
     assert "structure.attributes-mismatch" not in rule_ids(validate_package(root))
+
+
+def with_table(
+    tmp_path: Path,
+    csv: bytes,
+    fields: list[str],
+    *,
+    dialect: dict[str, Any] | None = None,
+    primary_key: Any = None,
+    table_format: str | None = "csv",
+    path: str = "data/t.csv",
+) -> Path:
+    """The valid fixture with one more table `t`, its file holding the bytes given."""
+
+    def edit(manifest: dict[str, Any]) -> None:
+        file = tmp_path / "package" / path
+        file.write_bytes(csv)
+        schema: dict[str, Any] = {"fields": [{"name": name} for name in fields]}
+        if primary_key is not None:
+            schema["primaryKey"] = primary_key
+        resource: dict[str, Any] = {
+            "name": "t",
+            "path": path,
+            "type": "table",
+            "bytes": len(csv),
+            "hash": f"sha256:{hashlib.sha256(csv).hexdigest()}",
+            "schema": schema,
+        }
+        if table_format is not None:
+            resource["format"] = table_format
+        if dialect is not None:
+            resource["dialect"] = dialect
+        manifest["resources"].append(resource)
+
+    return edited(tmp_path, edit)
+
+
+def test_header_matching_the_manifest_has_no_findings(tmp_path: Path) -> None:
+    assert validate_package(with_table(tmp_path, b"a,b\n1,2\n", ["a", "b"])) == []
+
+
+def test_header_in_another_order_names_the_column_and_both_names(tmp_path: Path) -> None:
+    [finding] = validate_package(with_table(tmp_path, b"b,a\n1,2\n", ["a", "b"]))
+
+    assert finding.rule_id == "structure.header-mismatch" and finding.severity == "error"
+    assert finding.message == (
+        "data/t.csv: column 1 is named 'b' in the file's header row, but the manifest names it 'a'"
+    )
+    assert finding.target == Target(resource="t", field="a", path="data/t.csv")
+    assert finding.evidence is not None and finding.evidence.values == ["b", "a"]
+
+
+def test_header_with_fewer_columns_names_the_missing_field(tmp_path: Path) -> None:
+    [finding] = validate_package(with_table(tmp_path, b"a\n1\n", ["a", "b"]))
+
+    assert finding.message == (
+        "data/t.csv: the header row has 1 columns, but the manifest describes 2; "
+        "the file has no column for 'b'"
+    )
+    assert finding.target == Target(resource="t", field="b", path="data/t.csv")
+    assert finding.evidence is not None and finding.evidence.values == [1, 2]
+
+
+def test_an_empty_table_file_has_a_header_of_no_columns(tmp_path: Path) -> None:
+    [finding] = validate_package(with_table(tmp_path, b"", ["a", "b"]))
+
+    assert finding.message == (
+        "data/t.csv: the header row has 0 columns, but the manifest describes 2; "
+        "the file has no column for 'a'"
+    )
+
+
+def test_header_with_more_columns_names_the_extra_column(tmp_path: Path) -> None:
+    [finding] = validate_package(with_table(tmp_path, b"a,b,c\n", ["a", "b"]))
+
+    assert finding.rule_id == "structure.header-mismatch"
+    assert finding.message.endswith("the manifest has no field for the file's column 'c'")
+    assert finding.target == Target(resource="t", path="data/t.csv")
+    assert finding.evidence is not None and finding.evidence.values == [3, 2]
+
+
+def test_header_after_a_byte_order_mark_matches(tmp_path: Path) -> None:
+    root = with_table(tmp_path, b"\xef\xbb\xbfa,b\n1,2\n", ["a", "b"])
+
+    assert validate_package(root) == []
+
+
+def test_header_with_a_space_around_a_name_is_a_mismatch(tmp_path: Path) -> None:
+    [finding] = validate_package(with_table(tmp_path, b"a, b\n1,2\n", ["a", "b"]))
+
+    assert finding.evidence is not None and finding.evidence.values == [" b", "b"]
+
+
+def test_header_differing_only_in_case_is_a_mismatch(tmp_path: Path) -> None:
+    assert rule_ids(validate_package(with_table(tmp_path, b"A,b\n", ["a", "b"]))) == [
+        "structure.header-mismatch"
+    ]
+
+
+@pytest.mark.parametrize("header", [False, 0])
+def test_a_table_with_no_header_row_is_not_compared(tmp_path: Path, header: Any) -> None:
+    root = with_table(tmp_path, b"1,2\n", ["a", "b"], dialect={"header": header})
+
+    assert validate_package(root) == []
+
+
+def test_header_is_read_with_the_dialects_delimiter(tmp_path: Path) -> None:
+    root = with_table(tmp_path, b"a;b\n1;2\n", ["a", "b"], dialect={"delimiter": ";"})
+
+    assert validate_package(root) == []
+
+
+def test_header_is_read_with_the_dialects_quote_character(tmp_path: Path) -> None:
+    root = with_table(tmp_path, b"'a,x',b\n1,2\n", ["a,x", "b"], dialect={"quoteChar": "'"})
+
+    assert validate_package(root) == []
+
+
+def test_comment_line_before_the_header_is_a_mismatch(tmp_path: Path) -> None:
+    root = with_table(tmp_path, b"# Monthly means\na,b\n1,2\n", ["a", "b"])
+
+    assert rule_ids(validate_package(root)) == ["structure.header-mismatch"]
+
+
+def test_a_table_that_is_not_utf8_is_left_to_the_reader(tmp_path: Path) -> None:
+    assert validate_package(with_table(tmp_path, b"\xe9,b\n\xff,2\n", ["a", "b"])) == []
+
+
+@pytest.mark.parametrize("dialect", [{"delimiter": "||"}, {"delimiter": ""}, {"quoteChar": "''"}])
+def test_a_two_character_delimiter_gets_no_header_finding_and_no_traceback(
+    tmp_path: Path, dialect: dict[str, Any]
+) -> None:
+    root = with_table(tmp_path, b"b||a\n1||2\n", ["a", "b"], dialect=dialect)
+
+    assert validate_package(root) == []
+
+
+def test_a_csv_path_with_no_format_gets_the_header_check(tmp_path: Path) -> None:
+    root = with_table(tmp_path, b"b,a\n", ["a", "b"], table_format=None)
+
+    assert rule_ids(validate_package(root)) == ["structure.header-mismatch"]
+
+
+def test_renaming_a_field_of_a_table_with_no_format_is_a_header_mismatch(tmp_path: Path) -> None:
+    def edit(manifest: dict[str, Any]) -> None:
+        assert "format" not in manifest["resources"][1]
+        manifest["resources"][1]["schema"]["fields"][0]["name"] = "station"
+
+    [finding] = validate_package(edited(tmp_path, edit))
+
+    assert finding.rule_id == "structure.header-mismatch"
+    assert finding.target == Target(resource="readings", field="station", path="data/readings.csv")
+
+
+@pytest.mark.parametrize(
+    ("table_format", "path", "expected"),
+    [
+        ("csv", "data/t.csv", True),
+        ("CSV", "data/t.txt", True),
+        (None, "data/t.csv", True),
+        (None, "data/t.CSV", True),
+        (None, "data/t.txt", False),
+        ("json", "data/t.csv", False),
+        ("", "data/t.csv", False),
+    ],
+)
+def test_is_csv_table(table_format: str | None, path: str, expected: bool) -> None:
+    resource = Resource.model_validate({"name": "t", "path": path, "format": table_format})
+
+    assert is_csv_table(resource) is expected
+
+
+def test_a_csv_path_with_another_format_gets_no_header_check(tmp_path: Path) -> None:
+    root = with_table(tmp_path, b"b,a\n", ["a", "b"], table_format="json")
+
+    assert validate_package(root) == []
+
+
+def test_primary_key_naming_a_missing_field(tmp_path: Path) -> None:
+    root = with_table(tmp_path, b"a,b\n", ["a", "b"], primary_key=["zzz"])
+
+    [finding] = validate_package(root)
+
+    assert finding.rule_id == "structure.primary-key" and finding.severity == "error"
+    assert finding.message == "primary key uses 'zzz', which is not a field of this table"
+    assert finding.target == Target(resource="t", field="zzz")
+
+
+def test_primary_key_given_as_one_name_is_checked_too(tmp_path: Path) -> None:
+    root = with_table(tmp_path, b"a,b\n", ["a", "b"], primary_key="zzz")
+
+    assert rule_ids(validate_package(root)) == ["structure.primary-key"]
+
+
+def test_primary_key_naming_its_tables_fields_has_no_findings(tmp_path: Path) -> None:
+    root = with_table(tmp_path, b"a,b\n", ["a", "b"], primary_key=["a", "b"])
+
+    assert validate_package(root) == []
+
+
+def test_foreign_key_with_field_lists_of_different_lengths(tmp_path: Path) -> None:
+    def edit(manifest: dict[str, Any]) -> None:
+        manifest["resources"][1]["schema"]["foreignKeys"][0]["fields"] = ["condition", "site"]
+
+    [finding] = validate_package(edited(tmp_path, edit))
+
+    assert finding.rule_id == "structure.foreign-key"
+    assert finding.message == "foreign key on condition, site names 2 fields but points at 1"
+    assert finding.target == Target(resource="readings", field="condition")

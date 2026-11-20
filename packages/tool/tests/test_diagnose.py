@@ -6,6 +6,7 @@ import socket
 from pathlib import Path
 from typing import Any
 
+import duckdb
 import pytest
 
 from archive_contract.findings import Finding
@@ -13,7 +14,7 @@ from archive_contract.manifest import CheckCount, Manifest
 from archive_contract.profile import load_profile
 from archive_contract.resources import Resource
 from cruise.diagnose import diagnose, diagnose_manifest
-from cruise.rules import REGISTRY, Context, Outcome, Problem, Registry
+from cruise.rules import CHECK_FAILED, REGISTRY, Context, Outcome, Problem, Registry, failed_id
 from cruise.score import completeness
 from cruise.tables import UnreadableTable, read_table, select
 
@@ -21,6 +22,8 @@ SAMPLE = Path(__file__).parents[3] / "examples" / "sample-package"
 
 
 MESSY = Path(__file__).parent / "fixtures" / "messy-package"
+NO_FORMAT = Path(__file__).parents[2] / "contract" / "tests" / "fixtures" / "valid"
+"""The contract's valid fixture: its two tables have `.csv` paths and state no format."""
 
 
 def targets(findings: list[Finding]) -> list[tuple[str, str]]:
@@ -212,3 +215,121 @@ def test_manifest_check_matches_diagnose_on_the_same_manifest(tmp_path: Path) ->
 
     found = diagnose_manifest(Manifest.model_validate(raw), profiles, ["archive:funding"])
     assert _seen(found) == _seen(expected)
+
+
+def test_a_rule_that_fails_becomes_one_blocking_finding_and_the_rest_still_run() -> None:
+    registry = Registry()
+
+    @registry.rule("values.broken", question="trust", scope="table", severity="warning")
+    def broken(ctx: Context) -> Outcome:
+        raise duckdb.BinderException('Binder Error: column "b" must appear\nLINE 1: SELECT')
+
+    @registry.rule("field.fine", question="understand", scope="field", severity="warning")
+    def fine(ctx: Context) -> Outcome:
+        return Outcome([Problem("still here")], 3)
+
+    result = diagnose(SAMPLE, registry=registry)
+
+    failed = next(f for f in result.findings if f.rule_id == "values.check-failed")
+    assert failed.severity == "error" and failed.target is None
+    assert failed.message == (
+        "The check values.broken could not run on this package, so what it looks at was not "
+        "checked. This is a fault in cruise, not a problem in your data: "
+        'BinderException: Binder Error: column "b" must appear'
+    )
+    assert failed.suggested_fix == (
+        "Send this message to the archive's maintainers. Every other check's result still stands."
+    )
+    assert failed.evidence is not None and failed.evidence.values == ["values.broken"]
+    assert [f.message for f in result.findings if f.rule_id == "field.fine"] == ["still here"]
+    assert result.blocking == 1
+    assert result.score is not None
+    assert result.score.parts["trust"] == CheckCount(passed=0, applicable=1)
+    assert result.score.parts["understand"] == CheckCount(passed=2, applicable=3)
+
+
+def test_a_rule_reporting_more_problems_than_checks_is_a_failed_check() -> None:
+    registry = Registry()
+
+    @registry.rule("package.greedy", question="find", scope="package", severity="note")
+    def greedy(ctx: Context) -> Outcome:
+        return Outcome([Problem("a"), Problem("b")], 1)
+
+    [finding] = diagnose_manifest(Manifest.model_validate(_sample_manifest()), registry=registry)
+
+    assert finding.rule_id == "package.check-failed" and finding.severity == "error"
+
+
+def test_a_failed_checks_cause_is_one_line_of_at_most_300_characters() -> None:
+    registry = Registry()
+
+    @registry.rule("field.long", question="understand", scope="field", severity="note")
+    def long(ctx: Context) -> Outcome:
+        raise ValueError("x" * 500)
+
+    [finding] = diagnose_manifest(Manifest.model_validate(_sample_manifest()), registry=registry)
+
+    assert finding.rule_id == "field.check-failed"
+    assert finding.message.endswith(
+        "not a problem in your data: " + ("ValueError: " + "x" * 500)[:300]
+    )
+
+
+def test_a_failed_checks_id_keeps_the_rules_prefix() -> None:
+    assert CHECK_FAILED == "check-failed"
+    assert [failed_id(r) for r in ("values.constant", "field.unit-missing", "package.x.y")] == [
+        "values.check-failed",
+        "field.check-failed",
+        "package.check-failed",
+    ]
+
+
+def test_a_rule_does_not_swallow_an_interrupt() -> None:
+    registry = Registry()
+
+    @registry.rule("values.stopped", question="trust", scope="table", severity="note")
+    def stopped(ctx: Context) -> Outcome:
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        diagnose(SAMPLE, registry=registry)
+
+
+def test_a_csv_path_with_no_format_is_read_as_csv() -> None:
+    result = diagnose(NO_FORMAT)
+
+    assert result.structure == []
+    assert not [f for f in result.findings if f.rule_id == "values.unreadable"]
+    constant = REGISTRY.get("values.constant").run(
+        Context.for_package(
+            NO_FORMAT,
+            Manifest.model_validate(json.loads((NO_FORMAT / "datapackage.json").read_text())),
+        )
+    )
+    assert constant.checks == 6  # three columns in each of the two tables
+
+
+def test_a_csv_path_with_another_format_is_still_not_read() -> None:
+    resource = Resource.model_validate(
+        {
+            "name": "t",
+            "path": "data/readings.csv",
+            "type": "table",
+            "format": "json",
+            "schema": {"fields": [{"name": "site"}]},
+        }
+    )
+
+    with pytest.raises(UnreadableTable, match="only csv tables are read"):
+        read_table(NO_FORMAT, resource)
+
+
+def test_the_declared_rules_come_after_the_rules_that_were_there_before() -> None:
+    ids = [rule.id for rule in REGISTRY]
+
+    assert (
+        ids.index("package.creator-orcid-missing")
+        < ids.index("values.not-declared-type")
+        < ids.index("values.unreadable")
+        < ids.index("values.foreign-key-missing")
+    )

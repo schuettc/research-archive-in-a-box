@@ -12,10 +12,11 @@ from cruise import __version__
 from cruise.audit import AuditRow, audit
 from cruise.diagnose import Diagnosis, diagnose
 from cruise.edit import EditError, edit_package
-from cruise.rules import REGISTRY
+from cruise.rules import CHECK_FAILED, REGISTRY
 
 HEADINGS = {
     "structure": "Structure",
+    "failed": "Checks that could not run (a fault in cruise, not in your package)",
     "find": "Can I find, cite and reuse it?",
     "understand": "Can I understand each column?",
     "trust": "Can I trust the values?",
@@ -46,6 +47,8 @@ def _load_selection(args: argparse.Namespace) -> tuple[list[Profile], list[str]]
 
 
 def _group(finding: Finding) -> str:
+    if finding.rule_id.endswith(f".{CHECK_FAILED}"):
+        return "failed"
     try:
         return REGISTRY.get(finding.rule_id).question
     except KeyError:
