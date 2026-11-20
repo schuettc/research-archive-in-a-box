@@ -20,7 +20,7 @@ def test_version_prints_name_and_version(capsys: pytest.CaptureFixture[str]) -> 
         main(["--version"])
 
     assert exit_info.value.code == 0
-    assert capsys.readouterr().out == "cruise 0.1.0\n"
+    assert capsys.readouterr().out == "cruise 0.1.2\n"
 
 
 def test_diagnose_prints_findings_by_question_then_score_and_verdict(

@@ -13,7 +13,7 @@ cruise set . description "Logger battery voltage." --resource logger --column ba
 Install it with [uv](https://docs.astral.sh/uv/) and check a package:
 
 ```
-uv tool install "git+https://github.com/schuettc/research-archive-in-a-box@v0.1.1#subdirectory=packages/tool"
+uv tool install "git+https://github.com/schuettc/research-archive-in-a-box@v0.1.2#subdirectory=packages/tool"
 cruise diagnose examples/sample-package
 ```
 

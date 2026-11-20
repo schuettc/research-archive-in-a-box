@@ -51,7 +51,7 @@ wheels = [
 
 [[package]]
 name = "archive-agent"
-version = "0.1.0"
+version = "0.1.2"
 source = { editable = "packages/agent" }
 dependencies = [
     { name = "archive-client" },
@@ -70,7 +70,7 @@ requires-dist = [
 
 [[package]]
 name = "archive-backend"
-version = "0.1.0"
+version = "0.1.2"
 source = { editable = "packages/backend" }
 dependencies = [
     { name = "archive-contract" },
@@ -93,12 +93,12 @@ requires-dist = [
 
 [[package]]
 name = "archive-client"
-version = "0.1.0"
+version = "0.1.2"
 source = { editable = "packages/client" }
 
 [[package]]
 name = "archive-contract"
-version = "0.1.0"
+version = "0.1.2"
 source = { editable = "packages/contract" }
 dependencies = [
     { name = "pydantic" },
@@ -553,7 +553,7 @@ wheels = [
 
 [[package]]
 name = "cruise"
-version = "0.1.0"
+version = "0.1.2"
 source = { editable = "packages/tool" }
 dependencies = [
     { name = "archive-contract" },
@@ -655,7 +655,7 @@ wheels = [
 
 [[package]]
 name = "femc"
-version = "0.1.0"
+version = "0.1.2"
 source = { editable = "examples/femc" }
 dependencies = [
     { name = "archive-contract" },
@@ -1679,7 +1679,7 @@ wheels = [
 
 [[package]]
 name = "research-archive-in-a-box"
-version = "0.1.0"
+version = "0.1.2"
 source = { virtual = "." }
 
 [package.dev-dependencies]
