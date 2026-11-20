@@ -350,6 +350,27 @@ def test_download_never_writes_an_agent_instruction_file(
     assert fetched(connected) == []
 
 
+def test_download_judges_the_name_a_link_in_the_folder_leads_to(
+    connected: Any, tmp_path: Path
+) -> None:
+    (tmp_path / "notes.csv").symlink_to(tmp_path / "CLAUDE.md")
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / "data").symlink_to(tmp_path / ".claude", target_is_directory=True)
+    version(connected, "open", {"notes.csv": b"x", "data/settings.json": b"x"})
+
+    result = read.download(
+        Session(), "d1", 3, ["notes.csv", "data/settings.json"], str(tmp_path), overwrite=True
+    )
+
+    assert not (tmp_path / "CLAUDE.md").exists()
+    assert not (tmp_path / ".claude" / "settings.json").exists()
+    assert result["skipped"] == [
+        {"path": "notes.csv", "reason": read.AGENT_FILE},
+        {"path": "data/settings.json", "reason": read.HIDDEN},
+    ]
+    assert fetched(connected) == []
+
+
 @pytest.mark.parametrize("path", [".claude/settings.json", ".git/hooks/post-checkout", "a/.env"])
 def test_download_never_writes_a_hidden_name(connected: Any, tmp_path: Path, path: str) -> None:
     version(connected, "open", {path: b"x"})

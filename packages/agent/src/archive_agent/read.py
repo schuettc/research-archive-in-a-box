@@ -142,9 +142,12 @@ def download(
     wanted: dict[str, Path] = {}
     existing: list[str] = []
     for path, target in targets.items():
-        if is_hidden(path):
+        # A link already in the folder can lead a name somewhere else, so the place the file
+        # would land is judged as well as the name the archive gave.
+        landing = target.relative_to(root).as_posix()
+        if is_hidden(path) or is_hidden(landing):
             skipped.append({"path": path, "reason": HIDDEN})
-        elif PurePosixPath(path).name.casefold() in agent_files:
+        elif {PurePosixPath(path).name.casefold(), target.name.casefold()} & agent_files:
             skipped.append({"path": path, "reason": AGENT_FILE})
         elif target.exists() and not overwrite:
             skipped.append({"path": path, "reason": EXISTS})

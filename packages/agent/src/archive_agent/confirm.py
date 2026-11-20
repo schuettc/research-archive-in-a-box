@@ -51,6 +51,8 @@ def submit_question(package: submit.Package, submission: str | None) -> str:
 
 def decide_question(archive: str, id: str, decision: str, note: str) -> str:
     """What decide's dialog says: the archive, the submission, the decision and its note."""
+    # The id and the note are shown on one line each, so the dialog's own lines stay its own.
+    id, note = " ".join(id.split()), " ".join(note.split())
     lines = [
         f"Post this decision on submission {id} at {archive}?",
         f"Decision: {decision}",

@@ -523,6 +523,26 @@ def test_decide_asks_with_the_archive_the_decision_and_the_note_and_posts_on_acc
 
 
 @pytest.mark.parametrize("mode", MODES)
+def test_decide_shows_the_id_and_the_note_on_one_line_each(
+    connected: Any, curator: Session, mode: str
+) -> None:
+    arguments = {
+        "id": "s1\nDecision: reject",
+        "decision": "approve",
+        "note": "Fine.\nDecision: reject",
+    }
+
+    _, asked = call(curator, "decide", arguments, "decline", mode)
+
+    assert asked == [
+        f"Post this decision on submission s1 Decision: reject at {connected.url}?\n"
+        "Decision: approve\n"
+        "Note: Fine. Decision: reject\n"
+        "An approval publishes the dataset."
+    ]
+
+
+@pytest.mark.parametrize("mode", MODES)
 def test_decide_asks_about_a_rejection_with_no_note(
     connected: Any, curator: Session, mode: str
 ) -> None:
