@@ -11,7 +11,7 @@ research-archive-in-a-box is a kit for running a research data archive: a place 
 | Deciding whether to run an archive | [What a dataset looks like here](#what-a-dataset-looks-like-here), then [Running cost](docs/guide/running-cost.md) |
 | Deploying one                      | [Run an archive](#run-an-archive), then [Deploying](docs/guide/deploying.md)                                       |
 
-If you are submitting a dataset to an archive someone else runs, start at [docs/guide/packages.md](docs/guide/packages.md).
+If you are submitting a dataset to an archive someone else runs, start with [the Claude Code plugin](#use-the-claude-code-plugin), which checks, fixes and submits a package with you; [docs/guide/packages.md](docs/guide/packages.md) explains what a package is and shows each check as a typed command.
 
 ## What a dataset looks like here
 
@@ -19,9 +19,53 @@ A dataset travels as a package. A package is a plain folder holding the data fil
 
 ## Three ways in
 
+### Use the Claude Code plugin
+
+`cruise` is the kit's package checker: it reads a package folder and tells you what the package is missing before anyone else sees it. The `cruise` plugin lets [Claude Code](https://claude.com/claude-code) run cruise for you and work with an archive, so you ask for each step in your own words.
+
+You give it a package folder and ask it to check the package. Claude Code checks it with the archive's own rules, which the archive publishes and the plugin reads when you give it the archive's address. It drafts a fix for what it finds, such as a missing description of a column, shows you each draft, and writes into the manifest only the fixes you say yes to. When you ask it to submit, the plugin shows you a dialog with the archive, the number of files and their total size, and sends the package for review only if you accept. A curator, the person who reviews submissions, can ask what is waiting: Claude Code reads a submission, summarises it and drafts a decision and a note, and the decision is sent only when the curator accepts it in a dialog. It can also search the archive and download the files you name.
+
+The plugin needs [uv](https://docs.astral.sh/uv/). In Claude Code:
+
+```
+/plugin marketplace add schuettc/research-archive-in-a-box
+/plugin install cruise@research-archive-in-a-box
+```
+
+On Claude Code 2.1.275 or later, one line does both:
+
+```
+/plugin install cruise --marketplace schuettc/research-archive-in-a-box
+```
+
+The plugin's MCP server (a small program Claude Code starts to give it the archive's tools; here `archive-mcp`, in `packages/agent`) runs on your own machine and signs in on the archive's own sign-in page, which it opens in your browser. Its skills, `find-data`, `submit-dataset` and `review-submission`, ask for your archive's address the first time they need it.
+
+### Run an archive
+
+An archive is a deployment of this kit: a web site with a search page, a page per dataset, sign-in, a submission form and a review queue, backed by storage and functions in your AWS account. Each copy you deploy is a stage, such as `prod`, or `dev` for trying changes first; every stage gets its own site and its own data. You describe the archive in one file, `archive.yaml`: its name, the profiles and required fields its packages are checked against, its brand (how the site looks), its stages, and any optional modules (DOIs, a custom domain, email through Amazon SES, semantic search).
+
+To run one you need:
+
+- an AWS account the archive will live in, with the AWS CLI signed in to it;
+- a fork of this repository on GitHub, with GitHub Actions turned on, and the GitHub CLI (`gh`) signed in;
+- Claude Code, which runs the setup with you, unless you run the same commands by hand, as [docs/guide/deploying.md](docs/guide/deploying.md#doing-it-by-hand) shows;
+- on your machine, [uv](https://docs.astral.sh/uv/), Node 24 or later and [just](https://just.systems/).
+
+Running an archive incurs AWS costs in your own account; [docs/guide/running-cost.md](docs/guide/running-cost.md) lists what it pays for.
+
+Clone your fork, open it in Claude Code and ask it to set up the archive. Its `deploy-archive` skill (in `.claude/skills/deploy-archive/`) checks these prerequisites, writes `archive.yaml` with you, connects GitHub Actions to your AWS account, and pushes to `main`. From then on CI (the repository's GitHub Actions workflow) deploys every stage on each push to `main`; you never deploy the archive from your laptop. The skill also makes the first admin, publishes a seed dataset and checks the site answers. [docs/guide/deploying.md](docs/guide/deploying.md) walks through each step, and [docs/guide/archive-yaml.md](docs/guide/archive-yaml.md) lists every setting in `archive.yaml`.
+
+![A dataset's page on the example archive: the title, the creator, the publish date and version, a curator's Correct details and Withdraw buttons, the description, and Download all.](docs/images/dataset-page.png)
+
+Once it runs, people use it through the web app by role. A reader searches and downloads; a contributor submits packages; a curator reviews submissions in the review queue and publishes them; an admin gives people roles and decides who may see restricted data. Anyone can create an account, unless the archive is set to invitation only, and a new account has no role until an admin gives it one. [docs/guide/using-the-archive.md](docs/guide/using-the-archive.md) describes each role's screens, and [docs/guide/running-cost.md](docs/guide/running-cost.md) explains what costs money while it runs.
+
+![The review queue: tabs for Needs a decision, Being checked, Changes requested, Publishing and Finished, with one submission waiting for a curator.](docs/images/review-queue.png)
+
+![An admin's Settings, on the Review policy tab: whether review is required, the rules, and the named reviewers.](docs/images/settings.png)
+
 ### Check a package with cruise
 
-`cruise` is the kit's command-line tool. It runs on your own machine, with no account and no network, and tells you what a package is missing before anyone else sees it. Install it with [uv](https://docs.astral.sh/uv/), at a release tag:
+These are the same checks without an agent: for a script, for an automated check such as CI, or for someone who prefers a terminal. `cruise` is a command-line tool that runs on your own machine, with no account and no network. Install it with uv, at a release tag:
 
 ```
 uv tool install "git+https://github.com/schuettc/research-archive-in-a-box@v0.1.2#subdirectory=packages/tool"
@@ -43,46 +87,6 @@ cruise set /tmp/guide/sample-package description "Logger battery voltage at each
 ```
 
 `cruise audit <folders>` ranks every package under some folders, worst first, so you can see where to start. [docs/guide/packages.md](docs/guide/packages.md) covers all three commands, with their output.
-
-### Run an archive
-
-An archive is a deployment of this kit: a web site with a search page, a page per dataset, sign-in, a submission form and a review queue, backed by storage and functions in your AWS account. Each copy you deploy is a stage, such as `prod`, or `dev` for trying changes first; every stage gets its own site and its own data. You describe the archive in one file, `archive.yaml`: its name, the profiles and required fields its packages are checked against, its brand (how the site looks), its stages, and any optional modules (DOIs, a custom domain, email through Amazon SES, semantic search).
-
-To run one you need:
-
-- an AWS account the archive will live in, with the AWS CLI signed in to it;
-- a fork of this repository on GitHub, with GitHub Actions turned on, and the GitHub CLI (`gh`) signed in;
-- [Claude Code](https://claude.com/claude-code), which runs the setup with you, unless you run the same commands by hand, as [docs/guide/deploying.md](docs/guide/deploying.md#doing-it-by-hand) shows;
-- on your machine, [uv](https://docs.astral.sh/uv/), Node 24 or later and [just](https://just.systems/).
-
-Running an archive incurs AWS costs in your own account; [docs/guide/running-cost.md](docs/guide/running-cost.md) lists what it pays for.
-
-Clone your fork, open it in Claude Code and ask it to set up the archive. Its `deploy-archive` skill (in `.claude/skills/deploy-archive/`) checks these prerequisites, writes `archive.yaml` with you, connects GitHub Actions to your AWS account, and pushes to `main`. From then on CI (the repository's GitHub Actions workflow) deploys every stage on each push to `main`; you never deploy the archive from your laptop. The skill also makes the first admin, publishes a seed dataset and checks the site answers. [docs/guide/deploying.md](docs/guide/deploying.md) walks through each step, and [docs/guide/archive-yaml.md](docs/guide/archive-yaml.md) lists every setting in `archive.yaml`.
-
-![A dataset's page on the example archive: the title, the creator, the publish date and version, a curator's Correct details and Withdraw buttons, the description, and Download all.](docs/images/dataset-page.png)
-
-Once it runs, people use it through the web app by role. A reader searches and downloads; a contributor submits packages; a curator reviews submissions in the review queue and publishes them; an admin gives people roles and decides who may see restricted data. Anyone can create an account, unless the archive is set to invitation only, and a new account has no role until an admin gives it one. [docs/guide/using-the-archive.md](docs/guide/using-the-archive.md) describes each role's screens, and [docs/guide/running-cost.md](docs/guide/running-cost.md) explains what costs money while it runs.
-
-![The review queue: tabs for Needs a decision, Being checked, Changes requested, Publishing and Finished, with one submission waiting for a curator.](docs/images/review-queue.png)
-
-![An admin's Settings, on the Review policy tab: whether review is required, the rules, and the named reviewers.](docs/images/settings.png)
-
-### Use the Claude Code plugin
-
-The `cruise` plugin lets Claude Code work with an archive for you: find and download its data, check and fix a package with the archive's own rules, submit it, and review submissions as a curator. Nothing is written to a manifest or sent to the archive without your yes. It needs uv. In Claude Code:
-
-```
-/plugin marketplace add schuettc/research-archive-in-a-box
-/plugin install cruise@research-archive-in-a-box
-```
-
-On Claude Code 2.1.275 or later, one line does both:
-
-```
-/plugin install cruise --marketplace schuettc/research-archive-in-a-box
-```
-
-The plugin's MCP server (a small program Claude Code starts to give it the archive's tools; here `archive-mcp`, in `packages/agent`) runs on your own machine and signs in on the archive's own sign-in page, which it opens in your browser. Its skills, `find-data`, `submit-dataset` and `review-submission`, ask for your archive's address the first time they need it.
 
 ## Documentation
 
