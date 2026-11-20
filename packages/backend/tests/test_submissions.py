@@ -35,6 +35,7 @@ ENV = Env(
     catalog_tables={"A": "catalog-a", "B": "catalog-b"},
     user_pool_id="pool",
     archive_config_parameter=CONFIG,
+    user_profiles_table="user-profiles",
 )
 
 
@@ -160,6 +161,27 @@ class FakeSSM:
         return {"Parameter": {"Value": "B"}}
 
 
+class FakeCognito:
+    """The pool's accounts by sub, with their live groups, for the live role check."""
+
+    def __init__(self, groups: dict[str, set[str]]) -> None:
+        self.groups = groups
+
+    def list_users(self, *, UserPoolId: str, Filter: str, Limit: int) -> dict[str, Any]:
+        assert UserPoolId == "pool"
+        sub = Filter.split('"')[1]
+        if sub not in self.groups:
+            return {"Users": []}
+        return {
+            "Users": [{"Username": f"name-{sub}", "Attributes": [{"Name": "sub", "Value": sub}]}]
+        }
+
+    def admin_list_groups_for_user(self, *, UserPoolId: str, Username: str) -> dict[str, Any]:
+        assert UserPoolId == "pool"
+        names = sorted(self.groups[Username.removeprefix("name-")])
+        return {"Groups": [{"GroupName": name} for name in names]}
+
+
 class World:
     def __init__(self) -> None:
         self.s3 = FakeS3()
@@ -168,6 +190,10 @@ class World:
         self.submissions = FakeTable(("submissionId",))
         self.reviews = FakeTable(("submissionId", "eventKey"))
         self.settings = FakeTable(("name",))
+        self.profiles = FakeTable(("userId",))
+        self.cognito = FakeCognito({})
+        # What the pool says of a user when it differs from their token.
+        self.live: dict[str, set[str]] = {}
         self.catalog = {"catalog-a": FakeTable(("PK", "SK")), "catalog-b": FakeTable(("PK", "SK"))}
         self.clients = Clients(
             s3=cast(submissions.S3, self.s3),
@@ -177,7 +203,8 @@ class World:
             reviews=cast(submissions.Table, self.reviews),
             settings=cast(submissions.Table, self.settings),
             table=lambda name: cast(submissions.Table, self.catalog[name]),
-            cognito=cast(submissions.Cognito, None),
+            cognito=cast(submissions.Cognito, self.cognito),
+            profiles=cast(submissions.Table, self.profiles),
         )
 
     def call(
@@ -199,6 +226,7 @@ class World:
             "body": raw if raw is not None else json.dumps(body) if body is not None else None,
             "requestContext": {"authorizer": {"claims": {"sub": user, "cognito:groups": groups}}},
         }
+        self.cognito.groups[user] = self.live.get(user, {g for g in groups.split(",") if g})
         response = submissions.handle(event, self.clients, ENV)
         return response["statusCode"], json.loads(response["body"])
 
@@ -252,6 +280,66 @@ def test_each_route_refuses_the_wrong_role(
     sid = world.create("alice")
     status, body = world.call(method, resource, "mallory", groups, {}, sid=sid)
     assert status == 403, body
+
+
+LIVE = [
+    ("POST", "/api/submissions", "contributor"),
+    ("GET", "/api/submissions", "curator"),
+    ("GET", "/api/submissions/policy", "admin"),
+    ("PUT", "/api/submissions/policy", "admin"),
+    ("POST", "/api/submissions/{id}/uploads", "contributor"),
+    ("POST", "/api/submissions/{id}/submit", "contributor"),
+    ("GET", "/api/submissions/{id}", "curator"),
+    ("POST", "/api/submissions/{id}/decision", "curator"),
+    ("GET", "/api/submissions/{id}/files", "curator"),
+    ("GET", "/api/people", "curator"),
+    ("GET", "/api/curators", "admin"),
+    ("POST", "/api/checks", "contributor"),
+    ("POST", "/api/submissions/{id}/edits", "curator"),
+]
+
+
+def test_the_roles_table_names_every_route() -> None:
+    assert set(submissions.ROLES) == {(method, resource) for method, resource, _ in ROUTES}
+    assert len(submissions.ROLES) == 13
+
+
+@pytest.mark.parametrize(("method", "resource", "role"), LIVE)
+def test_each_route_refuses_a_caller_no_longer_in_the_group(
+    world: World, method: str, resource: str, role: str
+) -> None:
+    sid = world.create("alice")
+    world.live["alice"] = set()
+
+    status, body = world.call(method, resource, "alice", role, {}, sid=sid)
+
+    assert status == 403, body
+
+
+@pytest.mark.parametrize(("method", "resource", "role"), LIVE)
+def test_each_route_refuses_a_disabled_account(
+    world: World, method: str, resource: str, role: str
+) -> None:
+    sid = world.create("alice")
+    world.profiles.put_item(Item={"userId": "alice", "disabled": True})
+
+    status, body = world.call(method, resource, "alice", role, {}, sid=sid)
+
+    assert (status, body["error"]) == (403, "your account is disabled")
+
+
+def test_a_caller_who_left_the_curator_group_acts_as_a_contributor(world: World) -> None:
+    theirs = world.create("bob")
+    world.live["alice"] = {"contributor"}
+
+    read, _ = world.call("GET", "/api/submissions/{id}", "alice", "contributor,curator", sid=theirs)
+    files = [{"path": "data/a.csv", "size": 4, "sha256": DIGEST}]
+    created, body = world.call(
+        "POST", "/api/submissions", "alice", "contributor,curator", {"files": files}
+    )
+
+    assert (read, created) == (403, 201)
+    assert world.submissions.items[(body["submissionId"],)]["submitterIsCurator"] is False
 
 
 def test_create_records_the_submission_and_returns_checksummed_urls(world: World) -> None:

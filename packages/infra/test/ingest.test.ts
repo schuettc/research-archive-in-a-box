@@ -200,6 +200,7 @@ test("every environment variable either handler reads is set", () => {
       "CATALOG_TABLE_B",
       "USER_POOL_ID",
       "ARCHIVE_CONFIG_PARAMETER",
+      "USER_PROFILES_TABLE",
     ].sort(),
   );
   expect(api.Variables.USER_POOL_ID).toEqual({ Ref: logicalId(archive.userPool) });
@@ -504,17 +505,23 @@ test("the ingest may call Bedrock only with the embeddings module, to embed what
   expect(statements(INGEST).flatMap(actions)).not.toContain("bedrock:InvokeModel");
 });
 
-test("the submissions function may only list the user pool's users and a group's members", () => {
-  const cognito = statements(SUBMISSIONS).filter((s) =>
-    actions(s).some((action) => action.startsWith("cognito-idp:")),
-  );
-
-  expect(cognito).toEqual([
-    expect.objectContaining({
-      Action: ["cognito-idp:ListUsers", "cognito-idp:ListUsersInGroup"],
-      Resource: { "Fn::GetAtt": [logicalId(archive.userPool), "Arn"] },
-    }),
+test("the submissions function may list the pool's users, a group's members and a user's groups", () => {
+  const onPool = statements(SUBMISSIONS)
+    .flatMap(actions)
+    .filter((action) => action.startsWith("cognito-idp:"));
+  expect(onPool.sort()).toEqual([
+    "cognito-idp:AdminListGroupsForUser",
+    "cognito-idp:ListUsers",
+    "cognito-idp:ListUsersInGroup",
   ]);
+});
+
+test("the submissions function may read a profile, and nothing else of UserProfiles", () => {
+  const profiles = logicalId(archive.userProfiles);
+  const onProfiles = statements(SUBMISSIONS)
+    .filter((s) => JSON.stringify(s.Resource).includes(profiles))
+    .flatMap(actions);
+  expect(onProfiles).toEqual(["dynamodb:GetItem"]);
 });
 
 test("the submissions function may read the archive config, so a check runs the archive's rules", () => {

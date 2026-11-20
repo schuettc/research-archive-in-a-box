@@ -1260,6 +1260,18 @@ def test_admin_downloads_refuses_a_disabled_or_demoted_admin_whose_token_says_ad
     assert (demoted, disabled) == (403, 403)
 
 
+def test_admin_usage_refuses_a_disabled_or_demoted_admin_whose_token_says_admin(
+    world: World,
+) -> None:
+    world.cognito.groups["user-1"] = {"curator"}
+    _disable(world, "admin-9")
+
+    demoted, _ = world.call("GET", "/api/admin/usage", {"dataset": ["ds"]}, claims=ADMIN)
+    disabled, _ = world.call("GET", "/api/admin/usage", {"dataset": ["ds"]}, claims=AN_ADMIN)
+
+    assert (demoted, disabled) == (403, 403)
+
+
 def test_a_public_file_not_yet_released_from_restricted_is_signed_where_it_is(
     world: World, today: None
 ) -> None:

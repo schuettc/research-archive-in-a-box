@@ -190,6 +190,7 @@ export class Ingest extends Construct {
         ...catalogEnv,
         INGEST_ALIAS_ARN: aliasArn,
         USER_POOL_ID: archive.userPool.userPoolId,
+        USER_PROFILES_TABLE: archive.userProfiles.tableName,
         ARCHIVE_CONFIG_PARAMETER: archive.archiveConfigParameter.parameterName,
       },
     });
@@ -226,9 +227,15 @@ export class Ingest extends Construct {
     );
 
     // /api/people turns ids into emails; /api/curators lists the curator group.
+    // Each route reads the caller's disabled mark and their groups live, as the curation function does.
+    archive.userProfiles.grant(api, "dynamodb:GetItem");
     api.addToRolePolicy(
       allow(
-        ["cognito-idp:ListUsers", "cognito-idp:ListUsersInGroup"],
+        [
+          "cognito-idp:ListUsers",
+          "cognito-idp:ListUsersInGroup",
+          "cognito-idp:AdminListGroupsForUser",
+        ],
         [archive.userPool.userPoolArn],
       ),
     );

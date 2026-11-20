@@ -672,10 +672,30 @@ def record_usage(id: str, answers: UsageAnswers) -> Response[None]:
     return Response(status_code=204, body=None)
 
 
+def _live_admin() -> None:
+    """Refuse unless the signed-in caller is an admin in the token and in the user pool now, and
+    not disabled."""
+    claims = _signed_in()
+    if "admin" not in _groups(claims.get("cognito:groups")):
+        raise ForbiddenError("admins only")
+    sub = str(claims.get("sub", ""))
+    profile = _item(os.environ["USER_PROFILES_TABLE"], {"userId": sub}) or {}
+    try:
+        people.require_live(
+            clients().cognito,
+            os.environ["USER_POOL_ID"],
+            sub,
+            disabled=profile.get("disabled") is True,
+            roles={"admin"},
+            refusal="admins only",
+        )
+    except people.NotAllowed as refused:
+        raise ForbiddenError(str(refused)) from None
+
+
 @app.get("/api/admin/usage")
 def list_usage(dataset: Annotated[str, Query()]) -> UsageList:
-    if "admin" not in _groups(_signed_in().get("cognito:groups")):
-        raise ForbiddenError("admins only")
+    _live_admin()
     items = _query(
         TableName=os.environ["USAGE_TABLE"],
         KeyConditionExpression="datasetId = :pk",
@@ -701,22 +721,7 @@ def _months(newest: str, count: int) -> list[str]:
 def list_downloads(months: Annotated[Literal["3", "12", "all"], Query()]) -> DownloadsAnswer:
     """One row per dataset ever downloaded: its downloads by month over the last 3 or 12 months
     (this one included) or all time, and their total, most downloaded first."""
-    claims = _signed_in()
-    if "admin" not in _groups(claims.get("cognito:groups")):
-        raise ForbiddenError("admins only")
-    sub = str(claims.get("sub", ""))
-    profile = _item(os.environ["USER_PROFILES_TABLE"], {"userId": sub}) or {}
-    try:
-        people.require_live(
-            clients().cognito,
-            os.environ["USER_POOL_ID"],
-            sub,
-            disabled=profile.get("disabled") is True,
-            roles={"admin"},
-            refusal="admins only",
-        )
-    except people.NotAllowed as refused:
-        raise ForbiddenError(str(refused)) from None
+    _live_admin()
     scan: dict[str, Any] = {"TableName": os.environ["DOWNLOAD_COUNTS_TABLE"]}
     by_dataset: dict[str, dict[str, int]] = {}
     while True:
