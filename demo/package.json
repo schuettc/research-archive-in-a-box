@@ -1,0 +1,10 @@
+{
+  "name": "research-archive-demo-video",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Records the README's demo video; not part of the archive, and not one of the root's workspaces.",
+  "type": "module",
+  "devDependencies": {
+    "playwright": "^1.56.0"
+  }
+}

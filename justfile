@@ -208,6 +208,45 @@ seed stage:
     fi
     uv run --all-packages --frozen python scripts/seed.py "$domain"
 
+# Record the README's demo video and screenshots into demo/out/ on a deployed stage with keepData: false
+demo-video stage:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # It makes two accounts on the stage, publishes the sample packages the stage lacks and makes
+    # two submissions; demo/README.md says what it needs. Run from a laptop, never CI.
+    for tool in vhs ffmpeg ffprobe node jq; do
+        if ! command -v "$tool" >/dev/null; then
+            echo "demo-video needs $tool, which is not installed: demo/README.md has the install commands"
+            exit 1
+        fi
+    done
+    if [ ! -d demo/node_modules/playwright ]; then
+        echo "demo-video needs Playwright, which is not installed: demo/README.md has the install commands"
+        exit 1
+    fi
+    # _stage-field prints True for a stage that keeps its data and nothing for one that doesn't.
+    if [ -n "$({{just_executable()}} _stage-field "{{stage}}" keep_data)" ]; then
+        echo "{{stage}} keeps its data; demo-video records only on a stage with keepData: false"
+        exit 1
+    fi
+    region="$({{just_executable()}} _stage-field "{{stage}}" region)"
+    [ -z "$region" ] || export AWS_DEFAULT_REGION="$region"
+    root="$PWD"
+    # An earlier take's video and screenshots stay until this take writes its own.
+    rm -rf demo/out/raw demo/out/scenes demo/out/captions demo/out/timeline.json
+    mkdir -p demo/out/scenes demo/out/screenshots
+    # The accounts, the sample datasets, the two package folders and a submission left waiting.
+    uv run --all-packages --frozen python demo/setup.py "{{stage}}"
+    work="$(jq -r .work demo/out/run.json)"
+    # The terminal scene, which gives the plot survey the title the browser scenes submit it with.
+    (cd "$work" && PATH="$work/bin:$PATH" vhs "$root/demo/terminal.tape")
+    mv "$work/terminal.mp4" demo/out/scenes/terminal-raw.mp4
+    mv "$work/demo-cruise-diagnose.png" demo/out/screenshots/demo-cruise-diagnose.png
+    # The browser scenes and screenshots, then the six scenes joined under their captions.
+    node demo/scenes.mjs
+    node demo/assemble.mjs
+    echo "the screenshots are in demo/out/screenshots/; watch the video with: open demo/out/research-archive-demo.mp4"
+
 # Delete the stage's stack, the log groups its functions leave behind and, with a domain, its
 # certificate stack in us-east-1; run from a laptop, never CI
 destroy stage:
