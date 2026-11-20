@@ -103,9 +103,11 @@ stateDiagram-v2
   review --> rejected: a curator rejects it
   changes --> draft: the upload of the next round starts
   changes --> abandoned: no resubmission within 30 days
+  draft --> abandoned: a later round, not submitted within the 30 days
   publishing --> published: the version is live
   review --> expired: still open after 360 days
   changes --> expired: still open after 360 days
+  draft --> expired: a later round, still open after 360 days
   checking --> failed: a file not scanned within one day, or a step fails
   publishing --> failed: a step fails
   published --> [*]
