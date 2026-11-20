@@ -7,7 +7,9 @@ from the header alone. A CSV table's header row must hold its schema's field nam
 Quality is the audit's business, not this module's.
 
 Symlinks are refused wherever they appear and never followed, so nothing outside the package
-is read or hashed.
+is read or hashed. Hidden files and folders (a name starting with a dot) are never part of a
+package: they are not walked, listed or read, and a manifest or `checksums.sha256` that names
+one is refused.
 """
 
 import csv
@@ -52,21 +54,36 @@ def _error(
     )
 
 
+def is_hidden(path: str) -> bool:
+    """Whether any part of the relative path starts with a dot.
+
+    A hidden file or folder (`.DS_Store`, `.git/`) is the computer's, never the package's.
+    """
+    return any(part.startswith(".") for part in path.split("/"))
+
+
 def is_package_content(relative: PurePosixPath) -> bool:
-    """Everything is package content except the top-level `_build/` folder."""
+    """Everything is package content except the top-level `_build/` folder and hidden files
+    and folders."""
+    if is_hidden(relative.as_posix()):
+        return False
     return not (len(relative.parts) > 1 and relative.parts[0] == BUILD)
 
 
 def package_files(root: Path) -> tuple[list[str], list[str]]:
     """The package's files and its symlinks, as sorted relative paths.
 
-    Symlinks, to files or folders, are listed and never followed; `_build/` is not walked.
+    Symlinks, to files or folders, are listed and never followed; `_build/` is not walked;
+    hidden files and folders are neither walked nor listed.
     """
     files: list[str] = []
     links: list[str] = []
     for dirpath, dirnames, filenames in os.walk(root):
         here = Path(dirpath)
         for name in list(dirnames):
+            if name.startswith("."):
+                dirnames.remove(name)
+                continue
             relative = (here / name).relative_to(root).as_posix()
             if (here / name).is_symlink():
                 links.append(relative)
@@ -74,6 +91,8 @@ def package_files(root: Path) -> tuple[list[str], list[str]]:
             elif relative == BUILD:
                 dirnames.remove(name)
         for name in filenames:
+            if name.startswith("."):
+                continue
             relative = (here / name).relative_to(root).as_posix()
             if (here / name).is_symlink():
                 links.append(relative)
@@ -107,8 +126,9 @@ def _safe(path: str) -> bool:
 
 
 def readable_member(root: Path, path: str) -> bool:
-    """Whether `path` stays inside the package at `root` with no symlink on the way."""
-    return _safe(path) and _symlink_in(root, path) is None
+    """Whether `path` stays inside the package at `root`, is not hidden and has no symlink
+    on the way."""
+    return _safe(path) and not is_hidden(path) and _symlink_in(root, path) is None
 
 
 def is_csv_table(resource: Resource) -> bool:
@@ -154,6 +174,16 @@ def _check_file(
     name = resource.name
     if not _safe(path):
         return [_error("path-unsafe", f"{path} is outside the package", resource=name, path=path)]
+    if is_hidden(path):
+        return [
+            _error(
+                "path-hidden",
+                f"{path} is a hidden file (a name starting with a dot), "
+                "which a package never holds",
+                resource=name,
+                path=path,
+            )
+        ]
     link = _symlink_in(root, path)
     if link is not None:
         return [_symlink(link, resource=name)]
@@ -501,6 +531,16 @@ def _check_checksums(root: Path) -> list[Finding]:
     findings.extend(_symlink(link) for link in links)
     present_set = set(present)
     for path, digest in listed.items():
+        if _safe(path) and is_hidden(path):
+            findings.append(
+                _error(
+                    "checksums-hidden",
+                    f"{CHECKSUMS} lists {path}, a hidden file (a name starting with a dot), "
+                    "which a package never holds; remove its line",
+                    path=path,
+                )
+            )
+            continue  # never hashed, and no orphan or mismatch finding
         if _safe(path) and _symlink_in(root, path) is not None:
             continue  # refused as a symlink above, and never hashed
         if not _safe(path) or path not in present_set:

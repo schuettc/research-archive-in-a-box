@@ -19,6 +19,7 @@ from archive_backend.people import MAX_PEOPLE
 from archive_contract import ReviewPolicy
 from archive_contract.findings import Finding
 from archive_contract.manifest import QualityVerdict, ValidationVerdict
+from archive_contract.validate import is_hidden
 
 Status = Literal[
     "draft",
@@ -78,7 +79,8 @@ class Model(BaseModel):
 
 
 class SubmittedFile(Model):
-    """One file of a round: a relative path, its size in bytes and its SHA-256 in hex."""
+    """One file of a round: a relative path with no part starting with a dot, its size in
+    bytes and its SHA-256 in hex."""
 
     path: str
     size: int = Field(ge=0, le=MAX_PUT)
@@ -94,7 +96,8 @@ def _safe_path(path: object) -> bool:
 
 
 def check_files(value: object) -> list[dict[str, Any]]:
-    """A round's file list: relative safe paths, each once, sizes up to 5 GB, SHA-256 in hex."""
+    """A round's file list: relative safe paths, none hidden, each once, sizes up to 5 GB,
+    SHA-256 in hex."""
     if not isinstance(value, list) or not value or len(value) > MAX_FILES:
         raise ValueError(f"files must list 1 to {MAX_FILES} files")
     files: list[dict[str, Any]] = []
@@ -105,6 +108,11 @@ def check_files(value: object) -> list[dict[str, Any]]:
         path, size, digest = entry.get("path"), entry.get("size"), entry.get("sha256")
         if not _safe_path(path) or not isinstance(path, str):
             raise ValueError(f"unsafe path: {path!r}")
+        if is_hidden(path):
+            raise ValueError(
+                f"hidden path: {path!r}; a package never holds a file or folder whose name "
+                "starts with a dot"
+            )
         if path in seen:
             raise ValueError(f"path listed twice: {path}")
         if isinstance(size, bool) or not isinstance(size, int) or not 0 <= size <= MAX_PUT:

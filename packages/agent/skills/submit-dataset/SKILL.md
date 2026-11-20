@@ -15,7 +15,9 @@ anything to the archive without the person's yes.** The tools come from the
 1. **Ask for the package folder and call `diagnose` on it.** Show the `verdict`, the score
    (`quality.score`, with `find`, `understand` and `trust`) and the findings grouped by
    question, errors first:
-   - Structure (`structure.*`): the package's files, hashes and references.
+   - Structure (`structure.*`): the package's files, hashes and references. A
+     `structure.checksums-hidden` finding means `checksums.sha256` lists a hidden file: any
+     approved `edit_manifest` rewrites the file without it.
    - Can I find, cite and reuse it? (`package.*`)
    - Can I understand each column? (`field.*`)
    - Can I trust the values? (`values.*`)
@@ -36,11 +38,14 @@ anything to the archive without the person's yes.** The tools come from the
    `diagnose` again and show what changed.
 4. **Repeat** until no errors are left or the person stops. Warnings may remain: list them
    and say they don't block publishing.
-5. **Submit only with the person's yes.** Say what will happen: every file in
-   `checksums.sha256` is uploaded and the package goes to the archive's review. Call
-   `sign_in` if needed (say first that it opens the browser), then `submit` with the folder.
-   Show the submission id and its status. `submit` refuses a package with an error finding;
-   go back to step 2 if it does.
+5. **Submit only with the person's yes.** Say what will happen and where: every file in
+   `checksums.sha256` is uploaded and the package goes to review at the archive this window
+   is on (`diagnose` answers it as `archive`; name it). Hidden files and folders
+   (names starting with a dot, such as `.DS_Store` or `.git/`) are never part of a package:
+   they are not listed, checked or uploaded. Call `sign_in` if needed (say first that it
+   opens the browser), then `submit` with the folder. Show the submission id, its status and
+   the `archive` it went to. `submit` refuses a package with an error finding; go back to
+   step 2 if it does.
 6. **Later, on request, call `submissions`** with the id to show its status. When it is
    `needs-changes`, show the curator's note (in its `decided` event) and the findings (in
    its `report`; if it answers a `report_error` instead, say the findings couldn't be read
@@ -52,12 +57,14 @@ anything to the archive without the person's yes.** The tools come from the
 Say what the tool said in plain words, keep working locally (`diagnose` and `edit_manifest`
 need no network), and say what to run again:
 
-- **No archive is set**: ask for the archive's web address and call `connect`.
+- **No archive is set, or it is the wrong one**: ask for the archive's web address and call
+  `connect`. It changes this window only; other open windows keep their archive.
 - **The archive can't be reached**: the package stays as it is on disk; run `submit` again
   when the archive answers. Nothing is queued. A submit that failed part way leaves a draft
   in the archive that expires on its own; the next `submit` starts a fresh one.
 - **Signed out or the sign-in expired**: sign-in lasts an hour and only while this session
-  runs. Call `sign_in` again (with their go) and retry.
+  runs. Call `sign_in` again (with their go) and retry. A sign-in is for one archive; after
+  `connect` to another, sign in again.
 - **Not allowed** (it names the group): submitting needs the `contributor` group; the
   archive's admin can add it.
 - **Conflict** (the archive's message): the submission isn't in a state that takes this step,

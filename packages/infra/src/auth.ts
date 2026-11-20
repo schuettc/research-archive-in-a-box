@@ -15,7 +15,7 @@ import type { LoginBrand } from "./brand";
 const ONLY_LOCALE = new cognito.ClientAttributes().withStandardAttributes({ locale: true });
 
 export interface AuthProps {
-  readonly isProd: boolean;
+  readonly keepData: boolean;
   /** The archive's brand: the invitation and code emails' name. */
   readonly brand: LoginBrand;
   /**
@@ -41,11 +41,11 @@ export interface AuthProps {
  */
 export class Auth extends Construct {
   readonly userPool: cognito.UserPool;
-  private readonly isProd: boolean;
+  private readonly keepData: boolean;
 
   constructor(scope: Construct, id: string, props: AuthProps) {
     super(scope, id);
-    this.isProd = props.isProd;
+    this.keepData = props.keepData;
     const name = props.brand.name;
     // The email is HTML; the subject is plain text.
     const escape = (text: string) =>
@@ -91,7 +91,7 @@ export class Auth extends Construct {
             }),
           }
         : {}),
-      ...(props.isProd
+      ...(props.keepData
         ? { removalPolicy: RemovalPolicy.RETAIN, deletionProtection: true }
         : { removalPolicy: RemovalPolicy.DESTROY }),
     });
@@ -172,12 +172,12 @@ export class Auth extends Construct {
   }
 
   /**
-   * The test-only `e2e` client, for non-prod stages: admin password sign-in, so `just
+   * The test-only `e2e` client, for stages with keepData: false: admin password sign-in, so `just
    * ingest-e2e` signs in the throwaway users it creates. Its outputs are what the run reads.
    */
   addTestClient(): cognito.UserPoolClient {
-    if (this.isProd) {
-      throw new Error("the e2e client is never created on a prod stage");
+    if (this.keepData) {
+      throw new Error("the e2e client is never created on a stage that keeps its data");
     }
     const client = this.userPool.addClient("E2eClient", {
       userPoolClientName: "e2e",

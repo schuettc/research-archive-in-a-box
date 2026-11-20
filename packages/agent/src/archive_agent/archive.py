@@ -31,8 +31,21 @@ def _message(body: bytes) -> str:
     return text[:500]
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuses every redirect, so the answer comes back as the 30x it is."""
+
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
+_SIGNED = urllib.request.build_opener(_NoRedirect)
+"""Opens a request that carries a token: urllib would copy the header to wherever a redirect
+points, so such a request follows none."""
+
+
 class Archive:
-    """Calls one archive, sending the ID token when signed in.
+    """Calls one archive, sending the ID token when signed in to it. A token another archive
+    issued is never sent.
 
     The archive's Cognito authorizer reads the ID token from the `Authorization` header (its
     routes ask for no OAuth scopes, and the backend reads the email and groups claims, which
@@ -54,6 +67,14 @@ class Archive:
 
     def _token(self, signed_in: bool) -> str | None:
         tokens = self.tokens
+        if tokens is not None and tokens.site != self.url:
+            # Another archive's token: as good as none here, and never put in a header.
+            if not signed_in:
+                return None
+            raise SignedOut(
+                f"Your sign-in is for {tokens.site}, not {self.url}, so it wasn't sent. "
+                f"Call sign_in to sign in to {self.url}, then retry."
+            )
         if tokens is not None and tokens.expires_at > self._now():
             return tokens.id_token
         if not signed_in:
@@ -63,11 +84,19 @@ class Archive:
         raise SignedOut(f"Your sign-in to {self.url} expired. {SIGN_IN_AGAIN}")
 
     def _open(self, request: urllib.request.Request, group: str | None) -> bytes:
+        signed = request.has_header("Authorization")
+        opener = _SIGNED.open if signed else urllib.request.urlopen
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with opener(request, timeout=self.timeout) as response:
                 body: bytes = response.read()
                 return body
         except urllib.error.HTTPError as exc:
+            if signed and 300 <= exc.code < 400:
+                raise Refused(
+                    f"{self.url} redirected a signed-in request to "
+                    f"{exc.headers.get('Location')}, so it wasn't followed: your sign-in goes "
+                    "only to the archive that issued it."
+                ) from exc
             message = _message(exc.read())
             if exc.code == 401:
                 raise SignedOut(

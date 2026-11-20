@@ -167,7 +167,7 @@ set-embargo stage id date:
     EOF
 
 # The stage's user pool id. list-stack-resources pages past 100 resources (describe-stack-resources
-# stops there), and a prod stage has no UserPoolId output.
+# stops there), and a stage that keeps its data has no UserPoolId output.
 _user-pool stage:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -316,11 +316,11 @@ add-curator stage email userId:
         --attributes "$attributes" --query SubscriptionArn --output text >/dev/null
     echo "{{email}} subscribed to the {{stage}} curators' topic; they must confirm from the email"
 
-# Drive the sample package through the ingest pipeline on a deployed non-prod stage, with the
+# Drive the sample package through the ingest pipeline on a deployed stage with keepData: false, with the
 # caller's AWS_PROFILE and region. Set INGEST_E2E_REVIEWER to your curator user id to receive
 # the reminder; the reminder run leaves one submission waiting, and the next day's run checks it.
 ingest-e2e stage:
-    uv run python scripts/ingest_e2e.py {{stage}}
+    uv run --all-packages --frozen python scripts/ingest_e2e.py {{stage}}
 
 # Install archive-backend, its workspace packages (the contract and cruise) and its locked
 # dependencies as arm64 Lambda wheels, without Docker

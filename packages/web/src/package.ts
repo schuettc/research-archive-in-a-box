@@ -32,8 +32,11 @@ const MAX_PUT = 5 * 1024 ** 3;
 /** A parsed datapackage.json, as plain JSON: only the fields an edit touches are typed. */
 export type Manifest = Record<string, unknown>;
 
-/** Dot-files and dot-folders (`.DS_Store`, `.git/`) are the computer's, not the package's. */
-const hidden = (path: string) => path.split("/").some((part) => part.startsWith("."));
+/**
+ * Dot-files and dot-folders (`.DS_Store`, `.git/`) are the computer's, not the package's. The
+ * same rule as the contract's `is_hidden`; `package.test.ts` holds the two to one file of cases.
+ */
+export const hidden = (path: string) => path.split("/").some((part) => part.startsWith("."));
 
 /**
  * A directory input's files, each by its path from the chosen folder's root: the input names
@@ -153,6 +156,12 @@ export async function checkPackage(
     return { ok: false, problem: "datapackage.json has no id the archive can use." };
   }
   for (const path of sums.keys()) {
+    if (hidden(path)) {
+      return {
+        ok: false,
+        problem: `checksums.sha256 lists ${path}, a hidden file, which a package never holds. Remove its line (any cruise set rewrites the file without it), then choose the folder again.`,
+      };
+    }
     if (!byPath.has(path)) {
       return {
         ok: false,
