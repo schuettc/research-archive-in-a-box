@@ -28,8 +28,15 @@ export type Test = boolean;
 export type Alertemail = string;
 export type Model = "amazon.titan-embed-text-v2:0";
 export type Retentiondays = number;
+/**
+ * true: one AWS WAF web ACL guards the API and sign-in of every stage, with a limit on the requests one address may make. false: no web ACL, and every caller of a stage shares one allowance of 50 requests a second. Left out: true.
+ */
 export type Waf = boolean;
 export type Monthlybudgetusd = number;
+/**
+ * With the WAF on, the API requests one address may make in five minutes before more are refused for a while. At least 10. Left out: 2000. Unused with modules.waf: false.
+ */
+export type Requestsperaddressperfiveminutes = number;
 /**
  * @minItems 1
  */
@@ -65,6 +72,10 @@ export type Email = "ses" | null;
 export type Keepdata = boolean;
 export type Name2 = string;
 export type Region = string | null;
+/**
+ * true: anyone can create an account on the sign-in page; a new account has no role. false: accounts come only from an invitation (just invite-user, or Settings › People), and limited then means the people you invited. On a public stage with sign-up on, set email: ses: Cognito's own email stops at about 50 a day. Left out: true.
+ */
+export type Selfsignup = boolean;
 export type Licenses = string[];
 export type Profiles = string[];
 export type Publisher = string;
@@ -130,10 +141,11 @@ export interface Infrastructure {
   alertEmail: Alertemail;
   modules?: Modules;
   monthlyBudgetUsd?: Monthlybudgetusd;
+  requestsPerAddressPerFiveMinutes?: Requestsperaddressperfiveminutes;
   stages?: Stages;
 }
 /**
- * The optional parts, each built only when switched on.
+ * The optional parts: the WAF is on unless switched off, the others only when switched on.
  */
 export interface Modules {
   embeddings?: Embeddings | null;
@@ -163,6 +175,7 @@ export interface Stage {
   keepData?: Keepdata;
   name: Name2;
   region?: Region;
+  selfSignUp?: Selfsignup;
 }
 /**
  * A stage's own DOI settings, each over the archive-wide `doi` block, which it needs. Test

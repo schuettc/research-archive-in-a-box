@@ -16,6 +16,8 @@ const ONLY_LOCALE = new cognito.ClientAttributes().withStandardAttributes({ loca
 
 export interface AuthProps {
   readonly keepData: boolean;
+  /** Whether people can create their own account; with false, accounts come only by invitation. */
+  readonly selfSignUp: boolean;
   /** The archive's brand: the invitation and code emails' name. */
   readonly brand: LoginBrand;
   /**
@@ -33,8 +35,8 @@ export interface AuthProps {
 /**
  * The user pool with email sign-in, offering a password or a passkey, and its role groups. People
  * sign in on the archive's own page, the command line too, through Cognito's API; Cognito shows no
- * page of its own and has no domain. Anyone may sign up, confirming their email
- * with an emailed code, and gets no role; an admin may still invite a person with
+ * page of its own and has no domain. Anyone may sign up unless the stage says not, confirming their
+ * email with an emailed code, and gets no role; an admin may always invite a person with
  * `just invite-user`, as the first admin of a new deploy is. Its emails come from Cognito's own
  * no-reply@verificationemail.com, or with `email` from `<brand name> <no-reply@<domain>>` through
  * the account's SES.
@@ -55,7 +57,7 @@ export class Auth extends Construct {
     const signInAt = address ? `Sign in at <a href="${address}">${address}</a>.<br><br>` : "";
     this.userPool = new cognito.UserPool(this, "UserPool", {
       // Sign-up confirms the email with a code, so an unconfirmed account can't sign in.
-      selfSignUpEnabled: true,
+      selfSignUpEnabled: props.selfSignUp,
       signInAliases: { email: true },
       autoVerify: { email: true },
       accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,

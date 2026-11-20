@@ -224,6 +224,7 @@ export class ResearchArchive extends Construct {
     }
     const auth = new Auth(this, "Auth", {
       keepData: this.keepData,
+      selfSignUp: stage.selfSignUp ?? true,
       brand,
       siteAddress: stage.domain?.name,
       ...(this.email && this.domain
@@ -234,7 +235,8 @@ export class ResearchArchive extends Construct {
 
     const api = new Api(this, "Api", {
       userPool: this.userPool,
-      waf: infrastructure.modules?.waf ?? false,
+      waf: infrastructure.modules?.waf ?? true,
+      requestsPerFiveMinutes: infrastructure.requestsPerAddressPerFiveMinutes ?? 2000,
       health: this.pythonFunction("HealthFunction", { handler: "archive_backend.health.handler" }),
       whoami: this.pythonFunction("WhoamiFunction", { handler: "archive_backend.whoami.handler" }),
     });
@@ -247,6 +249,7 @@ export class ResearchArchive extends Construct {
       archiveBucket: this.archiveBucket,
       stagingBucket: this.stagingBucket,
       restApi: this.api,
+      originKey: api.originKey,
       brandColor: brand.primaryColor,
       faviconExt: props.config.brand?.favicon
         ? extname(props.config.brand.favicon).toLowerCase()
@@ -284,6 +287,7 @@ export class ResearchArchive extends Construct {
       {
         region: Stack.of(this).region,
         webClientId: this.userPoolClients.web.userPoolClientId,
+        selfSignUp: stage.selfSignUp ?? true,
       },
       // The contract's defaults when the config names none, as ingest applies them.
       {

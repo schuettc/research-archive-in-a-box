@@ -59,8 +59,10 @@ tell the person.
    signed-in account downloads them), `restricted` (an admin approves each person's request) and
    `description-only` (the page and its description are published, with no files).
 2. Then walk through every other setting, one at a time, with its default, and keep the default
-   unless they want something else. Optional modules (such as WAF and object lock) are off unless
-   they switch them on; say what each adds.
+   unless they want something else. The WAF is on unless they set `waf: false`: say it costs
+   about $12 a month per stage, and that with `false` every caller of a stage shares one
+   allowance of 50 requests a second. The other optional modules (such as object lock) are off
+   unless they switch them on; say what each adds.
 3. When you reach `brand`, say that every archive has a privacy page at `/privacy`, linked from
    the footer, which says what the archive keeps about the people who use it (request logs kept
    90 days, an account's email and name, a submitter's name, an access request's reason). The
@@ -112,6 +114,13 @@ tell the person.
    isn't one of the ten `docs/email.md` lists, where it isn't supported yet. Point them to
    `docs/email.md` for what it changes.
 
+   Then, for each stage, ask: "Should anyone be able to create an account on this stage? The
+   default is yes." Read `selfSignUp`'s `description` from `$defs.Stage`. A no writes
+   `selfSignUp: false` on the stage; say that `limited` then means the people they invite. A yes
+   leaves `selfSignUp` out; on a stage the public will reach, recommend `email: ses`, since
+   Cognito's own email stops at about 50 a day and sign-up codes share it with invitations and
+   password resets.
+
 7. Write `archive.yaml` and validate it before going on:
 
    ```
@@ -132,6 +141,11 @@ which only `main` may deploy from.
 
 **What it costs.** The provider and role cost nothing. The CDK bootstrap bucket bills for the
 little it stores.
+
+Before creating the role, say two things. Anyone who can push to `main`, or change the workflow
+there, can run code with the deploy role, and that role can do anything in the AWS account: write
+access to `main` is admin of the account. So recommend an AWS account that holds nothing but the
+archive, and write access to `main` only for people they would give the account to.
 
 **Wait for:** "connect it" (or a clear yes).
 
@@ -268,9 +282,10 @@ to 55; after that it fails and rolls back), and then the stage's account emails 
 `no-reply@<name>`.
 
 **What it costs.** Say what bills while the archive sits idle: storage in S3 and DynamoDB, the
-CloudWatch alarms and dashboard, retained logs, and the WAF web ACL if they switched WAF on. Say
-what bills per use: Lambda, API Gateway, CloudFront, DynamoDB reads and writes, and Cognito past
-its free tier. Give no dollar figure; none has been measured. Point to the budget alarm: AWS
+CloudWatch alarms and dashboard, retained logs, and the WAF web ACL unless they set `waf: false`
+(about $12 a month per stage). Say what bills per use: Lambda, API Gateway, CloudFront, DynamoDB
+reads and writes, and Cognito past its free tier. Give no other dollar figure; none has been
+measured. Point to the budget alarm: AWS
 Budgets emails the alert email when the month passes `monthlyBudgetUsd`.
 
 **Wait for:** "deploy it" (or a clear yes).
@@ -293,8 +308,10 @@ Cognito emails a temporary password to the address.
 
 **What it costs.** Nothing.
 
-Before inviting, warn them: **anyone can create an account** from the sign-in page's Create an
-account form, and the stage is open to sign-up from the moment it deploys. A new account has no
+Before inviting, on a stage with sign-up on (`selfSignUp` left out or `true`), warn them:
+**anyone can create an account** from the sign-in page's Create an account form, and the stage is
+open to sign-up from the moment it deploys. On a stage with `selfSignUp: false` nobody can sign
+themselves up: say that accounts come only from an invitation. A new account has no
 role: it can read what any visitor reads, and sign in to download `limited` files and to ask for
 `restricted` ones, but it can't submit, review or change settings until an admin gives it a role.
 The first admin gives roles on the site under **Settings → People**, or from the terminal with

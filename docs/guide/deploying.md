@@ -50,6 +50,8 @@ This step deploys the one stack you deploy from your laptop, **`ResearchArchiveD
 
 The role trusts a run only when it comes from your fork and runs in a GitHub **environment** named for one of your stages. The skill creates one environment per stage, lets only the `main` branch deploy from it, and stores in it the role's ARN (`AWS_DEPLOY_ROLE_ARN`) and the stage's Region (`AWS_REGION`). To require a person's approval before `prod` deploys, add a required reviewer to the `prod` environment in the fork's settings.
 
+Anyone who can push to `main`, or change the workflow there, can run code with the deploy role, and that role can do anything in the AWS account. Write access to `main` is admin of the account. The deploy job installs packages without running their install scripts and loads the role only in the step before `cdk deploy`, but every step of that job, the build's own tools included, could ask GitHub for the role. Use an AWS account that holds nothing but the archive, and give write access to `main` only to people you would give the account to.
+
 A stage in another AWS account (an `account` in `archive.yaml`) needs this step again, signed in to that account.
 
 #### The repository's subject, and a recreated repository
@@ -84,13 +86,15 @@ just invite-user <stage> <email> admin,curator,contributor
 
 Cognito, the AWS service that holds the archive's accounts, emails them a temporary password. A **role** decides what a signed-in person can do: a **contributor** submits packages, a **curator** reviews them, and an **admin** changes the settings, people and access. The first admin gets all three.
 
-Sign-up is open: anyone can create an account on the site's sign-in page. A new account has no role, so it can download `limited` datasets and ask for `restricted` ones, but can't submit, review or change anything until an admin gives it a role, in the site's **Settings › People** or with:
+Sign-up is open unless the stage says `selfSignUp: false`: anyone can create an account on the site's sign-in page. A new account has no role, so it can download `limited` datasets and ask for `restricted` ones, but can't submit, review or change anything until an admin gives it a role, in the site's **Settings › People** or with:
 
 ```
 just set-roles <stage> <email> contributor
 ```
 
 `set-roles` makes the person's roles exactly the comma-separated list given; `""` removes every role.
+
+With `selfSignUp: false` only invited people get an account, so `limited` means the people you invited. On a public stage with sign-up on, use `email: ses`.
 
 ### 7. ✋ The seed
 

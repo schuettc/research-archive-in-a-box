@@ -38,6 +38,9 @@ async function answer(url: string): Promise<Response> {
   }
   if (path.startsWith("/api/datasets/")) return Response.json({}, { status: 404 });
   if (path === "/api/search") return Response.json({ total: 0, rows: [], facets: {} });
+  if (path === "/auth-config.json") {
+    return Response.json({ region: "eu-west-2", webClientId: "web" });
+  }
   return new Promise(() => {});
 }
 

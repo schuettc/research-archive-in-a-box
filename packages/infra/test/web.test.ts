@@ -136,6 +136,46 @@ test("/api/* goes to the REST API uncached with all methods", () => {
   expect(behaviour?.OriginRequestPolicyId).toBe("b689b0a8-53d0-40ab-baf2-68738e2966ac");
 });
 
+function archiveWithWaf(waf: boolean): ReturnType<typeof archive> {
+  return archive({
+    infrastructure: {
+      alertEmail: "a@example.org",
+      stages: [{ name: "prod" }],
+      modules: { waf },
+    },
+  });
+}
+
+test("with WAF on, /api/* sends the API its key and the visitor's address as CloudFront saw it", () => {
+  const { archive: a, stack, template } = archiveWithWaf(true);
+  const config = distributionConfig(a, stack, template);
+  const behaviour = (config.CacheBehaviors as Json[]).find((b) => b.PathPattern === "/api/*");
+  const origin = originOf(config, behaviour?.TargetOriginId);
+  const headers = origin.OriginCustomHeaders as Json[];
+  expect(headers).toHaveLength(1);
+  expect(headers[0]?.HeaderName).toBe("x-api-key");
+  expect(headers[0]?.HeaderValue).toHaveProperty("Fn::GetAtt");
+
+  const [association] = behaviour?.FunctionAssociations as Json[];
+  expect(association?.EventType).toBe("viewer-request");
+  const code = functionCode(template, association?.FunctionARN);
+  const handler = new Function(`${code}; return handler;`)() as (event: unknown) => Json;
+  const request = handler({
+    viewer: { ip: "203.0.113.9" },
+    request: { uri: "/api/search", headers: { "x-viewer-address": { value: "198.51.100.1" } } },
+  });
+  expect(request.headers["x-viewer-address"]).toEqual({ value: "203.0.113.9" });
+});
+
+test("with WAF off, /api/* sends no key and runs no function", () => {
+  const { archive: a, stack, template } = archiveWithWaf(false);
+  const config = distributionConfig(a, stack, template);
+  const behaviour = (config.CacheBehaviors as Json[]).find((b) => b.PathPattern === "/api/*");
+  const origin = originOf(config, behaviour?.TargetOriginId);
+  expect(origin.OriginCustomHeaders).toBeUndefined();
+  expect(behaviour?.FunctionAssociations).toBeUndefined();
+});
+
 /** A CloudFormation string as text: each Ref as <id>, AWS::Region as <region>. */
 function flatten(value: unknown): string {
   if (typeof value === "string") return value;
@@ -417,14 +457,24 @@ test("robots.txt names the sitemap and keeps search engines out of the signed-in
   }
 });
 
-test("auth-config.json holds exactly the region and the web client's id", () => {
+test("auth-config.json holds exactly the region, the web client's id and whether people can sign up", () => {
   const jsonData = vi.spyOn(s3deploy.Source, "jsonData");
   const { archive: a, stack } = archive();
 
   const call = jsonData.mock.calls.find(([name]) => name === "auth-config.json");
   expect(call).toBeDefined();
   const data = call?.[1] as Json;
-  expect(Object.keys(data).sort()).toEqual(["region", "webClientId"]);
+  expect(Object.keys(data).sort()).toEqual(["region", "selfSignUp", "webClientId"]);
+  expect(data.selfSignUp).toBe(true);
+  jsonData.mockClear();
+  archive({
+    infrastructure: {
+      alertEmail: "a@example.org",
+      stages: [{ name: "prod", selfSignUp: false }],
+    },
+  });
+  const off = jsonData.mock.calls.find(([name]) => name === "auth-config.json")?.[1] as Json;
+  expect(off.selfSignUp).toBe(false);
   const ref = (client: { node: { defaultChild: unknown } }) => ({
     Ref: stack.getLogicalId(client.node.defaultChild as CfnUserPoolClient),
   });
@@ -594,7 +644,9 @@ test("with a domain, /data and /api keep their own functions, so both addresses 
   expect(functionCode(built.template, data?.FunctionAssociations[0].FunctionARN)).not.toContain(
     "301",
   );
-  expect(api?.FunctionAssociations).toBeUndefined();
+  const apiFunction = functionCode(built.template, api?.FunctionAssociations[0].FunctionARN);
+  expect(apiFunction).toContain("x-viewer-address");
+  expect(apiFunction).not.toContain("301");
 });
 
 test("with a domain, robots.txt names the sitemap on the name", () => {

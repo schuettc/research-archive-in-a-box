@@ -4,7 +4,7 @@ import { expect, test } from "vitest";
 import { ResearchArchive } from "../src/research-archive";
 import { testApp } from "./test-app";
 
-function archive(waf?: boolean): { template: Template } {
+function archive(waf?: boolean, requestsPerAddressPerFiveMinutes?: number): { template: Template } {
   const stack = new Stack(testApp(), "S");
   new ResearchArchive(stack, "Archive", {
     config: {
@@ -13,6 +13,9 @@ function archive(waf?: boolean): { template: Template } {
         alertEmail: "a@example.org",
         stages: [{ name: "prod" }],
         ...(waf === undefined ? {} : { modules: { waf } }),
+        ...(requestsPerAddressPerFiveMinutes === undefined
+          ? {}
+          : { requestsPerAddressPerFiveMinutes }),
       },
     },
     stage: "prod",
@@ -53,7 +56,7 @@ test("health is public and whoami uses the Cognito authorizer", () => {
 
 test("the stage throttles at 50 per second with a burst of 100", () => {
   archive().template.hasResourceProperties("AWS::ApiGateway::Stage", {
-    MethodSettings: [
+    MethodSettings: Match.arrayWith([
       Match.objectLike({
         HttpMethod: "*",
         ResourcePath: "/*",
@@ -61,15 +64,52 @@ test("the stage throttles at 50 per second with a burst of 100", () => {
         ThrottlingBurstLimit: 100,
         MetricsEnabled: true,
       }),
-    ],
+    ]),
   });
 });
 
-test("WAF appears only when modules.waf is true, associated with the API stage", () => {
-  for (const off of [archive().template, archive(false).template]) {
-    off.resourceCountIs("AWS::WAFv2::WebACL", 0);
-    off.resourceCountIs("AWS::WAFv2::WebACLAssociation", 0);
-  }
+test("a config with no modules block has the web ACL with the per-address rule; waf: false has none", () => {
+  const left = archive().template;
+  left.resourceCountIs("AWS::WAFv2::WebACL", 1);
+  left.resourceCountIs("AWS::WAFv2::WebACLAssociation", 2);
+  const [acl] = Object.values(left.findResources("AWS::WAFv2::WebACL"));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const limit = acl?.Properties.Rules.find((rule: any) => rule.Name === "ApiRateLimit");
+  expect(limit.Statement.RateBasedStatement.Limit).toBe(2000);
+
+  const off = archive(false).template;
+  off.resourceCountIs("AWS::WAFv2::WebACL", 0);
+  off.resourceCountIs("AWS::WAFv2::WebACLAssociation", 0);
+  off.resourceCountIs("AWS::ApiGateway::ApiKey", 0);
+});
+
+test("requestsPerAddressPerFiveMinutes sets the per-address rule's limit", () => {
+  const [acl] = Object.values(archive(undefined, 500).template.findResources("AWS::WAFv2::WebACL"));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const limit = acl?.Properties.Rules.find((rule: any) => rule.Name === "ApiRateLimit");
+  expect(limit.Statement.RateBasedStatement.Limit).toBe(500);
+});
+
+test.each([undefined, false])(
+  "the usage route has its own throttle of 5 a second (modules.waf: %s)",
+  (waf) => {
+    archive(waf).template.hasResourceProperties("AWS::ApiGateway::Stage", {
+      MethodSettings: Match.arrayWith([
+        Match.objectLike({
+          HttpMethod: "POST",
+          ResourcePath: "/~1api~1datasets~1{id}~1usage",
+          ThrottlingRateLimit: 5,
+          ThrottlingBurstLimit: 5,
+        }),
+      ]),
+    });
+  },
+);
+
+test("WAF appears unless modules.waf is false, associated with the API stage", () => {
+  const off = archive(false).template;
+  off.resourceCountIs("AWS::WAFv2::WebACL", 0);
+  off.resourceCountIs("AWS::WAFv2::WebACLAssociation", 0);
 
   const { template } = archive(true);
   const [stage] = Object.keys(template.findResources("AWS::ApiGateway::Stage"));
@@ -99,9 +139,7 @@ test("WAF appears only when modules.waf is true, associated with the API stage",
 });
 
 test("with WAF on, the same web ACL guards the user pool and rate-limits its sign-up and sign-in calls per address", () => {
-  for (const off of [archive().template, archive(false).template]) {
-    off.resourceCountIs("AWS::WAFv2::WebACLAssociation", 0);
-  }
+  archive(false).template.resourceCountIs("AWS::WAFv2::WebACLAssociation", 0);
 
   const { template } = archive(true);
   const [pool] = Object.keys(template.findResources("AWS::Cognito::UserPool"));
@@ -150,6 +188,116 @@ test("with WAF on, the same web ACL guards the user pool and rate-limits its sig
   });
   expect(targets(email).sort()).toEqual(["ForgotPassword", "ResendConfirmationCode", "SignUp"]);
   expect(new Set(rules.map((rule) => rule.Priority)).size).toBe(rules.length);
+});
+
+test("with WAF on, every method needs the key CloudFront sends, from one usage plan on the stage", () => {
+  const { template } = archive(true);
+  const methods = Object.values(template.findResources("AWS::ApiGateway::Method"));
+  expect(methods.length).toBeGreaterThan(10);
+  for (const method of methods) expect(method.Properties.ApiKeyRequired).toBe(true);
+  template.resourceCountIs("AWS::ApiGateway::ApiKey", 1);
+  template.resourceCountIs("AWS::ApiGateway::UsagePlan", 1);
+  template.resourceCountIs("AWS::ApiGateway::UsagePlanKey", 1);
+  // API Gateway makes the value: the template names none.
+  const [key] = Object.values(template.findResources("AWS::ApiGateway::ApiKey"));
+  expect(key?.Properties.Value).toBeUndefined();
+
+  const off = archive(false).template;
+  off.resourceCountIs("AWS::ApiGateway::ApiKey", 0);
+  for (const method of Object.values(off.findResources("AWS::ApiGateway::Method"))) {
+    expect(method.Properties.ApiKeyRequired ?? false).toBe(false);
+  }
+});
+
+test("with WAF on, one rule limits each visitor address to 2,000 API requests in five minutes", () => {
+  const { template } = archive(true);
+  const [acl] = Object.keys(template.findResources("AWS::WAFv2::WebACL"));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rules: any[] = template.toJSON().Resources[acl!].Properties.Rules;
+  expect(rules).toHaveLength(7);
+  expect(new Set(rules.map((rule) => rule.Priority)).size).toBe(7);
+  const limit = rules.find((rule) => rule.Name === "ApiRateLimit");
+  expect(limit).toMatchObject({
+    Action: { Block: {} },
+    Statement: {
+      RateBasedStatement: {
+        AggregateKeyType: "CUSTOM_KEYS",
+        Limit: 2000,
+        EvaluationWindowSec: 300,
+        CustomKeys: [
+          {
+            Header: {
+              Name: "x-viewer-address",
+              TextTransformations: [{ Priority: 0, Type: "NONE" }],
+            },
+          },
+        ],
+        ScopeDownStatement: {
+          ByteMatchStatement: {
+            FieldToMatch: { SingleHeader: { Name: "x-api-key" } },
+            PositionalConstraint: "EXACTLY",
+            TextTransformations: [{ Priority: 0, Type: "NONE" }],
+          },
+        },
+      },
+    },
+  });
+  // The value compared is the key's own, read at deploy: a reference, never text in the template.
+  const search =
+    limit.Statement.RateBasedStatement.ScopeDownStatement.ByteMatchStatement.SearchString;
+  expect(search).toHaveProperty("Fn::GetAtt");
+});
+
+test("with WAF on, the web ACL takes API requests only with the key CloudFront sends", () => {
+  const { template } = archive(true);
+  const [acl] = Object.keys(template.findResources("AWS::WAFv2::WebACL"));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rules: any[] = template.toJSON().Resources[acl!].Properties.Rules;
+  expect(rules).toHaveLength(7);
+  const through = rules.find((rule) => rule.Name === "ApiThroughSite");
+  expect(through).toMatchObject({
+    Action: { Block: {} },
+    Statement: {
+      AndStatement: {
+        Statements: [
+          {
+            ByteMatchStatement: {
+              FieldToMatch: { SingleHeader: { Name: "host" } },
+              PositionalConstraint: "CONTAINS",
+              TextTransformations: [{ Priority: 0, Type: "LOWERCASE" }],
+            },
+          },
+          {
+            NotStatement: {
+              Statement: {
+                ByteMatchStatement: {
+                  FieldToMatch: { SingleHeader: { Name: "x-api-key" } },
+                  PositionalConstraint: "EXACTLY",
+                  TextTransformations: [{ Priority: 0, Type: "NONE" }],
+                },
+              },
+            },
+          },
+        ],
+      },
+    },
+  });
+  // Only the API's own address ends this way; the user pool's requests carry another host.
+  const [host, notKey] = through.Statement.AndStatement.Statements;
+  expect(JSON.stringify(host.ByteMatchStatement.SearchString)).toMatch(
+    /^\{"Fn::Join":\["",\["\.execute-api\.",\{"Ref":"AWS::Region"\},"\.",\{"Ref":"AWS::URLSuffix"\}\]\]\}$/,
+  );
+  // The key compared is the one the per-address limit counts by.
+  const limit = rules.find((rule) => rule.Name === "ApiRateLimit");
+  expect(notKey.NotStatement.Statement.ByteMatchStatement.SearchString).toEqual(
+    limit.Statement.RateBasedStatement.ScopeDownStatement.ByteMatchStatement.SearchString,
+  );
+  // It is evaluated before every rate rule.
+  for (const rule of rules.filter((r) => r.Statement.RateBasedStatement)) {
+    expect(through.Priority).toBeLessThan(rule.Priority);
+  }
+
+  archive(false).template.resourceCountIs("AWS::WAFv2::WebACL", 0);
 });
 
 test("the integrity check runs weekly with no retries", () => {

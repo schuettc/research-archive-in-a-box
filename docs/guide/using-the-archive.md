@@ -14,7 +14,7 @@ One person can hold any of them; the archive's first admin holds all three. The 
 
 **Sign in** takes two steps: the email address, then **Continue**, then the password, or **Use a passkey** for an account that has one.
 
-**Sign-up is open.** Anyone can create an account with **Sign in**, then **Create an account**: an email address and a password, confirmed with a code sent to that address. A new account has no role. It can download `limited` datasets and ask for `restricted` ones, as a reader, but it can't submit, review or change anything until an admin gives it a role (see [People](#people) below).
+**Sign-up is open unless the archive is by invitation.** Anyone can create an account with **Sign in**, then **Create an account**: an email address and a password, confirmed with a code sent to that address. On an archive by invitation ([`selfSignUp: false`](archive-yaml.md#infrastructurestagesselfsignup)) the sign-in page says *Accounts are by invitation*, and an admin invites people. A new account has no role. It can download `limited` datasets and ask for `restricted` ones, as a reader, but it can't submit, review or change anything until an admin gives it a role (see [People](#people) below).
 
 **Account**, from the menu, is where a signed-in person changes their password, adds or removes **passkeys** (a way to sign in with the device's own lock, such as a fingerprint, instead of a password), and signs out.
 
@@ -57,7 +57,7 @@ After a download starts, the archive may ask once per visit, "how will you use t
 
 A dataset that isn't `public` says so above its files:
 
-- **`limited`**: the files need an account. A signed-out reader sees **Sign in** and **Create an account**.
+- **`limited`**: the files need an account. A signed-out reader sees **Sign in**, and **Create an account** unless the archive is by invitation.
 - **`restricted`**: the files are shared with people an admin approves. A signed-in reader presses **Request access**, says what they will use the files for (the admins read this), and presses **Send request**. The page then shows the request as waiting, and later as approved, with the files to download, or declined, with **Request access again**.
 - **`description-only`**: the archive holds the description of this dataset, not its files.
 - **An embargo**: the page says "Files available from <date>" and each file shows the date instead of a Download button, whatever the access level, until the date passes.
@@ -148,7 +148,7 @@ A curator may approve their own submission: no rule stops it, and its history ma
 
 **People** lists every account with its email, its roles and its status (invited, signed up, active or disabled). **Invite someone** creates an account with roles chosen up front, and emails the person a temporary password. **Change roles** sets a person's roles, **Resend invite** sends a new temporary password to someone who hasn't signed in yet, and **Disable** signs the person out everywhere and stops their downloads, until **Re-enable**. You can't remove your own admin role or disable yourself. **Recent changes** lists the latest invitations, role changes and disablings, with who made them.
 
-Anyone can create an account, and it has no role until you give one here. From a terminal, `just set-roles <stage> <email> <roles>` does the same as **Change roles**.
+Anyone can create an account unless the archive is by invitation; a new account has no role until you give one here. From a terminal, `just set-roles <stage> <email> <roles>` does the same as **Change roles**.
 
 ### Access requests
 

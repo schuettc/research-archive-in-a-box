@@ -105,9 +105,33 @@ def test_infrastructure_defaults_to_prod_only() -> None:
 
     assert [s.name for s in infrastructure.stages] == ["prod"]
     assert infrastructure.monthly_budget_usd == 50
-    assert infrastructure.modules.waf is False
+    assert infrastructure.modules.waf is True
     assert infrastructure.modules.object_lock is None
     assert infrastructure.modules.embeddings is None
+
+
+def test_a_stage_lets_people_sign_up_unless_it_says_not() -> None:
+    assert Stage.model_validate({"name": "prod"}).self_sign_up is True
+    assert Stage.model_validate({"name": "prod", "selfSignUp": False}).self_sign_up is False
+
+
+def test_waf_is_on_unless_turned_off_and_the_limit_defaults_to_2000() -> None:
+    left_out = Infrastructure.model_validate({"alertEmail": "a@b.c"})
+    assert left_out.modules.waf is True
+    assert left_out.requests_per_address_per_five_minutes == 2000
+    off = Infrastructure.model_validate({"alertEmail": "a@b.c", "modules": {"waf": False}})
+    assert off.modules.waf is False
+    named = Infrastructure.model_validate(
+        {"alertEmail": "a@b.c", "requestsPerAddressPerFiveMinutes": 500}
+    )
+    assert named.requests_per_address_per_five_minutes == 500
+
+
+def test_the_limit_is_at_least_10() -> None:
+    with pytest.raises(ValidationError):
+        Infrastructure.model_validate(
+            {"alertEmail": "a@b.c", "requestsPerAddressPerFiveMinutes": 9}
+        )
 
 
 def test_embeddings_present_means_on_with_titan_v2() -> None:
@@ -248,7 +272,7 @@ def test_a_stage_with_no_email_has_none() -> None:
     ],
 )
 def test_stages_without_email_validate_unchanged(stage: dict[str, object]) -> None:
-    assert Stage.model_validate(stage).dump() == {**stage, "keepData": True}
+    assert Stage.model_validate(stage).dump() == {**stage, "keepData": True, "selfSignUp": True}
 
 
 def test_root_archive_yaml_is_valid() -> None:

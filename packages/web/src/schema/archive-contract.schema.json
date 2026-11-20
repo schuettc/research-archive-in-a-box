@@ -971,6 +971,13 @@
           "title": "Monthlybudgetusd",
           "type": "integer"
         },
+        "requestsPerAddressPerFiveMinutes": {
+          "default": 2000,
+          "description": "With the WAF on, the API requests one address may make in five minutes before more are refused for a while. At least 10. Left out: 2000. Unused with modules.waf: false.",
+          "minimum": 10,
+          "title": "Requestsperaddressperfiveminutes",
+          "type": "integer"
+        },
         "stages": {
           "items": {
             "$ref": "#/$defs/Stage"
@@ -1158,7 +1165,7 @@
     },
     "Modules": {
       "additionalProperties": false,
-      "description": "The optional parts, each built only when switched on.",
+      "description": "The optional parts: the WAF is on unless switched off, the others only when switched on.",
       "properties": {
         "embeddings": {
           "anyOf": [
@@ -1183,7 +1190,8 @@
           "default": null
         },
         "waf": {
-          "default": false,
+          "default": true,
+          "description": "true: one AWS WAF web ACL guards the API and sign-in of every stage, with a limit on the requests one address may make. false: no web ACL, and every caller of a stage shares one allowance of 50 requests a second. Left out: true.",
           "title": "Waf",
           "type": "boolean"
         }
@@ -1954,6 +1962,12 @@
           ],
           "default": null,
           "title": "Region"
+        },
+        "selfSignUp": {
+          "default": true,
+          "description": "true: anyone can create an account on the sign-in page; a new account has no role. false: accounts come only from an invitation (just invite-user, or Settings \u203a People), and limited then means the people you invited. On a public stage with sign-up on, set email: ses: Cognito's own email stops at about 50 a day. Left out: true.",
+          "title": "Selfsignup",
+          "type": "boolean"
         }
       },
       "required": [

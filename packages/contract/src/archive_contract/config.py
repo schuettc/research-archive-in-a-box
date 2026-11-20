@@ -111,6 +111,14 @@ class Stage(_Strict):
         "conveniences (uploads from a local web app at http://localhost:5199, and the sign-in "
         "client the end-to-end test uses). Left out: true.",
     )
+    self_sign_up: bool = PydanticField(
+        default=True,
+        alias="selfSignUp",
+        description="true: anyone can create an account on the sign-in page; a new account has no "
+        "role. false: accounts come only from an invitation (just invite-user, or Settings › "
+        "People), and limited then means the people you invited. On a public stage with sign-up "
+        "on, set email: ses: Cognito's own email stops at about 50 a day. Left out: true.",
+    )
 
     @model_validator(mode="after")
     def _domain_and_email_rules(self) -> Self:
@@ -144,9 +152,14 @@ class Embeddings(_Strict):
 
 
 class Modules(_Strict):
-    """The optional parts, each built only when switched on."""
+    """The optional parts: the WAF is on unless switched off, the others only when switched on."""
 
-    waf: bool = False
+    waf: bool = PydanticField(
+        default=True,
+        description="true: one AWS WAF web ACL guards the API and sign-in of every stage, with a "
+        "limit on the requests one address may make. false: no web ACL, and every caller of a "
+        "stage shares one allowance of 50 requests a second. Left out: true.",
+    )
     object_lock: ObjectLock | None = PydanticField(default=None, alias="objectLock")
     embeddings: Embeddings | None = PydanticField(default=None, alias="embeddings")
 
@@ -157,6 +170,14 @@ class Infrastructure(_Strict):
     stages: list[Stage] = PydanticField(default_factory=lambda: [Stage(name="prod")], min_length=1)
     alert_email: str = PydanticField(alias="alertEmail")
     monthly_budget_usd: PositiveInt = PydanticField(default=50, alias="monthlyBudgetUsd")
+    requests_per_address_per_five_minutes: int = PydanticField(
+        default=2000,
+        ge=10,
+        alias="requestsPerAddressPerFiveMinutes",
+        description="With the WAF on, the API requests one address may make in five minutes "
+        "before more are refused for a while. At least 10. Left out: 2000. Unused with "
+        "modules.waf: false.",
+    )
     modules: Modules = PydanticField(default_factory=Modules)
 
     @model_validator(mode="after")

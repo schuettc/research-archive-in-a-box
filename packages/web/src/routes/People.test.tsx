@@ -3,6 +3,7 @@ import axe from "axe-core";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, test, vi, type Mock } from "vitest";
 import type { Account, AccountEvent } from "../api";
+import { selfSignUp } from "../auth";
 import { forgetPeople } from "../People";
 import { People } from "./People";
 
@@ -11,6 +12,7 @@ vi.mock("../auth", async (importOriginal) => ({
   apiToken: vi.fn(() => "token"),
   signedInSub: vi.fn(() => "adm-1"),
   groups: vi.fn(() => ["admin"]),
+  selfSignUp: vi.fn(),
 }));
 
 // Noon UTC, so the day shown is the same in every time zone the tests run in.
@@ -91,6 +93,7 @@ let failList: boolean;
 const account = (sub: string) => ACCOUNTS.find((a) => a.sub === sub)!;
 
 beforeEach(() => {
+  vi.mocked(selfSignUp).mockResolvedValue(true);
   forgetPeople();
   calls = [];
   refuse = {};
@@ -164,6 +167,29 @@ if (typeof HTMLDialogElement !== "undefined" && !HTMLDialogElement.prototype.sho
     this.dispatchEvent(new Event("close"));
   };
 }
+
+test("on a stage with sign-up off, the note says only invited people get an account", async () => {
+  vi.mocked(selfSignUp).mockResolvedValue(false);
+  renderPeople();
+
+  expect(
+    await screen.findByText(
+      "Only people you invite get an account; one has no role until you give it one. Disabling signs the person out everywhere and stops their downloads. You can't remove your own admin role or disable yourself.",
+    ),
+  ).toBeDefined();
+  expect(screen.queryByText("Anyone can create an account", { exact: false })).toBeNull();
+});
+
+test("on a stage with sign-up on, the note says anyone can create an account", async () => {
+  renderPeople();
+
+  expect(
+    await screen.findByText(
+      "Anyone can create an account; it has no role until you give one. Disabling signs the person out everywhere and stops their downloads. You can't remove your own admin role or disable yourself.",
+    ),
+  ).toBeDefined();
+  expect(screen.queryByText("Only people you invite", { exact: false })).toBeNull();
+});
 
 test("People is the tab shown in the Settings tab row", async () => {
   renderPeople();

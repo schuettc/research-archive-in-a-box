@@ -454,10 +454,57 @@ async function confirmCode() {
   await main().findByRole("heading", { level: 2, name: "You're in" });
 }
 
-test("New here? Create an account opens the form, with the password rules and I have an account", () => {
+/** Answer the stage's sign-up setting as off. */
+async function signUpOff() {
+  vi.spyOn(await import("../auth"), "selfSignUp").mockResolvedValue(false);
+}
+
+test("New here? Create an account sits beside Continue", async () => {
   renderAt("/sign-in");
 
-  fireEvent.click(main().getByRole("button", { name: "Create an account" }));
+  const actions = main().getByRole("button", { name: "Continue" }).closest("p.actions");
+  expect(
+    await within(actions as HTMLElement).findByText("New here?", { exact: false }),
+  ).toBeDefined();
+  expect(
+    within(actions as HTMLElement).getByRole("button", { name: "Create an account" }),
+  ).toBeDefined();
+});
+
+test("on a stage with sign-up off, Sign in says accounts are by invitation and offers no way to create one", async () => {
+  await signUpOff();
+  renderAt("/sign-in");
+
+  const actions = main().getByRole("button", { name: "Continue" }).closest("p.actions");
+  expect(
+    await within(actions as HTMLElement).findByText("Accounts are by invitation."),
+  ).toBeDefined();
+  expect(main().queryByRole("button", { name: "Create an account" })).toBeNull();
+  expect(main().queryByText("New here?", { exact: false })).toBeNull();
+});
+
+test("on a stage with sign-up off, a link to view=create lands on Sign in", async () => {
+  await signUpOff();
+  renderAt("/sign-in?view=create");
+
+  await waitFor(() =>
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Sign in"),
+  );
+  expect(main().queryByRole("button", { name: "Create account" })).toBeNull();
+});
+
+test("an axe check of the email step on a stage with sign-up off finds no violations", async () => {
+  await signUpOff();
+  const { container } = renderAt("/sign-in");
+  await main().findByText("Accounts are by invitation.");
+
+  expect((await axe.run(container)).violations).toEqual([]);
+});
+
+test("New here? Create an account opens the form, with the password rules and I have an account", async () => {
+  renderAt("/sign-in");
+
+  fireEvent.click(await main().findByRole("button", { name: "Create an account" }));
 
   expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Create an account");
   expect(main().getByLabelText("Password").getAttribute("autocomplete")).toBe("new-password");

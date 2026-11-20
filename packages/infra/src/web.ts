@@ -12,16 +12,19 @@ import * as targets from "aws-cdk-lib/aws-route53-targets";
 import type * as s3 from "aws-cdk-lib/aws-s3";
 import * as s3deploy from "aws-cdk-lib/aws-s3-deployment";
 import { Construct } from "constructs";
+import { ORIGIN_KEY_HEADER } from "./api";
 
 const WEB_BUILD = fileURLToPath(new URL("../../web/dist", import.meta.url));
 
 /**
  * What /auth-config.json tells the web app: the user pool's region and the web client, which its
- * sign-in page calls Cognito's API with. The plugin reads it to tell an archive from another site.
+ * sign-in page calls Cognito's API with, and whether people can create their own account. The
+ * plugin reads it to tell an archive from another site.
  */
 export interface AuthConfig {
   readonly region: string;
   readonly webClientId: string;
+  readonly selfSignUp: boolean;
 }
 
 /**
@@ -40,6 +43,8 @@ export interface WebProps {
   /** The bucket the browser reaches through presigned links: uploads, reports, held files. */
   readonly stagingBucket: s3.IBucket;
   readonly restApi: apigateway.RestApi;
+  /** With WAF on, the key the API asks of every request: sent on /api/* with the visitor's address. */
+  readonly originKey?: string;
   /** The brand's primary colour, lower-case `#rrggbb`, as the static dataset pages write it. */
   readonly brandColor: string;
   /** The brand favicon's extension with its dot (`.svg`), when the brand has one: /favicon.ico serves it. */
@@ -131,6 +136,13 @@ function siteRewrite(domain?: string, faviconExt?: string): string {
 const STRIP_DATA = `function handler(event) {
   var request = event.request;
   request.uri = request.uri.replace(/^\\/data/, "");
+  return request;
+}`;
+
+// The API's per-address limit counts this header: the address CloudFront saw, whatever the request said.
+const VIEWER_ADDRESS = `function handler(event) {
+  var request = event.request;
+  request.headers["x-viewer-address"] = { value: event.viewer.ip };
   return request;
 }`;
 
@@ -249,11 +261,17 @@ export class Web extends Construct {
           functionAssociations: [viewerRequest("StripData", STRIP_DATA)],
         },
         "/api/*": {
-          origin: new origins.RestApiOrigin(props.restApi),
+          origin: new origins.RestApiOrigin(
+            props.restApi,
+            props.originKey ? { customHeaders: { [ORIGIN_KEY_HEADER]: props.originKey } } : {},
+          ),
           viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
           allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
           cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
           originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+          ...(props.originKey
+            ? { functionAssociations: [viewerRequest("ViewerAddress", VIEWER_ADDRESS)] }
+            : {}),
         },
       },
       enableLogging: true,

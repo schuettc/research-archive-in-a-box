@@ -2,6 +2,7 @@
 interface AuthConfig {
   region: string;
   webClientId: string;
+  selfSignUp?: boolean;
 }
 
 /** The signed-in reader's tokens, kept in the tab's session storage under SESSION_KEY. */
@@ -62,6 +63,15 @@ function readConfig(): Promise<AuthConfig> {
 /** The region of the stage's user pool, whose Cognito API answers the reader's own calls. */
 export async function cognitoRegion(): Promise<string> {
   return (await readConfig()).region;
+}
+
+/** Whether people can create their own account on this stage; a config without the field says yes. */
+export async function selfSignUp(): Promise<boolean> {
+  try {
+    return (await readConfig()).selfSignUp !== false;
+  } catch {
+    return true;
+  }
 }
 
 /**

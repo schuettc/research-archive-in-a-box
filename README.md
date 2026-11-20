@@ -48,7 +48,7 @@ Clone your fork, open it in Claude Code and ask it to set up the archive. Its `d
 
 ![A dataset's page on the example archive: the title, the creator, the publish date and version, a curator's Correct details and Withdraw buttons, the description, and Download all.](docs/images/dataset-page.png)
 
-Once it runs, people use it through the web app by role. A reader searches and downloads; a contributor submits packages; a curator reviews submissions in the review queue and publishes them; an admin gives people roles and decides who may see restricted data. Anyone can create an account, and a new account has no role until an admin gives it one. [docs/guide/using-the-archive.md](docs/guide/using-the-archive.md) describes each role's screens, and [docs/guide/running-cost.md](docs/guide/running-cost.md) explains what costs money while it runs.
+Once it runs, people use it through the web app by role. A reader searches and downloads; a contributor submits packages; a curator reviews submissions in the review queue and publishes them; an admin gives people roles and decides who may see restricted data. Anyone can create an account, unless the archive is set to invitation only, and a new account has no role until an admin gives it one. [docs/guide/using-the-archive.md](docs/guide/using-the-archive.md) describes each role's screens, and [docs/guide/running-cost.md](docs/guide/running-cost.md) explains what costs money while it runs.
 
 ![The review queue: tabs for Needs a decision, Being checked, Changes requested, Publishing and Finished, with one submission waiting for a curator.](docs/images/review-queue.png)
 
