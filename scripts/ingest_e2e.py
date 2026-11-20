@@ -388,6 +388,11 @@ class Api:
     def read(self, user: User, sid: str) -> dict[str, Any]:
         return cast(dict[str, Any], self.call(user, "GET", f"/{sid}"))
 
+    def known(self, user: User, sid: str) -> bool:
+        """Whether the stage has the submission: one destroyed and deployed again has none."""
+        status, _ = http("GET", f"https://{self.domain}/api/submissions/{sid}", user.token)
+        return status != 404
+
 
 def upload(uploads: list[dict[str, Any]], folder: Path) -> None:
     """PUT each file to its presigned URL with the headers the API returned for it."""
@@ -601,7 +606,7 @@ def run_two(s: Stage) -> str:
 
 def run_reminder(s: Stage, path: Path, waiting: dict[str, Any] | None) -> str:
     """Check a submission left waiting by an earlier run, or leave one waiting for the next."""
-    if waiting is None:
+    if waiting is None or not s.api.known(s.curator, str(waiting["submissionId"])):
         sid = s.submit(s.folder(themed(REMIND_THEME)))
         s.wait(sid, "in-review")
         events = s.events(sid, REVIEWED)

@@ -5,6 +5,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
+from typing import Any, cast
 
 import pytest
 import yaml
@@ -234,3 +235,39 @@ def test_an_upload_streams_each_file_with_its_length_and_headers(tmp_path: Path)
         server.shutdown()
 
     assert got == {"length": str(len(body)), "chunked": None, "checksum": "abc", "body": body}
+
+
+class _RebuiltStage:
+    """A stage that knows no earlier submission, as one destroyed and deployed again does."""
+
+    curator = None
+
+    def __init__(self) -> None:
+        self.api = self
+
+    def known(self, user: object, sid: str) -> bool:
+        return False
+
+    def folder(self, change: object = None) -> Path:
+        return Path()
+
+    def submit(self, folder: Path) -> str:
+        return "new"
+
+    def wait(self, sid: str, status: str) -> dict[str, str]:
+        return {}
+
+    def events(self, sid: str, types: list[str]) -> list[dict[str, str]]:
+        return [{"type": "entered-review", "at": "2026-11-20T00:00:00Z", "audience": "all"}]
+
+
+def test_a_saved_submission_the_stage_does_not_know_starts_the_reminder_run_again(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "state.json"
+    waiting = {"submissionId": "gone", "enteredAt": "2026-11-13T00:00:00Z"}
+
+    result = e2e.run_reminder(cast(Any, _RebuiltStage()), path, waiting)
+
+    assert result.startswith("new left waiting")
+    assert e2e.load_state(path) == {"submissionId": "new", "enteredAt": "2026-11-20T00:00:00Z"}
