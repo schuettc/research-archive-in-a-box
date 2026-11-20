@@ -152,3 +152,85 @@ def test_the_run_stops_on_a_stage_without_the_e2e_outputs(
         "ResearchArchive-prod has no E2eClientId, UserPoolId output; "
         "ingest-e2e needs a stage with keepData: false in its config"
     )
+
+
+def test_a_large_copy_totals_just_under_its_size_and_passes_the_checks(tmp_path: Path) -> None:
+    size = 8 * 1024**2
+
+    folder = e2e.large_copy(tmp_path, size)
+
+    files = e2e.file_list(folder)
+    total = sum(f["size"] for f in files)
+    assert size - e2e.LARGE_SLACK <= total <= size
+    large = [f for f in files if f["path"] in e2e.LARGE_PATHS]
+    assert len(large) == 2 and all(f["size"] > size // 3 for f in large)
+    assert _errors(folder) == []
+
+
+def test_files_over_the_limit_total_one_byte_more_and_each_fits_one_upload() -> None:
+    limit = 9 * 1024**3
+
+    files = e2e.over_limit_files(limit)
+
+    assert sum(f["size"] for f in files) == limit + 1
+    assert all(f["size"] <= 5 * 1024**3 for f in files)
+    assert {"datapackage.json", "checksums.sha256"} <= {f["path"] for f in files}
+
+
+@pytest.mark.parametrize(
+    ("seen", "fault"),
+    [
+        ([(200, 1), (200, 1), (200, 2), (200, 2)], None),
+        ([(200, 1), (404, None), (200, 2)], "answered 404"),
+        ([(200, 1), (200, 2), (200, 1)], "went back from version 2 to 1"),
+        ([(200, 1), (200, 1)], "never showed version 2"),
+        ([(200, 2), (200, 2)], "never showed version 1"),
+        ([], "never showed version 1"),
+    ],
+)
+def test_a_dataset_read_through_a_publish_stays_up_and_only_moves_forward(
+    seen: list[tuple[int, int | None]], fault: str | None
+) -> None:
+    found = e2e.version_fault(seen)
+
+    assert (found is None) if fault is None else (found is not None and fault in found)
+
+
+def test_an_upload_streams_each_file_with_its_length_and_headers(tmp_path: Path) -> None:
+    import http.server
+    import threading
+
+    got: dict[str, object] = {}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_PUT(self) -> None:
+            got["length"] = self.headers["Content-Length"]
+            got["chunked"] = self.headers.get("Transfer-Encoding")
+            got["checksum"] = self.headers["x-amz-checksum-sha256"]
+            got["body"] = self.rfile.read(int(self.headers["Content-Length"]))
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    body = b"x" * (3 * 1024**2 + 7)
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "big.bin").write_bytes(body)
+    try:
+        e2e.upload(
+            [
+                {
+                    "path": "data/big.bin",
+                    "url": f"http://127.0.0.1:{server.server_port}/put",
+                    "headers": {"x-amz-checksum-sha256": "abc"},
+                }
+            ],
+            tmp_path,
+        )
+    finally:
+        server.shutdown()
+
+    assert got == {"length": str(len(body)), "chunked": None, "checksum": "abc", "body": body}

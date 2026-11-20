@@ -5,7 +5,12 @@ It reads the stack's outputs, creates three throwaway users with the admin APIs 
 a curator who is also an admin, and a second curator), signs them in through the test-only `e2e`
 client, sets a review policy, and drives the sample package through the submissions API:
 approve, reject, request changes then approve, a blocking error, a skip rule, two curators and
-a reminder. Each run checks the event types its submission recorded in Reviews, read back with
+a reminder. Three more runs check the publish path: a second version of a live dataset, read
+once a second through its publish, which must answer version 1 and then version 2 and never
+"not found"; a package one byte over `submissions.maxPackageGiB`, which the API must refuse
+before any upload; and, only with `--large`, a package of random bytes just under that limit,
+which takes the stage's whole disk and a zip of more than 5 GiB. Each run checks the event
+types its submission recorded in Reviews, read back with
 `GET /api/submissions/{id}`. At the end it restores the policy and deletes its users.
 
 The policy's smallest reminder is one day, so the reminder run leaves its submission waiting and
@@ -24,6 +29,7 @@ import secrets
 import shutil
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -52,6 +58,17 @@ WAIT_SECONDS = 45 * 60
 EVENT_SECONDS = 60
 TOKEN_SECONDS = 50 * 60
 REMINDER_GRACE = timedelta(hours=1)
+
+GIB = 1024**3
+# The API's most for one file, sent in one PUT.
+MAX_PUT = 5 * GIB
+# The large package's two files of random bytes, which no zip makes smaller; the rest of the
+# package is the sample, and LARGE_SLACK is more than the sample and its manifest come to.
+LARGE_PATHS = ("data/large-1.bin", "data/large-2.bin")
+LARGE_SLACK = 1024**2
+CHUNK = 8 * 1024**2
+PACKAGE_ZIP = "_zips/all/package.zip"
+VERSION_POLL_SECONDS = 1
 
 REVIEWED = ["created", "submitted", "scanned", "checked", "held", "entered-review"]
 ROUND = ["scanned", "checked", "held", "entered-review"]
@@ -101,6 +118,76 @@ def file_list(folder: Path) -> list[dict[str, Any]]:
         {"path": p.relative_to(folder).as_posix(), "size": p.stat().st_size, "sha256": _sha256(p)}
         for p in _package_files(folder)
     ]
+
+
+def _random_file(path: Path, size: int) -> str:
+    """Write `size` random bytes to `path`; their SHA-256 in hex."""
+    digest = hashlib.sha256()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as stream:
+        left = size
+        while left:
+            chunk = os.urandom(min(CHUNK, left))
+            stream.write(chunk)
+            digest.update(chunk)
+            left -= len(chunk)
+    return digest.hexdigest()
+
+
+def large_copy(into: Path, size: int) -> Path:
+    """A copy of the sample package with two files of random bytes, the whole package's files
+    totalling `size` bytes or up to LARGE_SLACK fewer."""
+    folder = into / "package"
+    shutil.copytree(SAMPLE, folder, ignore=shutil.ignore_patterns(*NOT_PACKAGE))
+    each = (size - LARGE_SLACK) // len(LARGE_PATHS)
+    path = folder / MANIFEST
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    for number, name in enumerate(LARGE_PATHS, start=1):
+        manifest["resources"].append(
+            {
+                "name": f"large-{number}",
+                "path": name,
+                "title": f"Random bytes {number}",
+                "description": "Random bytes that make the package as large as the archive takes.",
+                "format": "bin",
+                "mediatype": "application/octet-stream",
+                "bytes": each,
+                "hash": f"sha256:{_random_file(folder / name, each)}",
+                "archive:kind": "file",
+            }
+        )
+    path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", "utf-8")
+    (folder / CHECKSUMS).write_text(checksum_text(folder), encoding="utf-8")
+    return folder
+
+
+def over_limit_files(limit: int) -> list[dict[str, Any]]:
+    """A file list one byte over `limit` in total, each file small enough for one upload. No
+    such files exist: the API must refuse the list before it signs an upload."""
+    count = -(-(limit + 1) // MAX_PUT)
+    sizes = [(limit + 1) // count] * count
+    sizes[0] += (limit + 1) - sum(sizes)
+    small = [{"path": name, "size": 0, "sha256": "0" * 64} for name in (MANIFEST, CHECKSUMS)]
+    return small + [
+        {"path": f"data/over-{n}.bin", "size": size, "sha256": "0" * 64}
+        for n, size in enumerate(sizes, start=1)
+    ]
+
+
+def version_fault(seen: list[tuple[int, int | None]]) -> str | None:
+    """What is wrong with a dataset's answers read through the publish of its version 2, each a
+    status and the current version: None when every one was 200, at version 1 and then 2."""
+    versions: list[int] = []
+    for status, version in seen:
+        if status != 200 or version is None:
+            return f"the dataset answered {status} during the publish"
+        if versions and version < versions[-1]:
+            return f"the dataset went back from version {versions[-1]} to {version}"
+        versions.append(version)
+    for wanted in (1, 2):
+        if wanted not in versions:
+            return f"the dataset never showed version {wanted} in {len(versions)} reads"
+    return None
 
 
 def themed(theme: str) -> Callable[[dict[str, Any]], None]:
@@ -305,13 +392,17 @@ class Api:
 def upload(uploads: list[dict[str, Any]], folder: Path) -> None:
     """PUT each file to its presigned URL with the headers the API returned for it."""
     for item in uploads:
-        data = (folder / item["path"]).read_bytes()
-        request = urllib.request.Request(
-            item["url"], data=data, method="PUT", headers=dict(item["headers"])
-        )
+        path = folder / item["path"]
+        # The length is given, so a file of several GiB is streamed, not read into memory or
+        # sent in chunks, which S3 would refuse.
+        headers = {**item["headers"], "Content-Length": str(path.stat().st_size)}
         try:
-            with urllib.request.urlopen(request, timeout=300):
-                pass
+            with path.open("rb") as stream:
+                request = urllib.request.Request(
+                    item["url"], data=stream, method="PUT", headers=headers
+                )
+                with urllib.request.urlopen(request, timeout=300):
+                    pass
         except urllib.error.HTTPError as error:
             raise Failed(f"upload of {item['path']} returned {error.code}") from error
 
@@ -327,10 +418,11 @@ class Stage:
     second: User
     tmp: Path
 
-    def submit(self, folder: Path) -> str:
-        created = self.api.call(
-            self.contributor, "POST", body={"files": file_list(folder)}, expect=201
-        )
+    def submit(self, folder: Path, dataset_id: str | None = None) -> str:
+        body: dict[str, Any] = {"files": file_list(folder)}
+        if dataset_id is not None:
+            body["datasetId"] = dataset_id
+        created = self.api.call(self.contributor, "POST", body=body, expect=201)
         upload(created["uploads"], folder)
         sid = str(created["submissionId"])
         self.api.call(self.contributor, "POST", f"/{sid}/submit", expect=202)
@@ -398,6 +490,23 @@ class Stage:
         status, raw = http("GET", f"{base}/datasets/{dataset_id}")
         if status != 200 or str(manifest.get("title", "")).encode() not in raw:
             raise Failed(f"/datasets/{dataset_id} returned {status} without the title")
+
+    def dataset(self, dataset_id: str) -> tuple[int, int | None]:
+        """The status of GET /api/datasets/<id>, and the current version it gives."""
+        status, raw = http("GET", f"https://{self.api.domain}/api/datasets/{dataset_id}")
+        return status, int(json.loads(raw)["currentVersion"]) if status == 200 else None
+
+    def size(self, dataset_id: str, version: int, path: str) -> int:
+        """The size /data serves for a published file, from a HEAD."""
+        url = f"https://{self.api.domain}/data/{dataset_id}/{version}/{path}"
+        request = urllib.request.Request(url, method="HEAD")
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                return int(response.headers["Content-Length"])
+        except urllib.error.HTTPError as error:
+            raise Failed(
+                f"HEAD /data/{dataset_id}/{version}/{path} returned {error.code}"
+            ) from error
 
 
 def _rule(events: list[dict[str, Any]], type: str) -> list[Any]:
@@ -518,6 +627,89 @@ def run_reminder(s: Stage, path: Path, waiting: dict[str, Any] | None) -> str:
     return f"{sid} reminded on day 1, then published {done['datasetId']}"
 
 
+def run_new_version(s: Stage) -> str:
+    first = s.submit(s.folder())
+    s.wait(first, "in-review")
+    s.decide(s.curator, first, "approve")
+    dataset_id = str(s.wait(first, "published")["datasetId"])
+    sid = s.submit(s.folder(), dataset_id)
+    s.wait(sid, "in-review")
+    seen: list[tuple[int, int | None]] = []
+    published = threading.Event()
+
+    def read() -> None:
+        while not published.is_set():
+            seen.append(s.dataset(dataset_id))
+            time.sleep(VERSION_POLL_SECONDS)
+        seen.append(s.dataset(dataset_id))
+
+    reader = threading.Thread(target=read)
+    reader.start()
+    try:
+        s.decide(s.curator, sid, "approve")
+        s.wait(sid, "published")
+    finally:
+        published.set()
+        reader.join()
+    events = s.events(sid, [*REVIEWED, "decided", "published"])
+    version = next(e.get("version") for e in events if e.get("type") == "published")
+    if int(version or 0) != 2:
+        raise Failed(f"{sid} published version {version} of {dataset_id}, not 2")
+    fault = version_fault(seen)
+    if fault is not None:
+        raise Failed(fault)
+    s.readable(dataset_id, 2)
+    return f"{sid} published {dataset_id} v2; {len(seen)} reads during it answered v1, then v2"
+
+
+def run_over_limit(s: Stage) -> str:
+    status, raw = http("GET", f"https://{s.api.domain}/archive-checks.json")
+    if status != 200:
+        raise Failed(f"/archive-checks.json returned {status}")
+    gib = int(json.loads(raw)["maxPackageGiB"])
+    answer = s.api.call(
+        s.contributor, "POST", body={"files": over_limit_files(gib * GIB)}, expect=400
+    )
+    if f"{gib} GiB" not in json.dumps(answer):
+        raise Failed(f"the refusal doesn't name the {gib} GiB limit: {answer}")
+    return f"a package one byte over {gib} GiB was refused before any upload"
+
+
+def run_large(s: Stage) -> str:
+    status, raw = http("GET", f"https://{s.api.domain}/archive-checks.json")
+    if status != 200:
+        raise Failed(f"/archive-checks.json returned {status}")
+    gib = int(json.loads(raw)["maxPackageGiB"])
+    folder = large_copy(Path(tempfile.mkdtemp(dir=s.tmp)), gib * GIB)
+    sizes = {f["path"]: int(f["size"]) for f in file_list(folder)}
+    started = time.monotonic()
+    sid = s.submit(folder)
+    uploaded = time.monotonic()
+    s.wait(sid, "in-review")
+    reviewed = time.monotonic()
+    s.decide(s.curator, sid, "approve")
+    done = s.wait(sid, "published")
+    finished = time.monotonic()
+    dataset_id = str(done["datasetId"])
+    s.readable(dataset_id, 1)
+    for path in LARGE_PATHS:
+        served = s.size(dataset_id, 1, path)
+        if served != sizes[path]:
+            raise Failed(f"/data serves {path} as {served:,} bytes, not {sizes[path]:,}")
+    zipped = s.size(dataset_id, 1, PACKAGE_ZIP)
+    if zipped < sum(sizes[path] for path in LARGE_PATHS):
+        raise Failed(f"package.zip is {zipped:,} bytes, less than the random files it holds")
+
+    def minutes(seconds: float) -> str:
+        return f"{seconds / 60:.1f} min"
+
+    return (
+        f"{sid} published {dataset_id} v1 from {sum(sizes.values()):,} bytes of the {gib} GiB "
+        f"limit; package.zip is {zipped:,} bytes; upload {minutes(uploaded - started)}, scan "
+        f"and checks {minutes(reviewed - uploaded)}, publish {minutes(finished - reviewed)}"
+    )
+
+
 @dataclass
 class Outcome:
     name: str
@@ -539,6 +731,11 @@ def attempt(name: str, run: Callable[[], str]) -> Outcome:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0] if __doc__ else None)
     parser.add_argument("stage")
+    parser.add_argument(
+        "--large",
+        action="store_true",
+        help="also publish a package of random bytes as large as the stage takes",
+    )
     args = parser.parse_args(argv)
 
     import boto3
@@ -580,7 +777,11 @@ def main(argv: list[str] | None = None) -> int:
                 "skip rule": lambda: run_skip(stage),
                 "two curators": lambda: run_two(stage),
                 "reminder": lambda: run_reminder(stage, path, waiting),
+                "new version": lambda: run_new_version(stage),
+                "over the limit": lambda: run_over_limit(stage),
             }
+            if args.large:
+                runs["large package"] = lambda: run_large(stage)
             with ThreadPoolExecutor(max_workers=len(runs)) as pool_:
                 futures = [pool_.submit(attempt, name, fn) for name, fn in runs.items()]
                 outcomes = [f.result() for f in futures]

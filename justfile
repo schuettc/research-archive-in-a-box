@@ -319,8 +319,10 @@ add-curator stage email userId:
 # Drive the sample package through the ingest pipeline on a deployed stage with keepData: false, with the
 # caller's AWS_PROFILE and region. Set INGEST_E2E_REVIEWER to your curator user id to receive
 # the reminder; the reminder run leaves one submission waiting, and the next day's run checks it.
-ingest-e2e stage:
-    uv run --all-packages --frozen python scripts/ingest_e2e.py {{stage}}
+# With --large it also uploads and publishes a package as large as the stage takes (9 GiB unless
+# submissions.maxPackageGiB says less), which needs that much free disk here.
+ingest-e2e stage *args:
+    uv run --all-packages --frozen python scripts/ingest_e2e.py {{stage}} {{args}}
 
 # Install archive-backend, its workspace packages (the contract and cruise) and its locked
 # dependencies as arm64 Lambda wheels, without Docker
