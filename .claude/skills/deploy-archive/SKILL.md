@@ -292,11 +292,25 @@ Budgets emails the alert email when the month passes `monthlyBudgetUsd`.
 
 Then:
 
-1. `git add archive.yaml && git commit -m "Configure the archive" && git push origin main`
-2. Find the run: `gh run list --commit $(git rev-parse HEAD) --workflow CI --json databaseId --jq '.[0].databaseId'`
-   (wait a few seconds and ask again if it isn't listed yet).
-3. `gh run watch <run-id> --exit-status` until it ends. On a failure, show
-   `gh run view <run-id> --log-failed` and stop.
+1. Commit the config and push it:
+
+   ```
+   git add archive.yaml && git commit -m "Configure the archive" && git push origin main
+   ```
+
+2. Find the run (wait a few seconds and ask again if it isn't listed yet):
+
+   ```
+   gh run list --commit $(git rev-parse HEAD) --workflow CI --json databaseId --jq '.[0].databaseId'
+   ```
+
+3. Watch it until it ends:
+
+   ```
+   gh run watch <run-id> --exit-status
+   ```
+
+   On a failure, show `gh run view <run-id> --log-failed` and stop.
 
 A stage's job that says it has no `AWS_DEPLOY_ROLE_ARN` was skipped: step 3 missed it.
 
@@ -323,7 +337,11 @@ Confirm the email address with them. **Wait for:** "invite <email>" (or a yes na
 With `email: ses` and the account still in SES's sandbox (step 3), the invitation only arrives
 if the address is verified in SES.
 
-Then: `just invite-user <stage> <email> admin,curator,contributor`
+Then:
+
+```
+just invite-user <stage> <email> admin,curator,contributor
+```
 
 Then say that the curator role alone emails nobody about submissions: the archive sends its review
 messages (a submission is waiting, a reminder, a stale review) to the stage's curators' topic,
@@ -358,17 +376,30 @@ the deletion runbook in `docs/curating.md` (Deleting data for good).
 
 **Wait for:** "seed it" (or a clear yes).
 
-Then: `just seed <stage>`. It prints the dataset's URL when it is published, or the status and
-its findings when it stops.
+Then:
+
+```
+just seed <stage>
+```
+
+It prints the dataset's URL when it is published, or the status and its findings when it stops.
 
 ### 8. Smoke test
 
-`just smoke <stage>`. Report each check's line: the site, health, search, the dataset page and a
-download whose SHA-256 matches the manifest. Every check should say `ok` after the seed. With DOIs
-on, check that the seeded dataset's page shows its DOI's address as its Identifier. If it doesn't,
-the alerts email says why; once DataCite answers, `just reindex <stage> --dois` registers it. Then give
-them the site's URL:
-`aws cloudformation describe-stacks --stack-name ResearchArchive-<stage> --query "Stacks[0].Outputs[?OutputKey=='SiteDomain'].OutputValue" --output text`.
+```
+just smoke <stage>
+```
+
+Report each check's line: the site, health, search, the dataset page and a download whose SHA-256
+matches the manifest. Every check should say `ok` after the seed. With DOIs on, check that the
+seeded dataset's page shows its DOI's address as its Identifier. If it doesn't, the alerts email
+says why; once DataCite answers, `just reindex <stage> --dois` registers it. Then give them the
+site's URL:
+
+```
+aws cloudformation describe-stacks --stack-name ResearchArchive-<stage> --query "Stacks[0].Outputs[?OutputKey=='SiteDomain'].OutputValue" --output text
+```
+
 With a domain, that is the name: check that `curl -sSI https://<name>/` answers 200.
 
 ## Update

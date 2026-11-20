@@ -9,7 +9,7 @@ Two things deploy an archive, and they are the supported path:
 - **The `deploy-archive` skill**, in [`.claude/skills/deploy-archive/SKILL.md`](../../.claude/skills/deploy-archive/SKILL.md). A **skill** is a set of instructions [Claude Code](https://claude.com/claude-code) follows when you ask for that task. Open your fork in Claude Code and ask it to set up the archive: the skill checks what you need, writes `archive.yaml` with you, connects GitHub to your AWS account, and stops before every step that changes something, saying what it does and what it costs, until you say yes.
 - **CI**, the GitHub Actions workflow in [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml). It runs the checks on every push, and on a push to `main` it deploys each stage. You never run `cdk deploy` on an archive stack yourself.
 
-The skill's file is plain text, and every command it runs is written there, so you can read exactly what it will do before you start. Deploying any other way (running the CDK app from a laptop, or another pipeline) isn't supported: the deploy role, the GitHub environments and the teardown all assume CI deploys.
+The skill's file is plain text, and every command it runs is written there, so you can read exactly what it will do before you start. What isn't supported is deploying an archive's stack other than through CI (running the CDK app on it from a laptop, or from another pipeline): the deploy role, the GitHub environments and the teardown all assume CI deploys. The setup around that deploy needs no Claude Code: [Doing it by hand](#doing-it-by-hand) lists the same commands for you to run yourself.
 
 A **stage** is one deployment of the archive, such as `dev` or `prod`: its own AWS CloudFormation stack, named `ResearchArchive-<stage>`, with its own site, accounts and data. `archive.yaml` lists the stages, and CI deploys them in that order, the next only after the last succeeded.
 
@@ -27,7 +27,7 @@ flowchart LR
 
 - **An AWS account** you can sign in to from the AWS CLI, with permission to create IAM roles and CloudFormation stacks. [Running cost](running-cost.md) explains what it will bill for.
 - **A fork of this repository on GitHub**, cloned to your computer, with GitHub Actions turned on for it, and the [GitHub CLI](https://cli.github.com/) (`gh`) signed in.
-- **Claude Code**, to run the skill.
+- **Claude Code**, to run the skill. Without it, [Doing it by hand](#doing-it-by-hand) has the commands the skill runs.
 - **[uv](https://docs.astral.sh/uv/), Node 24 or later and [just](https://just.systems/)**: uv runs the Python packages, Node the CDK app and the web build, and just the repository's recipes, such as `just check`.
 
 ## Setup, step by step
@@ -125,6 +125,129 @@ just smoke <stage>
 ```
 
 runs the smoke test again, now with the sample dataset published: the site, the API's health, search, the dataset's page and a download whose SHA-256 hash matches the manifest each print `ok`. The skill then gives you the site's address, from the stack's `SiteDomain` output.
+
+## Doing it by hand
+
+You can run the setup yourself, without Claude Code. This section lists the commands of the skill's steps 3 to 8, in the skill's order, each with what it does; the steps above explain why each is there. CI still does the deploying: by hand means the setup around it, and you still never run `cdk deploy` on an archive stack. A test in `scripts/tests/` fails when a command here differs from the skill's, so the two stay the same.
+
+Do steps 1 and 2 first. Check that you have everything under [What you need](#what-you-need), run `uv sync --all-packages` and `npm ci` in your clone, then write `archive.yaml` from [the reference](archive-yaml.md) and validate it as [Checking your file](archive-yaml.md#checking-your-file) shows. Replace each `<name>` in the commands below with your own value; `<owner>/<name>` is your fork on GitHub.
+
+### Connect GitHub to AWS
+
+Run these once for each AWS account your stages use, signed in to that account.
+
+Bootstrap CDK in the account and Region, unless `aws cloudformation describe-stacks --stack-name CDKToolkit` shows it is already there. A stage with a `domain` in a Region other than us-east-1 needs the same in us-east-1, where its certificate is made.
+
+```
+cd packages/infra && npx cdk bootstrap aws://<account>/<region>
+```
+
+Ask whether the account already has GitHub's OIDC provider, since IAM allows only one. When the answer is `NoSuchEntity`, there is none. When it lists `sts.amazonaws.com`, add `-c githubOidcProvider=existing` to the deploy below, which then uses that provider and leaves it alone. When it lists client ids without `sts.amazonaws.com`, stop: the existing provider doesn't accept AWS STS (the service that hands out the temporary credentials), and changing it is a decision for whoever owns it.
+
+```
+aws iam get-open-id-connect-provider --open-id-connect-provider-arn arn:aws:iam::<account>:oidc-provider/token.actions.githubusercontent.com --query ClientIDList --output text
+```
+
+Read the subject GitHub sends for your fork. When the answer has a `sub_claim_prefix`, that value is the `<prefix>` of the deploy below. When it says `"use_default": true` with no `sub_claim_prefix`, leave `-c githubSubPrefix=<prefix>` out of the deploy. When it says `"use_default": false`, stop: the deploy role doesn't support a custom subject.
+
+```
+gh api repos/<owner>/<name>/actions/oidc/customization/sub
+```
+
+Deploy the `ResearchArchiveDeploy` stack, which holds the OIDC provider and the deploy role. It is the only stack you deploy from your laptop.
+
+```
+cd packages/infra && npx cdk --app "npx tsx bin/deploy-access.ts" deploy -c githubRepo=<owner>/<name> -c githubSubPrefix=<prefix> --require-approval never
+```
+
+Read the deploy role's ARN from the stack.
+
+```
+aws cloudformation describe-stacks --stack-name ResearchArchiveDeploy --query "Stacks[0].Outputs[?OutputKey=='DeployRoleArn'].OutputValue" --output text
+```
+
+For each stage in the account, run these four in order. The first creates the stage's GitHub environment, the second lets only the `main` branch deploy from it, and the last two store in it the role's ARN and the stage's Region, which CI reads.
+
+```
+gh api -X PUT repos/<owner>/<name>/environments/<stage> --input - <<< '{"deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true}}'
+gh api -X POST repos/<owner>/<name>/environments/<stage>/deployment-branch-policies -f name=main -f type=branch
+gh api -X POST repos/<owner>/<name>/environments/<stage>/variables -f name=AWS_DEPLOY_ROLE_ARN -f value=<role-arn>
+gh api -X POST repos/<owner>/<name>/environments/<stage>/variables -f name=AWS_REGION -f value=<region>
+```
+
+### Store the DataCite password
+
+Only with DOIs on. For each stage, signed in to the stage's account and Region, store the DataCite repository's password as an encrypted parameter. The command reads the password without showing it; type it and press Enter.
+
+```
+read -rs PW && aws ssm put-parameter --name /research-archive/<stage>/datacite-password --type SecureString --value "$PW" --overwrite; unset PW
+```
+
+Check that it is there, without reading its value. It should list one parameter of type `SecureString`.
+
+```
+aws ssm describe-parameters --parameter-filters Key=Name,Values=/research-archive/<stage>/datacite-password
+```
+
+### Deploy
+
+Commit the config and push it to `main`. The push is what deploys: CI runs the checks, then deploys each stage in order and smoke-tests it.
+
+```
+git add archive.yaml && git commit -m "Configure the archive" && git push origin main
+```
+
+Find the id of the CI run the push started. Wait a few seconds and ask again if it prints nothing.
+
+```
+gh run list --commit $(git rev-parse HEAD) --workflow CI --json databaseId --jq '.[0].databaseId'
+```
+
+Watch the run until it ends. When it fails, `gh run view <run-id> --log-failed` shows the failed step's log, and [Troubleshooting](troubleshooting.md) covers the usual causes.
+
+```
+gh run watch <run-id> --exit-status
+```
+
+### Invite the first admin
+
+Create the first account with all three roles. Cognito emails the address a temporary password.
+
+```
+just invite-user <stage> <email> admin,curator,contributor
+```
+
+Read the account's user id, which the next command needs.
+
+```
+aws cognito-idp admin-get-user --user-pool-id "$(just _user-pool <stage>)" --username <email> --query "UserAttributes[?Name=='sub'].Value" --output text
+```
+
+Subscribe the address to the stage's review messages, and do the same for each curator you add later. The person confirms from the email AWS sends.
+
+```
+just add-curator <stage> <email> <userId>
+```
+
+### Seed and smoke test
+
+Publish the sample package as the admin. A browser tab opens on the archive's sign-in page: sign in there and press **Sign in the command line**.
+
+```
+just seed <stage>
+```
+
+Run the smoke test again, now with a dataset published. Every check should print `ok`.
+
+```
+just smoke <stage>
+```
+
+Print the site's address.
+
+```
+aws cloudformation describe-stacks --stack-name ResearchArchive-<stage> --query "Stacks[0].Outputs[?OutputKey=='SiteDomain'].OutputValue" --output text
+```
 
 ## Updating from upstream
 

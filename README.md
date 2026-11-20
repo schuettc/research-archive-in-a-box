@@ -79,9 +79,10 @@ The guide, for people deploying and using an archive:
 
 - [Packages](docs/guide/packages.md): what a package is, how to make one, and `cruise diagnose`, `audit` and `set`.
 - [archive.yaml](docs/guide/archive-yaml.md): every setting, with its type, default and an example.
-- [Deploying](docs/guide/deploying.md): setting up an archive with the skill and CI, updating it from upstream, and tearing a stage down.
+- [Deploying](docs/guide/deploying.md): setting up an archive with the skill and CI, or with the same commands by hand, updating it from upstream, and tearing a stage down.
 - [Using the archive](docs/guide/using-the-archive.md): the web app for readers, contributors, curators and admins.
 - [Running cost](docs/guide/running-cost.md): what an archive pays for, and what costs almost nothing when idle.
+- [Troubleshooting](docs/guide/troubleshooting.md): what to do when the setup, the first deploy or a first submission goes wrong.
 
 The optional modules and curating:
 
