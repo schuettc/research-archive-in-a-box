@@ -5,7 +5,7 @@ import * as cr from "aws-cdk-lib/custom-resources";
 import { Construct } from "constructs";
 
 export interface StorageProps {
-  readonly isProd: boolean;
+  readonly keepData: boolean;
   readonly objectLock?: { readonly retentionDays: number };
 }
 
@@ -26,7 +26,7 @@ export class Storage extends Construct {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       enforceSSL: true,
       encryption: s3.BucketEncryption.S3_MANAGED,
-      ...(props.isProd
+      ...(props.keepData
         ? { removalPolicy: RemovalPolicy.RETAIN }
         : { removalPolicy: RemovalPolicy.DESTROY, autoDeleteObjects: true }),
     };

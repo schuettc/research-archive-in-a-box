@@ -1,14 +1,14 @@
 """The local tools, which need no network: diagnose and edit_manifest.
 
-diagnose reads the checks `connect` saved from the archive, so it matches the archive's ingest.
+diagnose reads the checks of the session's archive, so it matches that archive's ingest.
 edit_manifest edits with cruise's own edit code, which `cruise set` uses too.
 """
 
 from pathlib import Path
 from typing import Any
 
-from archive_agent import state
 from archive_agent.errors import LocalError
+from archive_agent.state import LIMIT, Session
 from archive_contract.profile import Profile, load_profile
 from cruise.cli import counts, verdict
 from cruise.diagnose import diagnose as run_diagnose
@@ -28,18 +28,21 @@ def _folder(folder: str) -> Path:
     return root
 
 
-def _selection() -> tuple[list[Profile], list[str], dict[str, Any] | None, str | None]:
-    """The saved archive's profiles and required fields, loaded as `cruise diagnose --config`
-    loads them, which archive's they are, and a note when they fall short of its own check."""
-    archive_checks = state.saved_checks()
-    url = state.saved_url()
+def _selection(
+    session: Session,
+) -> tuple[list[Profile], list[str], dict[str, Any] | None, str | None]:
+    """The session's archive's profiles and required fields, loaded as `cruise diagnose
+    --config` loads them, which archive's they are, and a note when they fall short of its own
+    check."""
+    url = session.known()
+    archive_checks = session.checks
     if archive_checks is None or url is None:
         return [load_profile("core")], [], None, NO_CHECKS
     used: dict[str, Any] = {"archive": url, **archive_checks}
-    limit = state.saved_limit_gib()
+    limit = session.limit
     if limit is not None:
         # The most a package's files may total; submit refuses a larger one before sending.
-        used[state.LIMIT] = limit
+        used[LIMIT] = limit
     profiles: list[Profile] = []
     unknown: list[str] = []
     for name in archive_checks["profiles"]:
@@ -56,12 +59,12 @@ def _selection() -> tuple[list[Profile], list[str], dict[str, Any] | None, str |
     return profiles, archive_checks["required"], used, note
 
 
-def diagnose(folder: str) -> dict[str, Any]:
-    """`cruise diagnose --json` for the folder under the connected archive's checks, plus the
+def diagnose(session: Session, folder: str) -> dict[str, Any]:
+    """`cruise diagnose --json` for the folder under the session's archive's checks, plus the
     verdict line cruise prints, which archive's checks were used and, when those checks fell
     short, a note saying so."""
     root = _folder(folder)
-    profiles, required, used, note = _selection()
+    profiles, required, used, note = _selection(session)
     result = run_diagnose(root, profiles, required)
     answer: dict[str, Any] = {
         "validation": result.validation.dump(),
@@ -69,6 +72,9 @@ def diagnose(folder: str) -> dict[str, Any]:
         "findings": [f.dump() for f in result.findings],
         "verdict": verdict(*counts(result.findings)),
     }
+    archive = session.known()
+    if archive is not None:
+        answer["archive"] = archive
     if used is not None:
         answer["checks"] = used
     if note is not None:

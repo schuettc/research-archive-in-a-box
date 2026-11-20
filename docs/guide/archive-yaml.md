@@ -468,7 +468,7 @@ infrastructure:
 
 ### `infrastructure.stages[].name`
 
-The stage's name. A stage named `prod` is treated as production: its buckets, tables and user pool are kept when its stack is deleted and are protected from deletion, and it has none of the test conveniences other stages have (a local development origin for uploads and a sign-in client for the end-to-end test). Every other stage is deleted whole, data included, when it is torn down.
+The stage's name, which names its stack (`ResearchArchive-<name>`), its GitHub environment and its parameters. The name decides nothing else: whether a stage's data is kept is [`keepData`](#infrastructurestageskeepdata).
 
 - **Type:** text: a lowercase letter, then up to 19 lowercase letters, digits or hyphens. Required in each stage.
 - **Default:** none.
@@ -478,6 +478,24 @@ infrastructure:
   alertEmail: archive-admin@example.org
   stages:
     - name: walk-test
+```
+
+### `infrastructure.stages[].keepData`
+
+Whether the stage's data outlives its stack. A stage that keeps its data has its buckets, tables, user pool and logs left in place when its stack is deleted, with the tables and user pool protected from deletion; they go on billing for storage until you delete them by hand. A stage with `keepData: false` is disposable: tearing it down deletes everything, data included. It also has two test conveniences a kept stage never has: uploads from a local web app at `http://localhost:5199`, and a sign-in client for the end-to-end test (`just ingest-e2e`).
+
+To delete a kept stage whole, set `keepData: false`, let CI deploy it, then tear it down.
+
+- **Type:** `true` or `false`.
+- **Default:** `true`.
+
+```yaml
+infrastructure:
+  alertEmail: archive-admin@example.org
+  stages:
+    - name: dev
+      keepData: false
+    - name: prod
 ```
 
 ### `infrastructure.stages[].account`

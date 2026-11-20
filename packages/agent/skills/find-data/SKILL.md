@@ -10,9 +10,13 @@ files need `sign_in` first. The tools come from the `cruise` MCP server.
 
 ## Before you start
 
-If a tool answers that no archive is set, ask the person for their archive's web address
-(such as `https://d111111abcdef8.cloudfront.net`) and call `connect` with it. It is saved, so
-this happens once.
+This window works with one archive: the one it started with, or the one last given to
+`connect` in this window. `search` answers it as `archive`; say which archive the results come
+from. If a tool answers that no archive is set, or the person wants a different archive, ask
+for its web address (such as `https://d111111abcdef8.cloudfront.net`) and call `connect` with
+it. `connect` changes the archive for this window only, signs this window out of the one it
+was on, and makes the address the default for new windows; other open windows stay where
+they are.
 
 ## Steps
 
@@ -43,7 +47,8 @@ Tell the person in plain words what the tool said, and what to do next:
 - **The archive can't be reached**: check the address and the connection, then run the same
   step again. Nothing is queued.
 - **Signed out or the sign-in expired**: say that sign-in lasts an hour and only while this
-  session runs, then call `sign_in` again (with their go) and retry the step.
+  session runs, then call `sign_in` again (with their go) and retry the step. A sign-in is
+  for one archive; after `connect` to another, sign in again.
 - **Not allowed** (it names the group needed, and the archive's reason in brackets): their
   account lacks that group; the archive's admin can add it. A restricted dataset needs an
   admin's approval: if the reason is `ask for access`, tell them to request it on the

@@ -50,7 +50,8 @@ export interface ResearchArchiveProps {
 }
 
 export class ResearchArchive extends Construct {
-  readonly isProd: boolean;
+  /** The stage's keepData: its data outlives its stack, and it has no test conveniences. */
+  readonly keepData: boolean;
   /** Whether `infrastructure.modules.embeddings` switches semantic search on. */
   readonly embeddings: boolean;
   readonly stagingBucket: s3.Bucket;
@@ -141,7 +142,7 @@ export class ResearchArchive extends Construct {
           "repository and prefix",
       );
     }
-    this.isProd = props.stage === "prod";
+    this.keepData = stage.keepData ?? true;
     if (props.config.doi) {
       this.doiPasswordParameter = `/research-archive/${props.stage}/datacite-password`;
     }
@@ -185,7 +186,7 @@ export class ResearchArchive extends Construct {
     this.alertTopic = this.operations.alertTopic;
 
     const objectLock = infrastructure.modules?.objectLock ?? undefined;
-    const storage = new Storage(this, "Storage", { isProd: this.isProd, objectLock });
+    const storage = new Storage(this, "Storage", { keepData: this.keepData, objectLock });
     this.stagingBucket = storage.stagingBucket;
     this.archiveBucket = storage.archiveBucket;
     this.derivedBucket = storage.derivedBucket;
@@ -193,7 +194,7 @@ export class ResearchArchive extends Construct {
     this.embeddings = infrastructure.modules?.embeddings != null;
     const tables = new Tables(this, "Tables", {
       stage: props.stage,
-      isProd: this.isProd,
+      keepData: this.keepData,
       embeddings: this.embeddings,
     });
     this.catalogTables = tables.catalogTables;
@@ -219,10 +220,10 @@ export class ResearchArchive extends Construct {
 
     const brand = loginBrand(props.config, props.configDir ?? REPO_ROOT);
     if (stage.email === "ses" && this.domain) {
-      this.email = new Email(this, "Email", { domain: this.domain, isProd: this.isProd });
+      this.email = new Email(this, "Email", { domain: this.domain, keepData: this.keepData });
     }
     const auth = new Auth(this, "Auth", {
-      isProd: this.isProd,
+      keepData: this.keepData,
       brand,
       siteAddress: stage.domain?.name,
       ...(this.email && this.domain
@@ -259,11 +260,11 @@ export class ResearchArchive extends Construct {
     this.siteDomain = web.siteDomain;
     this.operations.addDistribution(this.distribution);
     // The web app PUTs uploads and reads reports from the staging bucket, on CloudFront's address
-    // and on the domain; a local dev server too on non-prod stages.
+    // and on the domain; a local dev server too on a stage with keepData: false.
     storage.allowStagingOrigins([
       `https://${this.distribution.distributionDomainName}`,
       ...(this.domain ? [`https://${this.domain.name}`] : []),
-      ...(this.isProd ? [] : ["http://localhost:5199"]),
+      ...(this.keepData ? [] : ["http://localhost:5199"]),
     ]);
     // just smoke, just seed, CI's smoke step and just ingest-e2e read it on every stage.
     new CfnOutput(Stack.of(this), "SiteDomain", { key: "SiteDomain", value: this.siteDomain });
@@ -276,7 +277,7 @@ export class ResearchArchive extends Construct {
     }
     this.userPoolClients = auth.addAppClients();
     auth.setRelyingParty(this.siteDomain);
-    if (!this.isProd) {
+    if (!this.keepData) {
       auth.addTestClient();
     }
     web.deploySite(
@@ -363,7 +364,7 @@ export class ResearchArchive extends Construct {
 
   /** A Python Lambda from archive-backend, built the way the archive's own are, with its alarm. */
   pythonFunction(id: string, props: PythonFunctionProps): lambda.Function {
-    const fn = makePythonFunction(this, id, { ...props, isProd: this.isProd });
+    const fn = makePythonFunction(this, id, { ...props, keepData: this.keepData });
     this.operations.addFunction(fn);
     return fn;
   }

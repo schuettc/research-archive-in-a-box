@@ -358,6 +358,23 @@ def test_each_photograph_is_its_own_media_resource(tmp_path: Path) -> None:
     ]
 
 
+def test_a_zip_made_on_a_mac_converts_without_its_hidden_files(tmp_path: Path) -> None:
+    folder = dataset(tmp_path, "quadrat-photos")
+    with zipfile.ZipFile(folder / "photos_1-2.zip", "w") as archive:
+        archive.writestr("Q_1a.JPG", b"\xff\xd8 invented photo one")
+        archive.writestr("Q_L9a,b.JPG", b"\xff\xd8 invented photo two")
+        archive.writestr(".DS_Store", b"x")
+        archive.writestr("sub/.DS_Store", b"x")
+        archive.writestr("__MACOSX/._Q_1a.JPG", b"x")
+        archive.writestr("__MACOSX/Q_1a.JPG", b"x")
+
+    package, manifest, _ = run(folder, tmp_path)
+
+    assert [r["name"] for r in manifest["resources"]] == ["q-1a", "q-l9a-b", "eml"]
+    unpacked = package / "data" / "photos_1-2"
+    assert sorted(p.name for p in unpacked.rglob("*")) == ["Q_1a.JPG", "Q_L9a,b.JPG"]
+
+
 def test_a_license_the_corpus_does_not_show_stops_the_conversion(tmp_path: Path) -> None:
     folder = dataset(tmp_path, "unknown-license", record="plant-permits")
 

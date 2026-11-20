@@ -22,14 +22,23 @@ from archive_client.signin import AuthConfig, SignInError
 
 INSTRUCTIONS = (
     "Tools for one research data archive: find and fetch datasets, check and fix a package "
-    "folder locally, and submit or review datasets. Call connect once with the archive's web "
-    "address. Never write to a manifest or send anything to the archive without the person's "
-    "yes."
+    "folder locally, and submit or review datasets. This window stays on the archive it started "
+    "with: the one saved as the default when it made its first call, or the one given to "
+    "connect in this window. connect changes the archive for this window only and saves it as "
+    "the default for new windows. When an answer names its archive, tell the person which "
+    "archive it was. Never write to a manifest or send anything to the archive without the "
+    "person's yes."
 )
 
 
 NO_CHECKS = "This archive doesn't publish its requirements, so checks use the basic set only."
 """connect's answer for an archive without /archive-checks.json."""
+
+MOVED = (
+    "This window now uses this archive. It is also the default for new windows; other open "
+    "windows keep the archive they started with."
+)
+"""connect's note on what it changed."""
 
 NAME = "cruise"
 """The plugin's, its MCP server's and its marketplace entry's one name."""
@@ -46,7 +55,9 @@ def _normalise(url: str) -> str:
 
 
 def connect(session: Session, url: str) -> dict[str, Any]:
-    """Check the archive at `url` answers, then save its address and the checks it publishes."""
+    """Check the archive at `url` answers, then move this session to it, signed out, and save
+    its address and the checks it publishes as the default for new windows. Nothing changes
+    when the archive can't be reached or isn't one."""
     address = _normalise(url)
     document = Archive(address).get("/auth-config.json")
     if not isinstance(document, dict) or not all(
@@ -54,12 +65,12 @@ def connect(session: Session, url: str) -> dict[str, Any]:
     ):
         raise Refused(f"{address} answered, but it doesn't look like a research archive.")
     archive_checks, limit = state.fetch_published(address)
+    session.use(address, archive_checks, limit)
     path = state.save_url(address, archive_checks, limit)
-    session.tokens = None
-    session.groups = []
+    answer: dict[str, Any] = {"url": address, "saved_to": str(path), "note": MOVED}
     if archive_checks is None:
-        return {"url": address, "saved_to": str(path), "checks_note": NO_CHECKS}
-    return {"url": address, "saved_to": str(path), "checks": archive_checks}
+        return {**answer, "checks_note": NO_CHECKS}
+    return {**answer, "checks": archive_checks}
 
 
 def _claims(id_token: str) -> dict[str, Any]:
@@ -81,16 +92,25 @@ def _groups(value: object) -> list[str]:
 
 
 def sign_in(session: Session) -> dict[str, Any]:
-    """Sign in on the archive's own sign-in page in the browser; answer who you are and your
-    groups."""
+    """Sign in on this session's archive's own sign-in page in the browser; answer who you are,
+    your groups and the archive that issued the sign-in."""
+    address = session.url()
     try:
-        tokens = session.sign_in(AuthConfig(site=session.url()))
+        tokens = session.sign_in(AuthConfig(site=address))
     except SignInError as exc:
         raise SignInFailed(f"Sign-in didn't finish: {exc}. Call sign_in to try again.") from exc
+    now = session.url()
+    if tokens.site != now.rstrip("/"):
+        # connect moved this window while the browser was open: the sign-in is not for it.
+        raise SignInFailed(
+            f"That sign-in was for {tokens.site}, but this window is now on {now}, so it was "
+            f"dropped. Call sign_in to sign in to {now}."
+        )
     claims = _claims(tokens.id_token)
     session.tokens = tokens
     session.groups = _groups(claims.get("cognito:groups"))
     return {
+        "archive": tokens.site,
         "email": claims.get("email"),
         "groups": session.groups,
         "expires_at": datetime.fromtimestamp(tokens.expires_at, UTC).isoformat(),
@@ -103,15 +123,18 @@ def build(session: Session) -> MCPServer:
 
     @mcp.tool(name="connect")
     def connect_tool(url: str) -> dict[str, Any]:
-        """Save the archive's web address (such as https://d111.cloudfront.net) and check it
-        answers. Call once; the address, and the requirement sets the archive checks packages
-        against, are remembered across sessions."""
+        """Use the archive at this web address (such as https://d111.cloudfront.net) in this
+        window from now on, after checking it answers. It signs this window out of the archive
+        it was on, and saves the address, with the requirement sets the archive checks packages
+        against, as the default for new windows; other open windows keep the archive they
+        started with."""
         return connect(session, url)
 
     @mcp.tool(name="sign_in")
     def sign_in_tool() -> dict[str, Any]:
         """Open the archive's own sign-in page in the browser to sign in. Answers your email
-        and groups. Tokens last an hour and are kept only while this server runs."""
+        and groups. Tokens last an hour and are kept only while this server runs. Answers the
+        archive you signed in to; the sign-in is for that archive only."""
         return sign_in(session)
 
     @mcp.tool(name="search")
@@ -132,7 +155,7 @@ def build(session: Session) -> MCPServer:
         projects each match any of the values given; from_date and to_date (YYYY-MM-DD) bound
         the data's dates; bbox is [west, south, east, north]. Answers one page of rows, the
         total and a count per value of access, license, format and project. size is at most
-        100."""
+        100. Answers the archive searched as `archive`."""
         return read.search(
             session, q, access, license, format, project, from_date, to_date, bbox, page, size
         )
@@ -152,12 +175,12 @@ def build(session: Session) -> MCPServer:
 
     @mcp.tool(name="diagnose")
     def diagnose_tool(folder: str) -> dict[str, Any]:
-        """Check a local package folder with cruise, under the requirement sets the connected
+        """Check a local package folder with cruise, under the requirement sets this window's
         archive checks against, as its ingest does. Answers the structure verdict, the quality
         counts and score, every finding (errors block publishing; warnings and notes don't) and
         the verdict line, the archive whose checks were used, and a note when only the core
         rules could be checked. Needs no network; submit refreshes the archive's checks."""
-        return local.diagnose(folder)
+        return local.diagnose(session, folder)
 
     @mcp.tool(name="edit_manifest")
     def edit_manifest_tool(folder: str, edits: list[dict[str, Any]]) -> dict[str, Any]:
@@ -177,7 +200,7 @@ def build(session: Session) -> MCPServer:
         first and refuses on any error finding. Uploads every file in checksums.sha256 plus
         that file, then sends it to review. With `submission` (an id that needs changes), it
         is that submission's next round. Answers the id, round and status. Needs sign_in and
-        the contributor group."""
+        the contributor group. Answers the archive it went to as `archive`."""
         return submit.submit(session, folder, submission)
 
     @mcp.tool(name="submissions")
@@ -199,7 +222,8 @@ def build(session: Session) -> MCPServer:
     def decide_tool(id: str, decision: str, note: str) -> dict[str, Any]:
         """Post a curator's decision on a submission in review, only with the curator's yes
         on the exact decision and note. decision is approve, reject or request-changes; the
-        note goes to the submitter. Needs sign_in and the curator group."""
+        note goes to the submitter. Needs sign_in and the curator group. Answers the archive it
+        went to as `archive`."""
         return submit.decide(session, id, decision, note)
 
     return mcp

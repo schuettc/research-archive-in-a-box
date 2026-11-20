@@ -72,6 +72,19 @@ def test_the_file_list_has_each_path_size_and_sha256(tmp_path: Path) -> None:
     ]
 
 
+def test_the_file_list_and_the_checksums_leave_out_hidden_files(tmp_path: Path) -> None:
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "a.csv").write_bytes(b"x,y\n")
+    (tmp_path / ".DS_Store").write_bytes(b"x")
+    (tmp_path / "data" / ".DS_Store").write_bytes(b"x")
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "config").write_bytes(b"x")
+
+    digest = hashlib.sha256(b"x,y\n").hexdigest()
+    assert e2e.file_list(tmp_path) == [{"path": "data/a.csv", "size": 4, "sha256": digest}]
+    assert e2e.checksum_text(tmp_path) == f"{digest}  data/a.csv\n"
+
+
 @pytest.mark.parametrize(
     ("themes", "outcome", "rule"),
     [(["e2e-skip"], "skip", 0), (["e2e-two"], "two", 1), (["e2e-remind"], "one", None)],
@@ -126,3 +139,16 @@ def test_a_waiting_status_holds_only_once_the_pipeline_waits() -> None:
     assert e2e.holds({"status": "needs-changes", "waiting": True}, "needs-changes") is True
     assert e2e.holds({"status": "published", "waiting": False}, "published") is True
     assert e2e.holds({"status": "checking", "waiting": True}, "in-review") is False
+
+
+def test_the_run_stops_on_a_stage_without_the_e2e_outputs(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("boto3.client", lambda *args, **kwargs: object())
+    monkeypatch.setattr(e2e, "stack_outputs", lambda cloudformation, stage: {"SiteDomain": "d"})
+
+    assert e2e.main(["prod"]) == 2
+    assert capsys.readouterr().out.strip() == (
+        "ResearchArchive-prod has no E2eClientId, UserPoolId output; "
+        "ingest-e2e needs a stage with keepData: false in its config"
+    )

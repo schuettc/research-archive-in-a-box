@@ -22,11 +22,10 @@ from typing import Any, cast
 
 from archive_client.signin import AuthConfig, SignInError, Tokens
 from archive_client.signin import sign_in as browser_sign_in
+from archive_contract.validate import package_files
 
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLE = ROOT / "examples" / "sample-package"
-# The sample's generator and its notes, not part of the package.
-NOT_PACKAGE = ("_build",)
 POLL_SECONDS = 5.0
 TIMEOUT_SECONDS = 15 * 60.0
 STOPPED = ("needs-changes", "rejected", "failed", "expired", "abandoned")
@@ -49,11 +48,8 @@ def _sha256(path: Path) -> str:
 
 
 def _package_files(folder: Path) -> list[Path]:
-    return sorted(
-        p
-        for p in folder.rglob("*")
-        if p.is_file() and p.relative_to(folder).parts[0] not in NOT_PACKAGE
-    )
+    """The contract's walk: no `_build/`, no hidden file or folder, no symlink."""
+    return [folder / path for path in package_files(folder)[0]]
 
 
 def file_list(folder: Path) -> list[dict[str, Any]]:

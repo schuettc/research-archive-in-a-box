@@ -16,7 +16,7 @@ function archive(
       publisher: "P",
       infrastructure: {
         alertEmail: "a@example.org",
-        stages: [{ name: "prod" }, { name: "dev" }],
+        stages: [{ name: "prod" }, { name: "dev", keepData: false }],
         modules,
       },
     },
@@ -92,7 +92,7 @@ test("the derived bucket's CloudFront logs/ expire after 90 days, and nothing el
   ]);
 });
 
-test("prod buckets are retained and a dev stage's are deleted with their objects", () => {
+test("a stage that keeps its data retains its buckets; a stage with keepData: false deletes them with their objects", () => {
   const prod = archive("prod").template;
   const dev = archive("dev").template;
 
@@ -158,7 +158,7 @@ test("the staging bucket lets the site's origin PUT uploads and GET reports and 
   expect(create).not.toContain("localhost");
 });
 
-test("a non-prod stage's staging bucket also allows the local web app", () => {
+test("the staging bucket of a stage with keepData: false also allows the local web app", () => {
   const { create } = stagingCors("dev");
 
   expect(create).toContain('\\"http://localhost:5199\\"');

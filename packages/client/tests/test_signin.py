@@ -85,8 +85,20 @@ def test_a_posted_form_with_the_right_state_returns_the_tokens() -> None:
 
     tokens = sign_in(SITE, open_browser=open_browser, port=0)
 
-    assert tokens == Tokens(access_token="access", id_token="id", expires_at=tokens.expires_at)
+    assert tokens == Tokens(
+        access_token="access", id_token="id", expires_at=tokens.expires_at, site=SITE.site
+    )
     assert before + 3600 <= tokens.expires_at <= time.time() + 3600
+
+
+def test_the_tokens_record_the_site_that_issued_them() -> None:
+    open_browser, _ = browser(handed_back)
+
+    tokens = sign_in(
+        AuthConfig(site="https://archive.example.org/"), open_browser=open_browser, port=0
+    )
+
+    assert tokens.site == "https://archive.example.org"
 
 
 def test_the_browser_opens_the_archives_own_sign_in_page_with_the_port_and_state() -> None:

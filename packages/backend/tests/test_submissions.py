@@ -312,6 +312,36 @@ def test_create_refuses_a_bad_file(world: World, file: dict[str, Any]) -> None:
     assert world.submissions.items == {}
 
 
+@pytest.mark.parametrize("path", [".DS_Store", "data/.DS_Store", ".git/config"])
+def test_create_refuses_a_hidden_path_and_says_why(world: World, path: str) -> None:
+    file = {"path": path, "size": 4, "sha256": DIGEST}
+    status, body = world.call("POST", "/api/submissions", "alice", "contributor", {"files": [file]})
+
+    assert status == 400, body
+    assert body["error"] == (
+        f"hidden path: {path!r}; a package never holds a file or folder whose name "
+        "starts with a dot"
+    )
+    assert world.submissions.items == {}
+
+
+def test_uploads_refuses_a_hidden_path(world: World) -> None:
+    sid = world.create("alice")
+    world.s3.presigned.clear()
+    files = [{"path": "data/.DS_Store", "size": 4, "sha256": DIGEST}]
+
+    status, body = world.call(
+        "POST", "/api/submissions/{id}/uploads", "alice", "contributor", {"files": files}, sid=sid
+    )
+
+    assert status == 400, body
+    assert body["error"] == (
+        "hidden path: 'data/.DS_Store'; a package never holds a file or folder whose name "
+        "starts with a dot"
+    )
+    assert world.s3.presigned == []
+
+
 def _publish(world: World, dataset_id: str, submitter: str) -> None:
     # The catalog's dataset item carries no submitter; ownership is a published submission.
     world.catalog["catalog-b"].items[(f"DATASET#{dataset_id}", "META")] = {

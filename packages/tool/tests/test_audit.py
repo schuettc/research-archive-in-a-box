@@ -30,6 +30,15 @@ def test_find_packages_skips_build_and_node_modules(tmp_path: Path) -> None:
     assert find_packages([tmp_path]) == [tmp_path / "a", tmp_path / "b" / "c"]
 
 
+def test_find_packages_skips_hidden_folders_below_the_ones_given(tmp_path: Path) -> None:
+    for folder in ["a", ".git/x", "b/.venv/pkg", ".work/c"]:
+        (tmp_path / folder).mkdir(parents=True)
+        (tmp_path / folder / "datapackage.json").write_text("{}", encoding="utf-8")
+
+    assert find_packages([tmp_path]) == [tmp_path / "a"]
+    assert find_packages([tmp_path / ".work"]) == [tmp_path / ".work" / "c"]
+
+
 def test_audit_ranks_unreadable_first_then_by_errors_then_by_score(archive: Path) -> None:
     rows = audit([archive])
 
