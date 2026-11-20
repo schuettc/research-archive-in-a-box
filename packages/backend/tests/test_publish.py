@@ -173,7 +173,9 @@ class FakeS3:
         first, last = (int(n) for n in CopySourceRange.removeprefix("bytes=").split("-"))
         body = self.objects[(CopySource["Bucket"], CopySource["Key"])][first : last + 1]
         self.uploads[UploadId]["parts"][PartNumber] = body
-        self.part_copies.append({"CopySource": CopySource, "Key": extra["Key"]})
+        self.part_copies.append(
+            {"CopySource": CopySource, "Key": extra["Key"], "Bucket": extra["Bucket"]}
+        )
         return {"CopyPartResult": {"ETag": f"etag-{PartNumber}"}}
 
     def complete_multipart_upload(self, *, UploadId: str, **_: Any) -> dict[str, Any]:
@@ -466,18 +468,28 @@ class World:
         target: dict[str, Any] = ingest._version(self.clients, ENV, sid)(None)  # type: ignore[arg-type]
         return target
 
-    def staged(self, sid: str) -> tuple[dict[str, Any], dict[str, Any]]:
-        """The version, fill, copy and zips steps: the publish as it stands before the move."""
-        target = self.version(sid)
+    def fill(self, sid: str, target: dict[str, Any]) -> dict[str, Any]:
+        """The fill step alone."""
         filled: dict[str, Any] = ingest._fill(self.clients, ENV, sid, target)(None)  # type: ignore[arg-type]
-        ingest._copy(self.clients, ENV, sid, target, filled)(None)  # type: ignore[arg-type]
-        ingest._zips(self.clients, ENV, ingest._publishing(target))(None)  # type: ignore[arg-type]
+        return filled
+
+    def zips(self, sid: str) -> int:
+        """The zips step alone, as the publish runs it: on the held files, in the staging
+        bucket."""
+        written: int = ingest._held_zips(self.clients, ENV, sid)(None)  # type: ignore[arg-type]
+        return written
+
+    def staged(self, sid: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        """The version, fill and zips steps: the publish as it stands before the copy."""
+        target = self.version(sid)
+        filled = self.fill(sid, target)
+        self.zips(sid)
         return target, filled
 
-    def move(self, target: dict[str, Any], filled: dict[str, Any]) -> int:
-        """The move step alone."""
-        moved: int = ingest._move(self.clients, ENV, target, filled)(None)  # type: ignore[arg-type]
-        return moved
+    def copy(self, sid: str, target: dict[str, Any], filled: dict[str, Any]) -> int:
+        """The copy step alone."""
+        copied: int = ingest._copy(self.clients, ENV, sid, target, filled)(None)  # type: ignore[arg-type]
+        return copied
 
     def fail(self, sid: str, error: str) -> None:
         """The fail step alone, as `run` calls it when a step has failed for good."""
@@ -609,23 +621,28 @@ def test_every_file_is_copied_by_s3_and_checked_against_checksums_sha256(world: 
 
     world.publish()
 
-    copies = [c for c in world.s3.copies if c["CopySource"]["Bucket"] == STAGING]
-    assert sorted(c["Key"] for c in copies) == sorted(
-        "publishing/stream/1/" + p for p in _package()
-    )
+    made_all = [c for c in world.s3.copies if c["Bucket"] == ARCHIVE]
+    assert sorted(c["Key"] for c in made_all) == _published_keys("open/stream/1/")
+    copies = [c for c in made_all if "/_zips/" not in c["Key"]]
     for made in copies:
-        assert made["Bucket"] == ARCHIVE
-        path = made["Key"].removeprefix("publishing/stream/1/")
+        path = made["Key"].removeprefix("open/stream/1/")
         assert made["CopySource"] == {"Bucket": STAGING, "Key": f"held/{SID}/{path}"}
         assert made["ChecksumAlgorithm"] == "SHA256"
         assert (made["MetadataDirective"], made["TaggingDirective"]) == ("REPLACE", "REPLACE")
         assert "Tagging" not in made
-    assert copies[-1]["Key"] == "publishing/stream/1/datapackage.json"
+    # The zips come from the held copy too, each with the metadata it was written with.
+    for made in (c for c in made_all if "/_zips/" in c["Key"]):
+        path = made["Key"].removeprefix("open/stream/1/")
+        assert made["CopySource"] == {"Bucket": STAGING, "Key": f"held/{SID}/.zips/{path}"}
+        assert made["ChecksumAlgorithm"] == "SHA256"
+        assert "MetadataDirective" not in made and made["TaggingDirective"] == "REPLACE"
+    # The manifest is the last thing to arrive, after every file and every zip.
+    assert made_all[-1]["Key"] == "open/stream/1/datapackage.json"
     kinds = {c["Key"].rsplit("/", 1)[-1]: c.get("ContentType") for c in copies}
     assert (kinds["logger.csv"], kinds["datapackage.json"]) == ("text/csv", "application/json")
-    # Nothing but the zips goes to the archive by a PUT, and no held data file is read.
-    assert all("/_zips/" in p["Key"] for p in world.s3.puts if p["Bucket"] == ARCHIVE)
-    assert (STAGING, f"held/{SID}/data/logger.csv") not in world.s3.gets
+    # Nothing goes to the archive by a PUT, and nothing is ever deleted there.
+    assert [p["Key"] for p in world.s3.puts if p["Bucket"] == ARCHIVE] == []
+    assert world.s3.deleted == []
 
 
 def test_a_copy_that_differs_from_its_checksum_line_stops_before_the_manifest(
@@ -638,8 +655,10 @@ def test_a_copy_that_differs_from_its_checksum_line_stops_before_the_manifest(
         world.publish()
 
     assert [k for k in world.s3.keys(ARCHIVE) if k.endswith("/datapackage.json")] == []
-    assert world.s3.keys(ARCHIVE, "open/") == []
     assert "currentVersion" not in world.table()[("DATASET#stream", "META")]
+    # The failure handler removes what the copy had put there before it stopped.
+    world.fail(SID, "copy differs")
+    assert world.s3.keys(ARCHIVE) == []
 
 
 def test_the_published_version_validates(world: World, tmp_path: Path) -> None:
@@ -836,9 +855,8 @@ def test_the_zips_are_written_before_the_version_goes_live(
 
     context = world.publish()
 
-    assert context.names[:7] == [
-        f"publish-1-{part}"
-        for part in ("version", "fill", "copy", "zips", "move", "catalog", "page")
+    assert context.names[:6] == [
+        f"publish-1-{part}" for part in ("version", "fill", "zips", "copy", "catalog", "page")
     ]
     assert live == [False]
     root = "restricted/secret/1/"
@@ -863,6 +881,7 @@ def test_a_zip_failure_leaves_readers_on_the_version_before(
 ) -> None:
     world.hold("sub-a", _package(), datasetId="stream")
     world.publish("sub-a")
+    first = world.s3.keys(ARCHIVE)
     world.hold("sub-b", _package(), datasetId="stream", newVersion=True)
 
     def refuse(*args: Any, **kwargs: Any) -> list[str]:
@@ -872,10 +891,8 @@ def test_a_zip_failure_leaves_readers_on_the_version_before(
 
     with pytest.raises(RuntimeError, match="zip refused"):
         world.publish("sub-b")
-    # The copy ran before the zips: its files are there for the failure handler to remove, in
-    # the private folder and nowhere a reader or the reindex looks.
-    assert "publishing/stream/2/datapackage.json" in world.s3.keys(ARCHIVE)
-    assert world.s3.keys(ARCHIVE, "open/stream/2/") == []
+    # The zips come before the copy: nothing of version 2 is in the archive bucket at all.
+    assert world.s3.keys(ARCHIVE) == first
     world.table()[("DATASET#stream", "V#000002")] = {
         "PK": {"S": "DATASET#stream"},
         "SK": {"S": "V#000002"},
@@ -885,9 +902,8 @@ def test_a_zip_failure_leaves_readers_on_the_version_before(
     meta = world.table()[("DATASET#stream", "META")]
     assert meta["currentVersion"] == {"N": "1"} and "claimedBy" not in meta
     assert [sk for pk, sk in world.table() if sk.startswith("V#000002")] == []
-    for prefix in ("open", "restricted", "publishing"):
-        assert world.s3.keys(ARCHIVE, f"{prefix}/stream/2/") == []
-    assert world.s3.keys(ARCHIVE, "publishing/") == []
+    assert world.s3.keys(ARCHIVE) == first
+    assert world.s3.deleted == []
     status, body = world.read("/api/datasets/stream")
     assert (status, body["currentVersion"]) == (200, 1)
 
@@ -956,7 +972,7 @@ def test_without_the_doi_module_the_steps_are_exactly_todays(world: World) -> No
 
     assert context.names == [
         f"publish-1-{part}"
-        for part in ("version", "fill", "copy", "zips", "move", "catalog", "page")
+        for part in ("version", "fill", "zips", "copy", "catalog", "page")
         + ("catalog-file", "sitemap", "finish")
     ]
     assert world.datacite.calls == []
@@ -1103,13 +1119,7 @@ def test_a_publish_that_fails_after_the_claim_leaves_the_live_dataset_as_it_was(
     world.publish("sub-a")
     before = copy.deepcopy(world.table())
     world.hold("sub-b", _package(), datasetId="stream", newVersion=True)
-    world.s3.fail_copy = lambda bucket, key: (
-        (bucket, key)
-        == (
-            ARCHIVE,
-            "publishing/stream/2/README.md",
-        )
-    )
+    world.s3.fail_copy = lambda bucket, key: (bucket, key) == (ARCHIVE, "open/stream/2/README.md")
 
     with pytest.raises(RuntimeError):
         world.publish("sub-b")
@@ -1272,7 +1282,6 @@ def test_a_failure_of_a_submission_that_holds_no_claim_deletes_nothing(world: Wo
     _two_versions_claimed(world)
     world.hold("sub-c", _package(), datasetId="stream", newVersion=True)
     world.s3.objects[(ARCHIVE, "open/stream/2/datapackage.json")] = b"{}"
-    world.s3.objects[(ARCHIVE, "publishing/stream/2/datapackage.json")] = b"{}"
     table, stored = copy.deepcopy(world.table()), world.s3.keys(ARCHIVE)
 
     world.fail("sub-c", "boom")
@@ -1344,42 +1353,44 @@ def test_a_first_version_claim_left_by_a_failed_submission_is_taken_over(world: 
     assert world.read("/api/datasets/stream")[1]["currentVersion"] == 1
 
 
-def _of_version(world: World, version: int, dataset_id: str = "stream") -> dict[str, list[str]]:
-    """The archive bucket's current objects for one version, by the top-level folder they are in."""
-    return {
-        prefix: world.s3.keys(ARCHIVE, f"{prefix}/{dataset_id}/{version}/")
-        for prefix in ("open", "restricted", "publishing")
-    }
+def _of_version(world: World, version: int, dataset_id: str = "stream") -> list[str]:
+    """Every object the archive bucket holds for one version, under any top-level folder."""
+    return [k for k in world.s3.keys(ARCHIVE) if f"/{dataset_id}/{version}/" in k]
+
+
+ZIPPED = ("_zips/all/package.zip", "_zips/depth.zip", "_zips/sites.zip")
 
 
 def _published_keys(root: str) -> list[str]:
-    zipped = ("_zips/all/package.zip", "_zips/depth.zip", "_zips/sites.zip")
-    return sorted(root + path for path in (*_package(), *zipped))
+    return sorted(root + path for path in (*_package(), *ZIPPED))
 
 
-def test_before_the_catalog_step_nothing_of_the_version_is_at_a_public_address(
+def test_before_the_copy_step_the_archive_bucket_holds_nothing_of_the_version(
     world: World,
 ) -> None:
     world.hold("sub-a", _package(), datasetId="stream")
     world.publish("sub-a")
+    first = world.s3.keys(ARCHIVE)
     world.hold("sub-b", _package(), datasetId="stream", newVersion=True)
 
     world.staged("sub-b")
 
-    found = _of_version(world, 2)
-    assert (found["open"], found["restricted"]) == ([], [])
-    assert found["publishing"] == _published_keys("publishing/stream/2/")
+    assert _of_version(world, 2) == []
+    assert world.s3.keys(ARCHIVE) == first
     assert reindex.manifest_keys(cast(Any, world.s3), ARCHIVE) == ["open/stream/1/datapackage.json"]
+    # The zips are built: beside the held files, in the staging bucket.
+    assert world.s3.keys(STAGING, "held/sub-b/.zips/") == [
+        "held/sub-b/.zips/" + path for path in ZIPPED
+    ]
 
 
-def test_a_restricted_version_is_staged_in_the_same_private_folder(world: World) -> None:
+def test_a_restricted_version_is_built_in_the_staging_bucket_too(world: World) -> None:
     world.hold(SID, _package(**{"archive:access": "restricted"}), datasetId="secret")
 
     world.staged(SID)
 
-    assert world.s3.keys(ARCHIVE, "restricted/") == []
+    assert world.s3.keys(ARCHIVE) == []
     assert reindex.manifest_keys(cast(Any, world.s3), ARCHIVE) == []
-    assert world.s3.keys(ARCHIVE, "publishing/secret/1/") != []
 
 
 def test_a_complete_publish_leaves_the_files_and_zips_at_their_public_keys_alone(
@@ -1390,115 +1401,109 @@ def test_a_complete_publish_leaves_the_files_and_zips_at_their_public_keys_alone
     world.publish()
 
     assert world.s3.keys(ARCHIVE) == _published_keys("open/stream/1/")
-    # The moved zips keep the mark that says what they hold, and the files their type.
+    assert [k for b, k in world.s3.objects if "publishing/" in k] == []
+    # The copied zips keep the mark that says what they hold, and the files their type.
     manifest = json.loads(world.s3.objects[(ARCHIVE, "open/stream/1/datapackage.json")])
     assert zips.write_zips(cast(Any, world.s3), ARCHIVE, "open/stream/1/", manifest) == []
+    for path in ZIPPED:
+        kept = world.s3.kept[(ARCHIVE, "open/stream/1/" + path)]
+        assert re.fullmatch(r"[0-9a-f]{64}", kept["Metadata"]["members-sha256"])
+        assert kept["ContentType"] == "application/zip"
     head = world.s3.head_object(Bucket=ARCHIVE, Key="open/stream/1/data/logger.csv")
     assert head["ContentType"] == "text/csv"
+    # The staging bucket keeps nothing of the submission, zips included.
+    assert world.s3.keys(STAGING, f"held/{SID}/") == []
 
 
-def test_the_move_copies_inside_s3_checks_each_copy_and_takes_the_manifest_last(
-    world: World,
-) -> None:
-    world.hold(SID, _package(), datasetId="stream")
-
-    world.publish()
-
-    moves = [c for c in world.s3.copies if c["CopySource"]["Bucket"] == ARCHIVE]
-    assert sorted(c["Key"] for c in moves) == _published_keys("open/stream/1/")
-    for made in moves:
-        path = made["Key"].removeprefix("open/stream/1/")
-        assert made["CopySource"] == {"Bucket": ARCHIVE, "Key": "publishing/stream/1/" + path}
-        assert made["ChecksumAlgorithm"] == "SHA256"
-        assert "MetadataDirective" not in made
-    assert moves[-1]["Key"] == "open/stream/1/datapackage.json"
-    assert sorted(world.s3.deleted) == [
-        (ARCHIVE, key) for key in _published_keys("publishing/stream/1/")
-    ]
-
-
-def test_a_move_whose_copy_differs_from_its_source_keeps_the_private_copy(world: World) -> None:
+def test_the_zips_under_held_are_not_among_the_submissions_files(world: World) -> None:
     world.hold(SID, _package(), datasetId="stream")
     target, filled = world.staged(SID)
-    world.s3.corrupt = {"open/stream/1/data/logger.csv"}
+    assert world.s3.keys(STAGING, f"held/{SID}/.zips/") != []
 
-    with pytest.raises(ingest.CopyMismatch, match="data/logger.csv"):
-        world.move(target, filled)
+    # The fill step lists held/<id>/; run again with the zips there, it lists the same files.
+    again = world.fill(SID, target)
 
-    assert "publishing/stream/1/data/logger.csv" in world.s3.keys(ARCHIVE)
-    assert "open/stream/1/datapackage.json" not in world.s3.keys(ARCHIVE)
+    assert filled["files"] == again["files"] == sorted(_package())
 
 
-def test_a_move_run_again_after_a_partial_one_finishes_it(world: World) -> None:
+def test_the_zips_step_run_again_writes_no_zip_it_already_built(world: World) -> None:
+    world.hold(SID, _package(), datasetId="stream")
+    world.staged(SID)
+    puts = len(world.s3.puts)
+
+    assert world.zips(SID) == 0
+
+    assert len(world.s3.puts) == puts
+
+
+def test_a_zip_that_arrives_with_other_bytes_stops_before_the_manifest(world: World) -> None:
+    world.hold(SID, _package(), datasetId="stream")
+    target, filled = world.staged(SID)
+    world.s3.corrupt = {"_zips/depth.zip"}
+
+    with pytest.raises(ingest.CopyMismatch, match="_zips/depth.zip"):
+        world.copy(SID, target, filled)
+
+    assert reindex.manifest_keys(cast(Any, world.s3), ARCHIVE) == []
+
+
+def test_a_copy_run_again_after_a_partial_one_finishes_it(world: World) -> None:
     world.hold(SID, _package(), datasetId="stream")
     target, filled = world.staged(SID)
     world.s3.fail_copy = lambda bucket, key: key == "open/stream/1/data/logger.csv"
     with pytest.raises(RuntimeError, match="refused"):
-        world.move(target, filled)
-    found = _of_version(world, 1)
-    assert found["open"] and found["publishing"]  # part-way: some moved, some not
+        world.copy(SID, target, filled)
+    assert _of_version(world, 1) != []  # part-way: some copied
     assert reindex.manifest_keys(cast(Any, world.s3), ARCHIVE) == []
     world.s3.fail_copy = lambda bucket, key: False
 
-    world.move(target, filled)
+    world.copy(SID, target, filled)
 
     assert world.s3.keys(ARCHIVE) == _published_keys("open/stream/1/")
+    assert world.s3.copies[-1]["Key"] == "open/stream/1/datapackage.json"
 
 
-def test_a_move_run_again_after_a_complete_one_changes_nothing(world: World) -> None:
+def test_a_copy_run_again_after_a_complete_one_ends_in_the_same_state(world: World) -> None:
     world.hold(SID, _package(), datasetId="stream")
     target, filled = world.staged(SID)
-    world.move(target, filled)
-    stored, copies = dict(world.s3.objects), len(world.s3.copies)
-    deleted = len(world.s3.deleted)
+    copied = world.copy(SID, target, filled)
+    stored, kept = dict(world.s3.objects), copy.deepcopy(world.s3.kept)
 
-    assert world.move(target, filled) == 0
+    assert world.copy(SID, target, filled) == copied == len(_published_keys(""))
 
-    assert world.s3.objects == stored
-    assert (len(world.s3.copies), len(world.s3.deleted)) == (copies, deleted)
-
-
-def test_a_move_interrupted_between_a_copy_and_its_delete_is_finished_by_the_next(
-    world: World,
-) -> None:
-    world.hold(SID, _package(), datasetId="stream")
-    target, filled = world.staged(SID)
-    path = "data/logger.csv"
-    # As the step leaves it when it stops after the copy and before the private copy's delete.
-    world.s3.copy_object(
-        Bucket=ARCHIVE,
-        Key="open/stream/1/" + path,
-        CopySource={"Bucket": ARCHIVE, "Key": "publishing/stream/1/" + path},
-    )
-
-    world.move(target, filled)
-
-    assert world.s3.keys(ARCHIVE) == _published_keys("open/stream/1/")
+    assert (world.s3.objects, world.s3.kept) == (stored, kept)
+    assert world.s3.copies[-1]["Key"] == "open/stream/1/datapackage.json"
+    assert world.s3.deleted == []
 
 
-def test_a_file_over_one_request_is_moved_in_parts(
+def test_a_zip_over_one_request_is_copied_in_parts_from_the_staging_bucket(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     world.hold(SID, _package(), datasetId="stream")
     target, filled = world.staged(SID)
-    key = "publishing/stream/1/_zips/all/package.zip"
+    key = f"held/{SID}/.zips/_zips/all/package.zip"
     # The package's zip is the largest thing a version holds; here it alone is over one request.
-    world.s3.objects[(ARCHIVE, key)] += bytes(200_000)
-    body, mark = world.s3.objects[(ARCHIVE, key)], world.s3.kept[(ARCHIVE, key)]["Metadata"]
+    world.s3.objects[(STAGING, key)] += bytes(200_000)
+    body, mark = world.s3.objects[(STAGING, key)], world.s3.kept[(STAGING, key)]["Metadata"]
     monkeypatch.setattr(parts, "ONE_REQUEST_MAX", len(body) - 1)
     monkeypatch.setattr(parts, "PART", len(body) // 2 + 1)
 
-    world.move(target, filled)
+    world.copy(SID, target, filled)
 
-    moved = "open/stream/1/_zips/all/package.zip"
-    assert world.s3.objects[(ARCHIVE, moved)] == body
-    assert world.s3.kept[(ARCHIVE, moved)]["Metadata"] == mark
-    assert [c["Key"] for c in world.s3.part_copies] == [moved, moved]
-    assert moved not in [c["Key"] for c in world.s3.copies]
-    assert world.s3.keys(ARCHIVE, "publishing/") == []
+    copied = "open/stream/1/_zips/all/package.zip"
+    assert world.s3.objects[(ARCHIVE, copied)] == body
+    assert world.s3.kept[(ARCHIVE, copied)]["Metadata"] == mark
+    assert world.s3.kept[(ARCHIVE, copied)]["ContentType"] == "application/zip"
+    assert (
+        world.s3.part_copies
+        == [{"CopySource": {"Bucket": STAGING, "Key": key}, "Key": copied, "Bucket": ARCHIVE}] * 2
+    )
+    assert copied not in [c["Key"] for c in world.s3.copies]
+    assert world.s3.keys(ARCHIVE) == _published_keys("open/stream/1/")
+    assert world.s3.copies[-1]["Key"] == "open/stream/1/datapackage.json"
 
 
-def test_a_takeover_clears_the_private_folder_the_failed_publish_left(world: World) -> None:
+def test_a_takeover_clears_the_public_folder_a_copy_that_died_part_way_left(world: World) -> None:
     world.hold("sub-a", _package(), datasetId="stream")
     world.publish("sub-a")
     left = _package()
@@ -1506,12 +1511,33 @@ def test_a_takeover_clears_the_private_folder_the_failed_publish_left(world: Wor
     extra = hashlib.sha256(left["data/extra.csv"]).hexdigest()
     left["checksums.sha256"] += f"{extra}  data/extra.csv\n".encode()
     world.hold("sub-b", left, datasetId="stream", newVersion=True)
-    world.staged("sub-b")
-    assert "publishing/stream/2/data/extra.csv" in world.s3.keys(ARCHIVE)
+    target, filled = world.staged("sub-b")
+    world.s3.fail_copy = lambda bucket, key: key.endswith("/datapackage.json")
+    with pytest.raises(RuntimeError, match="refused"):
+        world.copy("sub-b", target, filled)
+    world.s3.fail_copy = lambda bucket, key: False
+    assert "open/stream/2/data/extra.csv" in world.s3.keys(ARCHIVE)
     world.submissions.items["sub-b"]["status"] = "failed"  # failed, and its release never ran
     world.hold("sub-c", _package(), datasetId="stream", newVersion=True)
 
     world.publish("sub-c")
 
     assert world.s3.keys(ARCHIVE, "open/stream/2/") == _published_keys("open/stream/2/")
-    assert world.s3.keys(ARCHIVE, "publishing/") == []
+
+
+def test_a_failed_publish_leaves_its_held_files_and_zips_and_nothing_in_the_archive(
+    world: World,
+) -> None:
+    world.hold(SID, _package(), datasetId="stream")
+    target, filled = world.staged(SID)
+    world.s3.fail_copy = lambda bucket, key: key.endswith("/README.md")
+    with pytest.raises(RuntimeError, match="refused"):
+        world.copy(SID, target, filled)
+
+    world.fail(SID, "copy refused")
+
+    assert world.s3.keys(ARCHIVE) == []
+    # What a failure leaves of held files stays as it was before the zips were kept there.
+    assert world.s3.keys(STAGING, f"held/{SID}/") == sorted(
+        f"held/{SID}/{path}" for path in (*_package(), *(".zips/" + z for z in ZIPPED))
+    )

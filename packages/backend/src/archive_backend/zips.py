@@ -1,7 +1,9 @@
 """The version's zips: `all/package.zip` and one `<resource>.zip` per multi-file resource.
 
 They sit beside the version, at `<open|restricted>/<datasetId>/<version>/_zips/`, and are
-written by the zips step at publish and by the reindex. The version's zip is in its own
+written by the zips step at publish and by the reindex. At publish they are built before the
+version is in the archive bucket at all: from the held files in the staging bucket, into a
+folder beside them, and the copy step puts them at their keys. The version's zip is in its own
 folder because a resource name may be any string without a `/` (the contract sets no
 pattern), so `_zips/<resource>.zip` can never be `_zips/all/package.zip`, even for a resource
 named `package`; it still downloads as `package.zip`. `package.zip` holds every file
@@ -140,9 +142,13 @@ def _build(s3: S3, bucket: str, root: str, members: tuple[str, ...], into: IO[by
                     entry.write(chunk)
 
 
-def write_zips(s3: S3, bucket: str, root: str, manifest: dict[str, Any]) -> list[str]:
+def write_zips(
+    s3: S3, bucket: str, root: str, manifest: dict[str, Any], into: str | None = None
+) -> list[str]:
     """Write the zips of the version at `root` (`<prefix>/<id>/<version>/`) whose members
-    changed, and return the keys written. A version with no checksums.sha256 gets none."""
+    changed, and return the keys written. A version with no checksums.sha256 gets none. The
+    zips go under `into` when it is given (a folder to keep them apart from the version's own
+    files) and under `root` otherwise."""
     try:
         text = s3.get_object(Bucket=bucket, Key=root + CHECKSUMS)["Body"].read()
     except ClientError as error:
@@ -153,7 +159,7 @@ def write_zips(s3: S3, bucket: str, root: str, manifest: dict[str, Any]) -> list
     hashes = {**listed, CHECKSUMS: hashlib.sha256(text).hexdigest()}
     written: list[str] = []
     for item in plan(manifest, listed):
-        key = root + item.path
+        key = (root if into is None else into) + item.path
         mark = fingerprint(item.members, hashes)
         if _current(s3, bucket, key) == mark:
             continue

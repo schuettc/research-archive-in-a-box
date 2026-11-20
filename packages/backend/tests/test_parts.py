@@ -23,12 +23,15 @@ class FakeS3:
         self.started: list[dict[str, Any]] = []
         self.sent: list[dict[str, Any]] = []
         self.ranges: list[str] = []
+        self.sources: list[dict[str, str]] = []
+        self.headed: list[tuple[str, str]] = []
         self.completed: list[dict[str, Any]] = []
         self.aborted: list[dict[str, Any]] = []
         self.fail_part: int | None = None
         self._parts: dict[int, bytes] = {}
 
     def head_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:
+        self.headed.append((Bucket, Key))
         return self.heads[Key]
 
     def create_multipart_upload(self, **kwargs: Any) -> dict[str, Any]:
@@ -51,6 +54,7 @@ class FakeS3:
     ) -> dict[str, Any]:
         assert kwargs["UploadId"] == "u-1"
         self.ranges.append(CopySourceRange)
+        self.sources.append(CopySource)
         first, last = (int(n) for n in CopySourceRange.removeprefix("bytes=").split("-"))
         data = self.objects[CopySource["Key"]][first : last + 1]
         return {"CopyPartResult": self._part(PartNumber, data)}
@@ -141,3 +145,22 @@ def test_copy_carries_the_sources_type_and_metadata(monkeypatch: pytest.MonkeyPa
     )
     assert s3.started[0]["Key"] == "to.zip"
     assert s3.aborted == []
+    assert s3.sources == [{"Bucket": BUCKET, "Key": "from.zip"}] * 3
+
+
+def test_copy_reads_from_another_bucket_when_one_is_named(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(parts, "PART", 4)
+    s3 = FakeS3()
+    s3.objects["from.zip"] = b"0123456789"
+    s3.heads["from.zip"] = {"ContentType": "application/zip", "Metadata": {"members-sha256": "abc"}}
+
+    parts.copy(cast(parts.S3, s3), BUCKET, "from.zip", "to.zip", 10, source_bucket="staging")
+
+    assert s3.headed == [("staging", "from.zip")]
+    assert s3.sources == [{"Bucket": "staging", "Key": "from.zip"}] * 3
+    assert (s3.started[0]["Bucket"], s3.started[0]["Metadata"]) == (
+        BUCKET,
+        {"members-sha256": "abc"},
+    )
+    assert s3.objects["to.zip"] == b"0123456789"
+    assert [done["Bucket"] for done in s3.completed] == [BUCKET]

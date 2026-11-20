@@ -113,7 +113,11 @@ class FakeS3:
 
     def head_object(self, *, Bucket: str, Key: str, **_: Any) -> dict[str, Any]:
         if Bucket == STAGING and Key in self.objects:
-            return {"ContentLength": self.sizes.get(Key, len(self.objects[Key]))}
+            return {
+                "Metadata": {},
+                "ContentLength": self.sizes.get(Key, len(self.objects[Key])),
+                "ChecksumSHA256": self._sha256(self.objects[Key]),
+            }
         if (Bucket, Key) not in self.published:
             raise ClientError({"Error": {"Code": "404"}}, "HeadObject")
         body = self.published[(Bucket, Key)]
@@ -129,12 +133,10 @@ class FakeS3:
         if self.fail_copy:
             raise RuntimeError("copy refused")
         if Bucket == ARCHIVE:
-            # The publish's copy into the archive bucket and its move within it, each of which
-            # S3 answers with the SHA-256 of what it stored.
-            if CopySource["Bucket"] == ARCHIVE:
-                body = self.published[(ARCHIVE, CopySource["Key"])]
-            else:
-                body = self.objects[CopySource["Key"]]
+            # The publish's copy into the archive bucket, which S3 answers with the SHA-256 of
+            # what it stored.
+            assert CopySource["Bucket"] == STAGING
+            body = self.objects[CopySource["Key"]]
             self.published[(Bucket, Key)] = body
             return {"CopyObjectResult": {"ChecksumSHA256": self._sha256(body)}}
         assert CopySource["Bucket"] == STAGING
@@ -161,11 +163,6 @@ class FakeS3:
                 self.objects.pop(entry["Key"], None)
             else:
                 self.published.pop((Bucket, entry["Key"]), None)
-        return {}
-
-    def delete_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:
-        assert Bucket == ARCHIVE
-        del self.published[(Bucket, Key)]
         return {}
 
     def keys(self, prefix: str) -> list[str]:
@@ -561,6 +558,32 @@ def test_request_changes_then_approve_publishes_round_two(world: World) -> None:
     assert [t for _, t in context.timeouts][1] == 30 * DAY
     assert f"reports/{SID}/2.json" in world.s3.objects
     assert world.item["approvals"] == ["dave"]
+
+
+def test_zips_left_under_held_are_no_part_of_the_next_round(world: World) -> None:
+    left = f"held/{SID}/.zips/_zips/all/package.zip"
+
+    def changes() -> dict[str, Any]:
+        # As a publish that built its zips leaves held/: a zip beside the held files, here one
+        # that alone weighs more than the archive takes.
+        world.s3.objects[left] = b"PK"
+        world.s3.sizes[left] = 20 * 1024**3
+        return _decision("request-changes", note="Add units")
+
+    def approve() -> dict[str, Any]:
+        # The round was checked and held without the zip: the hold step replaced held/ whole.
+        assert world.item["status"] == "in-review"
+        assert world.s3.keys(f"held/{SID}/") == sorted(f"held/{SID}/{p}" for p in _package())
+        # The fake keeps a size apart from its object; the zip this publish builds is its own.
+        del world.s3.sizes[left]
+        return _decision("approve", by="dave")
+
+    result, _ = world.run([changes, world.resubmit(2, _package()), approve])
+
+    assert result["status"] == "published"
+    checked = [e for e in world.reviews.events if e["type"] == "checked"]
+    assert [e["blocked"] for e in checked] == [False, False]
+    assert left not in world.s3.downloads
 
 
 def test_a_blocking_error_returns_the_round_without_review(world: World) -> None:

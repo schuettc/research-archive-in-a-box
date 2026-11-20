@@ -1,9 +1,10 @@
 """An object larger than one S3 request takes, written or copied as a multipart upload.
 
 One PUT and one CopyObject each take at most 5 GiB. `upload` sends a stream in parts, each with
-its own SHA-256, which S3 verifies; `copy` copies an object within a bucket by ranges. Either
-way the object's stored checksum is a composite of its parts' (`<base64>-<parts>`), not the
-SHA-256 of the whole object. An upload that fails is aborted, so its parts are not kept.
+its own SHA-256, which S3 verifies; `copy` copies an object by ranges, within a bucket or from
+another. Either way the object's stored checksum is a composite of its parts'
+(`<base64>-<parts>`), not the SHA-256 of the whole object. An upload that fails is aborted, so
+its parts are not kept.
 """
 
 from __future__ import annotations
@@ -68,10 +69,14 @@ def upload(
         raise
 
 
-def copy(s3: S3, bucket: str, source: str, target: str, size: int) -> None:
-    """Copy the `size` bytes of `source` to `target` in the same bucket, in `PART`-sized
-    ranges, with the source's content type and metadata."""
-    head = s3.head_object(Bucket=bucket, Key=source)
+def copy(
+    s3: S3, bucket: str, source: str, target: str, size: int, *, source_bucket: str | None = None
+) -> None:
+    """Copy the `size` bytes of `source` to `target` in `bucket`, in `PART`-sized ranges, with
+    the source's content type and metadata. The source is in the same bucket unless
+    `source_bucket` names another."""
+    source_bucket = source_bucket or bucket
+    head = s3.head_object(Bucket=source_bucket, Key=source)
     start: dict[str, Any] = {"Bucket": bucket, "Key": target, "ChecksumAlgorithm": "SHA256"}
     if head.get("ContentType"):
         start["ContentType"] = head["ContentType"]
@@ -87,7 +92,7 @@ def copy(s3: S3, bucket: str, source: str, target: str, size: int) -> None:
                 Key=target,
                 UploadId=upload_id,
                 PartNumber=number,
-                CopySource={"Bucket": bucket, "Key": source},
+                CopySource={"Bucket": source_bucket, "Key": source},
                 CopySourceRange=f"bytes={first}-{min(first + PART, size) - 1}",
             )["CopyPartResult"]
             part = {"PartNumber": number, "ETag": copied["ETag"]}

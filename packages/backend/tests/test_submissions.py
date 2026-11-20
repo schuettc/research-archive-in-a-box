@@ -727,6 +727,20 @@ def test_a_curator_gets_a_five_minute_link_to_each_held_file(world: World, statu
     ]
 
 
+def test_the_files_route_lists_no_zip_a_publish_built_under_held(world: World) -> None:
+    sid = _held(world, "publishing")
+    world.s3.objects[f"held/{sid}/.zips/_zips/all/package.zip"] = b"PK"
+
+    code, body = world.call("GET", "/api/submissions/{id}/files", "carol", "curator", sid=sid)
+
+    assert code == 200, body
+    assert [f["path"] for f in body["files"]] == ["data/a.csv", "README.md"]
+    assert [signed["Key"] for signed in world.s3.presigned] == [
+        f"held/{sid}/data/a.csv",
+        f"held/{sid}/README.md",
+    ]
+
+
 def test_the_files_route_is_refused_to_the_submitter_who_is_no_curator(world: World) -> None:
     sid = _held(world, "in-review")
 

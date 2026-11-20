@@ -221,3 +221,22 @@ def test_a_resource_named_package_keeps_its_own_zip_apart_from_download_all(s3: 
     assert "checksums.sha256" in whole.namelist()
     resource = zipfile.ZipFile(io.BytesIO(s3.objects[(BUCKET, ROOT + "_zips/package.zip")]))
     assert "checksums.sha256" not in resource.namelist()
+
+
+def test_zips_written_into_another_folder_are_built_from_the_files_at_the_root(s3: FakeS3) -> None:
+    into = ROOT + ".zips/"
+
+    written = zips.write_zips(_s3(s3), BUCKET, ROOT, _manifest(), into)
+
+    assert sorted(written) == [
+        into + "_zips/all/package.zip",
+        into + "_zips/depth.zip",
+        into + "_zips/sites.zip",
+    ]
+    assert [k for b, k in s3.objects if k.startswith(ROOT + "_zips/")] == []
+    with zipfile.ZipFile(io.BytesIO(s3.objects[(BUCKET, into + "_zips/sites.zip")])) as z:
+        assert z.namelist() != []
+        for name in z.namelist():
+            assert z.read(name) == s3.objects[(BUCKET, ROOT + name)]
+    # A second run finds each zip where the first put it, and writes none.
+    assert zips.write_zips(_s3(s3), BUCKET, ROOT, _manifest(), into) == []
