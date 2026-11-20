@@ -9,12 +9,12 @@ What a person needs depends on their role: a **reader** finds and downloads data
 | Who | Send them | What it covers |
 | --- | --- | --- |
 | A reader | [Using the archive: Reader](https://github.com/schuettc/research-archive-in-a-box/blob/main/docs/guide/using-the-archive.md#reader) | Searching, a dataset's page, citing, and what happens when the files aren't public |
-| A contributor | [Packages and cruise](https://github.com/schuettc/research-archive-in-a-box/blob/main/docs/guide/packages.md), then [Using the archive: Contributor](https://github.com/schuettc/research-archive-in-a-box/blob/main/docs/guide/using-the-archive.md#contributor) | Making a package and checking it with `cruise`, then submitting it and following it through review |
+| A contributor | [The Claude Code plugin](https://github.com/schuettc/research-archive-in-a-box/blob/main/README.md#use-the-claude-code-plugin) and [Packages and cruise](https://github.com/schuettc/research-archive-in-a-box/blob/main/docs/guide/packages.md), then [Using the archive: Contributor](https://github.com/schuettc/research-archive-in-a-box/blob/main/docs/guide/using-the-archive.md#contributor) | Checking, fixing and submitting a package through Claude Code; making a package and checking it with typed `cruise` commands; then submitting it in the web app and following it through review |
 | A curator | [Using the archive: Curator](https://github.com/schuettc/research-archive-in-a-box/blob/main/docs/guide/using-the-archive.md#curator), then [Curating published datasets](https://github.com/schuettc/research-archive-in-a-box/blob/main/docs/curating.md) | The review queue and deciding a submission, then corrections to published datasets |
 
 A reader needs nothing from you to browse and to download public files. A contributor or a curator needs an account with that role first: you give roles under **Settings › People**, as [People](using-the-archive.md#people) describes. A curator is emailed about waiting submissions only after you subscribe their address, as [The first admin](deploying.md#6--the-first-admin) explains.
 
-A contributor should check a package with your archive's own rules before uploading it, and for that they need your `archive.yaml`. It holds no password or key, so you can send them the file, or tell them the profiles it names. [Profiles and the archive's own rules](packages.md#profiles-and-the-archives-own-rules) shows both ways.
+A contributor should check a package with your archive's own rules before uploading it. Through the Claude Code plugin they need nothing more from you for that: your archive publishes the profiles and required fields from your `archive.yaml` at `/archive-checks.json`, and the plugin reads them when the contributor gives it your archive's address. If the plugin can't read them, it checks the `core` rules only and says so. A contributor who types `cruise` commands needs your `archive.yaml` instead. It holds no password or key, so you can send them the file, or tell them the profiles it names. [Profiles and the archive's own rules](packages.md#profiles-and-the-archives-own-rules) shows both ways.
 
 ## A welcome text for contributors
 
@@ -26,7 +26,14 @@ Welcome to <the archive's name>, at <the archive's address>.
 You have a contributor account, so you can submit datasets for review. A dataset is submitted as a package: a folder with your data files and a manifest, datapackage.json, that describes them. This guide shows how to make one from a CSV file:
 https://github.com/schuettc/research-archive-in-a-box/blob/main/docs/guide/packages.md
 
-cruise is the tool that checks a package on your own computer before you upload anything. It needs uv (https://docs.astral.sh/uv/). Install cruise with:
+If you use Claude Code, it can check and submit the package with you. It needs uv (https://docs.astral.sh/uv/). In Claude Code, install the cruise plugin with:
+
+/plugin marketplace add schuettc/research-archive-in-a-box
+/plugin install cruise@research-archive-in-a-box
+
+Then ask Claude Code to check and submit your package's folder, and give it <the archive's address> when it asks. It checks the package with this archive's rules, drafts fixes and writes only the ones you approve, and asks you again before it sends anything.
+
+Without Claude Code, cruise is the tool that checks a package on your own computer before you upload anything. It needs uv too. Install cruise with:
 
 uv tool install "git+https://github.com/schuettc/research-archive-in-a-box@v0.1.2#subdirectory=packages/tool"
 
@@ -40,7 +47,7 @@ https://github.com/schuettc/research-archive-in-a-box/blob/main/docs/guide/using
 Questions go to <your contact address>.
 ```
 
-If your archive's `archive.yaml` names a profile other than `core`, or required fields of its own, add a line telling contributors to check with those rules, such as `cruise diagnose --profile ecology <folder>`.
+If your archive's `archive.yaml` names a profile other than `core`, or required fields of its own, add a line to the part without Claude Code telling contributors to check with those rules, such as `cruise diagnose --profile ecology <folder>`. The plugin reads those rules from the archive itself, so its part needs no such line.
 
 ## Pointing at the guide from the archive itself
 
