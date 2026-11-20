@@ -8,6 +8,7 @@ import hashlib
 import json
 import re
 import urllib.parse
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -70,12 +71,20 @@ def _files(root: Path) -> list[dict[str, Any]]:
     return files
 
 
-def submit(session: Session, folder: str, submission: str | None = None) -> dict[str, Any]:
-    """Check the folder, upload every file in checksums.sha256 and send it to review.
+@dataclass(frozen=True)
+class Package:
+    """A package folder checked and ready to send: its files, their total size in bytes and
+    the archive it goes to."""
 
-    With no `submission`, a new submission; else the next round of that one. A failure part
-    way answers the plain error; nothing is retried.
-    """
+    root: Path
+    files: list[dict[str, Any]]
+    total: int
+    archive: str
+
+
+def prepare(session: Session, folder: str) -> Package:
+    """Check the folder and list its files with their sizes and SHA-256. Refuses on an error
+    finding or a package over the archive's limit. Sends nothing of the person's."""
     # The archive may have changed what it checks since connect; check what it checks now.
     limit = state.refresh_checks(session)
     findings = local.diagnose(session, folder)["findings"]
@@ -94,6 +103,16 @@ def submit(session: Session, folder: str, submission: str | None = None) -> dict
             f"The package's files total {total:,} bytes, more than the {limit // 1024**3} GiB "
             "this archive takes, so nothing was sent."
         )
+    return Package(root=root, files=files, total=total, archive=session.url())
+
+
+def send(session: Session, package: Package, submission: str | None = None) -> dict[str, Any]:
+    """Upload every file of a prepared package and send it to review.
+
+    With no `submission`, a new submission; else the next round of that one. A failure part
+    way answers the plain error; nothing is retried.
+    """
+    root, files = package.root, package.files
     archive = session.archive()
     if submission is None:
         # The manifest's id names the dataset: a published one gets its next version. An id
@@ -127,6 +146,11 @@ def submit(session: Session, folder: str, submission: str | None = None) -> dict
         "status": sent.get("status"),
         "archive": archive.url,
     }
+
+
+def submit(session: Session, folder: str, submission: str | None = None) -> dict[str, Any]:
+    """Check the folder, upload every file in checksums.sha256 and send it to review."""
+    return send(session, prepare(session, folder), submission)
 
 
 def _report(archive: Archive, link: str) -> tuple[Any, str | None]:

@@ -6,9 +6,10 @@ description: Checks a local dataset package with the archive's own rules, drafts
 # Submit a dataset
 
 The checks are the same `cruise` rules the archive's ingest runs, so a package that passes
-here passes there. You draft; the person decides. **Never write to the manifest or send
-anything to the archive without the person's yes.** The tools come from the
-`cruise` MCP server; `diagnose` and `edit_manifest` work offline.
+here passes there. You draft; the person decides. **Never write to the manifest without the
+person's yes.** Before anything is sent to the archive, `submit` asks the person itself, in a
+dialog. The tools come from the `cruise` MCP server; `diagnose` and `edit_manifest` work
+offline.
 
 ## Steps
 
@@ -38,14 +39,16 @@ anything to the archive without the person's yes.** The tools come from the
    `diagnose` again and show what changed.
 4. **Repeat** until no errors are left or the person stops. Warnings may remain: list them
    and say they don't block publishing.
-5. **Submit only with the person's yes.** Say what will happen and where: every file in
+5. **Submit when the person asks.** Say what will happen and where: every file in
    `checksums.sha256` is uploaded and the package goes to review at the archive this window
    is on (`diagnose` answers it as `archive`; name it). Hidden files and folders
    (names starting with a dot, such as `.DS_Store` or `.git/`) are never part of a package:
    they are not listed, checked or uploaded. Call `sign_in` if needed (say first that it
-   opens the browser), then `submit` with the folder. Show the submission id, its status and
-   the `archive` it went to. `submit` refuses a package with an error finding; go back to
-   step 2 if it does.
+   opens the browser), then `submit` with the folder. The plugin then shows the person a
+   dialog with the archive, the number of files and their total size, and sends only if they
+   accept it. Show the submission id, its status and the `archive` it went to. If it answers
+   that the person didn't accept, nothing was sent: don't call it again unless they ask.
+   `submit` refuses a package with an error finding; go back to step 2 if it does.
 6. **Later, on request, call `submissions`** with the id to show its status. When it is
    `needs-changes`, show the curator's note (in its `decided` event) and the findings (in
    its `report`; if it answers a `report_error` instead, say the findings couldn't be read
@@ -70,3 +73,5 @@ need no network), and say what to run again:
 - **Conflict** (the archive's message): the submission isn't in a state that takes this step,
   such as one already in review. Call `submissions` to see where it stands.
 - **Refused** (the archive's message): pass it on, and fix what it names with the person.
+- **It needs an interactive session**: `submit` could not show its dialog, so nothing was
+  sent. Say that submitting needs an interactive Claude Code session.

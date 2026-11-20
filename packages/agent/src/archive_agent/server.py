@@ -10,11 +10,11 @@ import json
 import urllib.parse
 from collections.abc import Sequence
 from datetime import UTC, datetime
-from typing import Any
+from typing import Annotated, Any
 
-from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver import Context, Elicit, ElicitationResult, MCPServer, Resolve
 
-from archive_agent import __version__, local, read, state, submit
+from archive_agent import __version__, confirm, local, read, state, submit
 from archive_agent.archive import Archive
 from archive_agent.errors import NotConnected, Refused, SignInFailed
 from archive_agent.state import Session
@@ -26,8 +26,10 @@ INSTRUCTIONS = (
     "with: the one saved as the default when it made its first call, or the one given to "
     "connect in this window. connect changes the archive for this window only and saves it as "
     "the default for new windows. When an answer names its archive, tell the person which "
-    "archive it was. Never write to a manifest or send anything to the archive without the "
-    "person's yes."
+    "archive it was. Never write to a manifest without the person's yes. submit and decide ask "
+    "the person themselves, in a dialog only the person can answer, before anything is sent: "
+    "say what will be sent and where before you call either, and after an answer that the "
+    "person didn't accept, don't call it again unless they ask."
 )
 
 
@@ -51,6 +53,7 @@ def _normalise(url: str) -> str:
             f"{url!r} isn't a web address. Give the archive's address with https://, "
             "such as https://d111111abcdef8.cloudfront.net."
         )
+    state.require_https(url.strip())
     return urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path.rstrip("/"), "", ""))
 
 
@@ -121,10 +124,30 @@ def build(session: Session) -> MCPServer:
     """The MCP server with every tool bound to `session`."""
     mcp: MCPServer = MCPServer(NAME, instructions=INSTRUCTIONS, version=__version__)
 
+    def prepared(ctx: Context[Any, Any], folder: str) -> submit.Package:
+        confirm.require_dialog(ctx, "submit")
+        return submit.prepare(session, folder)
+
+    def ask_submit(
+        package: Annotated[submit.Package, Resolve(prepared)], submission: str | None
+    ) -> Elicit[confirm.Yes]:
+        return Elicit(confirm.submit_question(package, submission), confirm.Yes)
+
+    def ask_decide(
+        ctx: Context[Any, Any], id: str, decision: str, note: str
+    ) -> Elicit[confirm.Yes]:
+        confirm.require_dialog(ctx, "decide")
+        if decision not in submit.DECISIONS:
+            raise Refused(
+                f"{decision!r} isn't a decision; give approve, reject or request-changes."
+            )
+        return Elicit(confirm.decide_question(session.url(), id, decision, note), confirm.Yes)
+
     @mcp.tool(name="connect")
     def connect_tool(url: str) -> dict[str, Any]:
         """Use the archive at this web address (such as https://d111.cloudfront.net) in this
-        window from now on, after checking it answers. It signs this window out of the archive
+        window from now on, after checking it answers. The address starts with https://; http://
+        is taken only for an archive on this computer. It signs this window out of the archive
         it was on, and saves the address, with the requirement sets the archive checks packages
         against, as the default for new windows; other open windows keep the archive they
         started with."""
@@ -167,11 +190,16 @@ def build(session: Session) -> MCPServer:
         return read.get_dataset(session, id, version)
 
     @mcp.tool(name="download")
-    def download_tool(id: str, version: int, paths: list[str], to: str) -> dict[str, Any]:
+    def download_tool(
+        id: str, version: int, paths: list[str], to: str, overwrite: bool = False
+    ) -> dict[str, Any]:
         """Download the named files (paths as listed in the version's files) of one version
         into the local folder `to`, checking each against its recorded SHA-256. Restricted
-        files need sign_in first. Answers what was written and anything that failed."""
-        return read.download(session, id, version, paths, to)
+        files need sign_in first. A file already in the folder is left as it is unless
+        `overwrite` is true; a hidden name (any part starting with a dot) and a file named
+        CLAUDE.md, CLAUDE.local.md or AGENTS.md are never written. Answers what was written,
+        what was replaced, what was skipped and why, and anything that failed."""
+        return read.download(session, id, version, paths, to, overwrite)
 
     @mcp.tool(name="diagnose")
     def diagnose_tool(folder: str) -> dict[str, Any]:
@@ -195,13 +223,22 @@ def build(session: Session) -> MCPServer:
         return local.edit_manifest(folder, edits)
 
     @mcp.tool(name="submit")
-    def submit_tool(folder: str, submission: str | None = None) -> dict[str, Any]:
-        """Submit a package folder for review, only with the person's yes. Runs diagnose
-        first and refuses on any error finding. Uploads every file in checksums.sha256 plus
-        that file, then sends it to review. With `submission` (an id that needs changes), it
-        is that submission's next round. Answers the id, round and status. Needs sign_in and
-        the contributor group. Answers the archive it went to as `archive`."""
-        return submit.submit(session, folder, submission)
+    def submit_tool(
+        folder: str,
+        package: Annotated[submit.Package, Resolve(prepared)],
+        answer: Annotated[ElicitationResult[confirm.Yes], Resolve(ask_submit)],
+        submission: str | None = None,
+    ) -> dict[str, Any]:
+        """Submit a package folder for review. Runs diagnose first and refuses on any error
+        finding. Then the plugin asks the person in a dialog that shows the archive, the
+        number of files and their total size; nothing is sent unless they accept it, and
+        where no dialog can be shown the tool refuses. On an accept it uploads every file in
+        checksums.sha256 plus that file, then sends it to review. With `submission` (an id
+        that needs changes), it is that submission's next round. Answers the id, round and
+        status. Needs sign_in and the contributor group. Answers the archive it went to as
+        `archive`."""
+        confirm.accepted(answer, package.archive)
+        return submit.send(session, package, submission)
 
     @mcp.tool(name="submissions")
     def submissions_tool(id: str | None = None, queue: bool = False) -> dict[str, Any]:
@@ -219,11 +256,19 @@ def build(session: Session) -> MCPServer:
         return submit.submission_files(session, id)
 
     @mcp.tool(name="decide")
-    def decide_tool(id: str, decision: str, note: str) -> dict[str, Any]:
-        """Post a curator's decision on a submission in review, only with the curator's yes
-        on the exact decision and note. decision is approve, reject or request-changes; the
-        note goes to the submitter. Needs sign_in and the curator group. Answers the archive it
-        went to as `archive`."""
+    def decide_tool(
+        id: str,
+        decision: str,
+        note: str,
+        answer: Annotated[ElicitationResult[confirm.Yes], Resolve(ask_decide)],
+    ) -> dict[str, Any]:
+        """Post a curator's decision on a submission in review. decision is approve, reject or
+        request-changes; the note goes to the submitter. The plugin first asks the curator
+        in a dialog that shows the archive, the submission, the decision and the note;
+        nothing is sent unless they accept it, and where no dialog can be shown the tool
+        refuses. Needs sign_in and the curator group. Answers the archive it went to as
+        `archive`."""
+        confirm.accepted(answer, session.url())
         return submit.decide(session, id, decision, note)
 
     return mcp

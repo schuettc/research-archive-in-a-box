@@ -5,6 +5,7 @@ and on disk the default archive for new windows."""
 import json
 import os
 import tempfile
+import urllib.parse
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,6 +16,25 @@ from archive_agent.errors import ArchiveError, NotAllowed, NotConnected, Refused
 from archive_client.signin import AuthConfig, Tokens, sign_in
 
 LIMIT = "maxPackageGiB"
+
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
+"""The hosts an http:// address may name: an archive on this computer."""
+
+HTTPS_ONLY = (
+    "{url} starts with http://. Give the archive's address with https://; http:// is taken "
+    "only for an archive on this computer (localhost, 127.0.0.1 or ::1)."
+)
+SAVED_HTTP = (
+    "The saved archive address {url} starts with http://, which is taken only for an archive "
+    "on this computer. Call connect with its https:// address."
+)
+
+
+def require_https(url: str, message: str = HTTPS_ONLY) -> None:
+    """Refuse an http:// address whose host isn't this computer."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme == "http" and parts.hostname not in LOCAL_HOSTS:
+        raise NotConnected(message.format(url=url))
 
 
 def config_file() -> Path:
@@ -147,6 +167,7 @@ class Session:
                 "No archive is set yet. Ask the person for their archive's web address, then "
                 "call connect with it."
             )
+        require_https(url, SAVED_HTTP)
         return url
 
     def archive(self) -> Archive:

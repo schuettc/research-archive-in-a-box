@@ -39,6 +39,11 @@ they are.
      `sign_in` that it will open the browser to sign in, and wait for their go.
    - Report what was written and where. A file under `failed` didn't match its recorded
      hash and was not kept: say so and offer to try again.
+   - A file under `skipped` was not written; say which and why (its `reason`). One that
+     was already in the folder is replaced only when the person asks: call `download`
+     again for that file with `overwrite` true, and say which files it lists as `replaced`.
+     Hidden names and files named `CLAUDE.md`, `CLAUDE.local.md` or `AGENTS.md` are never
+     written; the person can get one from the dataset's page in a browser.
 
 ## When a tool answers an error
 

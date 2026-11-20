@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 from pathlib import Path
@@ -5,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from archive_agent import read, state
+from archive_agent import read, server, state
 from archive_agent.errors import LocalError, Refused, SignedOut
 from archive_agent.state import Session
 from archive_client.signin import Tokens
@@ -262,3 +263,131 @@ def test_download_skips_the_hash_check_for_a_hash_shared_by_several_files(
         "data/a.csv": True,
     }
     assert result["not_checked"] == ["data/sites.shp", "data/sites.dbf"]
+
+
+def fetched(connected: Any) -> list[str]:
+    """The file paths the stub was asked for under /data/."""
+    return [s.path for s in connected.seen if s.path.startswith("/data/")]
+
+
+def test_download_skips_hidden_names_instruction_files_and_files_already_there(
+    connected: Any, tmp_path: Path
+) -> None:
+    files = {
+        ".claude/settings.json": b"{}",
+        "CLAUDE.md": b"theirs\n",
+        "notes.csv": b"new\n",
+        "data/a.csv": b"a,b\n",
+    }
+    version(connected, "open", files)
+    for path, data in files.items():
+        connected.raw(f"GET /data/d1/3/{path}", data)
+    (tmp_path / "CLAUDE.md").write_text("mine\n")
+    (tmp_path / "notes.csv").write_text("old\n")
+
+    result = read.download(Session(), "d1", 3, list(files), str(tmp_path))
+
+    assert not (tmp_path / ".claude").exists()
+    assert (tmp_path / "CLAUDE.md").read_text() == "mine\n"
+    assert (tmp_path / "notes.csv").read_text() == "old\n"
+    assert (tmp_path / "data" / "a.csv").read_bytes() == b"a,b\n"
+    assert [w["path"] for w in result["written"]] == ["data/a.csv"]
+    assert result["skipped"] == [
+        {"path": ".claude/settings.json", "reason": read.HIDDEN},
+        {"path": "CLAUDE.md", "reason": read.AGENT_FILE},
+        {"path": "notes.csv", "reason": read.EXISTS},
+    ]
+    assert result["replaced"] == []
+    assert result["failed"] == []
+    assert fetched(connected) == ["/data/d1/3/data/a.csv"]
+
+
+def test_download_with_overwrite_replaces_a_file_already_there_and_lists_it(
+    connected: Any, tmp_path: Path
+) -> None:
+    version(connected, "open", {"notes.csv": b"new\n", "data/a.csv": b"a,b\n"})
+    connected.raw("GET /data/d1/3/notes.csv", b"new\n")
+    connected.raw("GET /data/d1/3/data/a.csv", b"a,b\n")
+    (tmp_path / "notes.csv").write_text("old\n")
+
+    result = read.download(
+        Session(), "d1", 3, ["notes.csv", "data/a.csv"], str(tmp_path), overwrite=True
+    )
+
+    assert (tmp_path / "notes.csv").read_bytes() == b"new\n"
+    assert [w["path"] for w in result["written"]] == ["notes.csv", "data/a.csv"]
+    assert result["replaced"] == ["notes.csv"]
+    assert result["skipped"] == []
+
+
+def test_download_with_overwrite_keeps_a_file_whose_new_copy_fails_its_hash(
+    connected: Any, tmp_path: Path
+) -> None:
+    version(connected, "open", {"notes.csv": b"new\n"})
+    connected.raw("GET /data/d1/3/notes.csv", b"something else\n")
+    (tmp_path / "notes.csv").write_text("old\n")
+
+    result = read.download(Session(), "d1", 3, ["notes.csv"], str(tmp_path), overwrite=True)
+
+    assert (tmp_path / "notes.csv").read_text() == "old\n"
+    assert result["replaced"] == []
+    assert result["failed"][0]["path"] == "notes.csv"
+
+
+@pytest.mark.parametrize(
+    "path", ["CLAUDE.md", "docs/CLAUDE.local.md", "a/b/AGENTS.md", "docs/claude.md"]
+)
+def test_download_never_writes_an_agent_instruction_file(
+    connected: Any, tmp_path: Path, path: str
+) -> None:
+    version(connected, "open", {path: b"x"})
+    connected.raw(f"GET /data/d1/3/{path}", b"x")
+
+    result = read.download(Session(), "d1", 3, [path], str(tmp_path), overwrite=True)
+
+    assert not (tmp_path / path).exists()
+    assert result["skipped"] == [{"path": path, "reason": read.AGENT_FILE}]
+    assert fetched(connected) == []
+
+
+def test_download_judges_the_name_a_link_in_the_folder_leads_to(
+    connected: Any, tmp_path: Path
+) -> None:
+    (tmp_path / "notes.csv").symlink_to(tmp_path / "CLAUDE.md")
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / "data").symlink_to(tmp_path / ".claude", target_is_directory=True)
+    version(connected, "open", {"notes.csv": b"x", "data/settings.json": b"x"})
+
+    result = read.download(
+        Session(), "d1", 3, ["notes.csv", "data/settings.json"], str(tmp_path), overwrite=True
+    )
+
+    assert not (tmp_path / "CLAUDE.md").exists()
+    assert not (tmp_path / ".claude" / "settings.json").exists()
+    assert result["skipped"] == [
+        {"path": "notes.csv", "reason": read.AGENT_FILE},
+        {"path": "data/settings.json", "reason": read.HIDDEN},
+    ]
+    assert fetched(connected) == []
+
+
+@pytest.mark.parametrize("path", [".claude/settings.json", ".git/hooks/post-checkout", "a/.env"])
+def test_download_never_writes_a_hidden_name(connected: Any, tmp_path: Path, path: str) -> None:
+    version(connected, "open", {path: b"x"})
+    connected.raw(f"GET /data/d1/3/{path}", b"x")
+
+    result = read.download(Session(), "d1", 3, [path], str(tmp_path), overwrite=True)
+
+    assert not (tmp_path / path).exists()
+    assert result["skipped"] == [{"path": path, "reason": read.HIDDEN}]
+    assert fetched(connected) == []
+
+
+def test_the_agent_instruction_file_names_are_one_list() -> None:
+    assert read.AGENT_FILES == ("CLAUDE.md", "CLAUDE.local.md", "AGENTS.md")
+
+
+def test_the_download_tool_takes_overwrite() -> None:
+    tools = {tool.name: tool for tool in asyncio.run(server.build(Session()).list_tools())}
+
+    assert tools["download"].input_schema["properties"]["overwrite"]["default"] is False
