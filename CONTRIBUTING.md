@@ -31,7 +31,7 @@ npm ci
 
 Inside a clone, `uv run cruise` runs the command-line tool from the source.
 
-To try the web app locally against a deployed stage, run `ARCHIVE_DEV_SITE=https://<stage domain> npm run dev -w packages/web`. Vite then proxies `/api/`, `/auth-config.json` and `/data/` to that stage; without the variable, `npm run dev` is unchanged. Uploads, the findings report and file Preview fail locally, because the stage's storage refuses a localhost origin: check those on the stage itself.
+To try the web app locally against a deployed stage, run `ARCHIVE_DEV_SITE=https://<stage domain> npm run dev -w packages/web`. Vite then proxies `/api/`, `/auth-config.json` and `/data/` to that stage; without the variable, `npm run dev` is unchanged. On a stage that keeps its data, which is every stage unless `archive.yaml` gives it `keepData: false`, uploads, the findings report and file Preview fail locally, because the stage's storage refuses a localhost origin: check those on the stage itself. A stage with `keepData: false` accepts them from `http://localhost:5199` and no other local address, so add `-- --port 5199` to the command to start the local server on that port ([the reference](docs/guide/archive-yaml.md#infrastructurestageskeepdata) has the setting).
 
 ## Check a change
 

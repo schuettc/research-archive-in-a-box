@@ -1,6 +1,6 @@
 # Using the archive
 
-This page walks through an archive's web app as each kind of person uses it: a reader who finds and downloads data, a contributor who submits it, a curator who reviews it, and an admin who runs the archive. It ends with the privacy page.
+This page walks through an archive's web app as each kind of person uses it: a reader who finds and downloads data, a contributor who submits it, a curator who reviews it, and an admin who runs the archive. It ends with the About page and the privacy page.
 
 ## Accounts and roles
 
@@ -24,7 +24,9 @@ One person can hold any of them; the archive's first admin holds all three. The 
 
 The front page, **Browse**, lists the archive's datasets, with the archive's introduction above them when it has one.
 
-![The Browse page of an example archive: its introduction, the search box, the Access, Licence and Format filters on the left, and two datasets in the results.](../images/reading-room.png) The search box takes a title, a keyword, a creator or a column name. Beside the results, filters narrow them by:
+![The Browse page of an example archive: its introduction, the search box, the Access, Licence and Format filters on the left, and two datasets in the results.](../images/reading-room.png)
+
+The search box takes a title, a keyword, a creator or a column name. Beside the results, filters narrow them by:
 
 - **Access**: who may download the files (see [Access levels](packages.md#access-levels));
 - **Licence**, such as CC-BY-4.0;
@@ -163,6 +165,10 @@ Giving someone the curator role does not email them about submissions. The perso
 ### Withdrawing, restoring and embargoes
 
 On a published dataset's page, an admin can **Withdraw…** it with a reason, which takes its files offline and out of search while its page and citation stay, and **Restore…** it later. An admin moves an embargo's date with `just set-embargo <stage> <id> <YYYY-MM-DD>`. [Curating published datasets](../curating.md) covers each of these, and deleting a dataset for good.
+
+## The About page
+
+The nav's **About the archive** opens `/about`, a short page that says what the archive is. It shows the archive's introduction, the same text as above the datasets on Browse, or one sentence made from the archive's name when it has none. Under it, when the archive has a contact address, is that address as an email link, for questions and for asking about access to a restricted dataset. Both come from `archive.yaml`: [`brand.intro`](archive-yaml.md#brandintro) and [`brand.contact`](archive-yaml.md#brandcontact).
 
 ## The privacy page
 

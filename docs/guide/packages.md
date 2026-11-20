@@ -23,10 +23,13 @@ sample-package/
   README.md
   changes.jsonl
   data/logger.csv
+  data/logger.xlsx
   data/codes/condition-codes.csv
   data/sites/sites.shp (with .dbf, .prj and .shx)
   data/depth.asc
+  data/depth.prj
   docs/methods.md
+  docs/site-photo.png
   original/logger-raw.csv
 ```
 
@@ -298,7 +301,7 @@ The six errors are the list of work: record the file's size and hash, write the 
 
 ### 3. Record the file's size and hash
 
-Each resource records its file's size in bytes and its hash, so the archive can tell if a file changed on the way. Read both:
+Each resource records its file's size in bytes and its hash, so the archive can tell if a file changed on the way. You record them by hand here because `cruise set` doesn't: it writes `checksums.sha256`, but a resource's `bytes` and `hash` are not among the manifest fields it can change. Read both:
 
 ```
 wc -c < plot-survey/data/plots.csv

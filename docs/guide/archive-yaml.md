@@ -19,6 +19,7 @@ brand:
 infrastructure:
   stages:
     - name: dev
+      keepData: false
       region: eu-west-1
     - name: prod
       region: eu-west-1
@@ -50,6 +51,7 @@ infrastructure:
   monthlyBudgetUsd: 50
   stages:
     - name: dev
+      keepData: false
       region: eu-west-1
     - name: prod
       region: eu-west-1
@@ -480,6 +482,7 @@ infrastructure:
   alertEmail: archive-admin@example.org
   stages:
     - name: dev
+      keepData: false
     - name: prod
 ```
 
