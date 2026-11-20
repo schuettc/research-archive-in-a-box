@@ -79,7 +79,7 @@ After publishing, curators and admins can correct, withdraw, restore and embargo
 
 All of a stage is one CloudFormation stack, `ResearchArchive-<stage>`, built by the `ResearchArchive` construct. Inside it:
 
-- **Storage:** three S3 buckets. The staging bucket takes uploads (`incoming/`), keeps checked rounds (`held/`, with a version's zips while it is being published) and reports (`reports/`). The archive bucket keeps published data (`open/` and `restricted/`), each withdrawal's record (`state/`) and project records (`projects/`). The derived bucket keeps the site (`site/`), reindex files (`reindex/`) and CloudFront's logs (`logs/`).
+- **Storage:** three S3 buckets. The staging bucket takes uploads (`incoming/`), keeps checked rounds (`held/`, with a version's zips while it is being published) and reports (`reports/`). The archive bucket keeps published data (`open/` and `restricted/`), each withdrawal's record (`state/`) and project records (`projects/`). `state/<id>/withdrawn.json` holds when, by whom and why the dataset `<id>` was withdrawn, so that a reindex keeps the withdrawal. `<version>/_zips/`, inside each published version's folder, holds that version's download zips: `all/package.zip` with every file, and one zip for each resource that has more than one file. The derived bucket keeps the site (`site/`), reindex files (`reindex/`) and CloudFront's logs (`logs/`).
 - **Tables:** DynamoDB tables on demand: two catalog tables, A and B, with a parameter naming the active one, and one table per kind of record (submissions, review events, settings, access requests, user profiles, account events, download counts, usage responses).
 - **Accounts:** a Cognito user pool. Anyone can sign up with a confirmed email, unless the stage is by invitation, and gets no role; an admin gives roles.
 - **API:** an API Gateway REST API under `/api`, with throttling and a Cognito authorizer, in front of the read, submissions, access and curation functions.
@@ -126,6 +126,45 @@ flowchart TD
 - **GitHub Actions** is the only deployer. The deploy role trusts GitHub's OIDC tokens from this repository's GitHub environments for the listed stages and nothing else, and may only assume CDK's bootstrap roles.
 
 A stage with a custom domain answers on that name through the same distribution; the diagram leaves the domain out.
+
+### The buckets and their prefixes
+
+The prefixes are conventions the code keeps, not resources of their own.
+
+```mermaid
+flowchart TD
+  stage["One stage"]
+  stage --> staging
+  stage --> archive
+  stage --> derived
+  subgraph staging["Staging bucket"]
+    direction TB
+    incoming["incoming/: each round's uploads, deleted after 30 days"]
+    held["held/: the round that passed the checks, until it is published or closed"]
+    heldZips[".zips/ inside held/: a version's zips while it is being published"]
+    reports["reports/: each round's findings report"]
+    incoming ~~~ held ~~~ heldZips ~~~ reports
+  end
+  subgraph archive["Archive bucket, versioned"]
+    direction TB
+    open["open/: published versions anyone may download"]
+    restricted["restricted/: every other published version"]
+    zips["_zips/ inside each version: its download zips"]
+    state["state/: withdrawn.json for each withdrawn dataset"]
+    projects["projects/: project.json for each project"]
+    open ~~~ restricted ~~~ zips ~~~ state ~~~ projects
+  end
+  subgraph derived["Derived bucket"]
+    direction TB
+    site["site/: the web app, catalog.json and sitemap.xml"]
+    pages["site/datasets/: each dataset's and version's page"]
+    reindex["reindex/: each reindex run's data and report"]
+    logs["logs/: CloudFront's logs, deleted after 90 days"]
+    site ~~~ pages ~~~ reindex ~~~ logs
+  end
+```
+
+A submission's files are under `incoming/<submission>/<round>/` and `held/<submission>/`, and a published version's under `open/<id>/<version>/` or `restricted/<id>/<version>/`. A version is under `open/` only while its dataset is public, not withdrawn and not under embargo; the lifecycle function moves it when that changes.
 
 ## Design decisions
 
