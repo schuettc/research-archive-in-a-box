@@ -133,6 +133,14 @@ def test_infrastructure_refuses_duplicate_stage_names() -> None:
         Infrastructure.model_validate({"alertEmail": "a@b.c", "stages": []})
 
 
+def test_a_stage_keeps_its_data_unless_it_says_otherwise() -> None:
+    assert Stage(name="dev").keep_data is True
+    assert Stage.model_validate({"name": "prod", "keepData": False}).keep_data is False
+    assert Infrastructure.model_validate({"alertEmail": "a@b.c"}).stages[0].keep_data is True
+    with pytest.raises(ValidationError):
+        Stage.model_validate({"name": "dev", "keepdata": False})
+
+
 def test_stage_refuses_bad_names_and_accounts() -> None:
     with pytest.raises(ValidationError):
         Stage(name="Prod")
@@ -232,7 +240,7 @@ def test_a_stage_with_no_email_has_none() -> None:
     ],
 )
 def test_stages_without_email_validate_unchanged(stage: dict[str, object]) -> None:
-    assert Stage.model_validate(stage).dump() == stage
+    assert Stage.model_validate(stage).dump() == {**stage, "keepData": True}
 
 
 def test_root_archive_yaml_is_valid() -> None:

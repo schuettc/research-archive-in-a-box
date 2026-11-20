@@ -102,6 +102,15 @@ class Stage(_Strict):
         "zone. Needs a domain. Left out: Cognito's own email, which is capped per day.",
     )
     doi: StageDoi | None = None
+    keep_data: bool = PydanticField(
+        default=True,
+        alias="keepData",
+        description="true: the stage's buckets, tables, user pool and logs are kept when its "
+        "stack is deleted, and the tables and user pool are protected from deletion. false: a "
+        "disposable stage, deleted whole with its data when it is torn down, with the test "
+        "conveniences (uploads from a local web app at http://localhost:5199, and the sign-in "
+        "client the end-to-end test uses). Left out: true.",
+    )
 
     @model_validator(mode="after")
     def _domain_and_email_rules(self) -> Self:

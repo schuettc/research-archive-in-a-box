@@ -5,7 +5,7 @@ import { Construct } from "constructs";
 
 export interface TablesProps {
   readonly stage: string;
-  readonly isProd: boolean;
+  readonly keepData: boolean;
   /** Give each catalog table the `datasets` vector index, for the embeddings module. */
   readonly embeddings: boolean;
 }
@@ -37,7 +37,7 @@ export class Tables extends Construct {
     super(scope, id);
     const common: Partial<dynamodb.TableProps> = {
       billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      ...(props.isProd
+      ...(props.keepData
         ? { removalPolicy: RemovalPolicy.RETAIN, deletionProtection: true }
         : { removalPolicy: RemovalPolicy.DESTROY }),
     };

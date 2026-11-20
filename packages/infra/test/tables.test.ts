@@ -10,7 +10,10 @@ function archive(stage = "prod"): { archive: ResearchArchive; template: Template
   const built = new ResearchArchive(stack, "Archive", {
     config: {
       publisher: "P",
-      infrastructure: { alertEmail: "a@example.org", stages: [{ name: "prod" }, { name: "dev" }] },
+      infrastructure: {
+        alertEmail: "a@example.org",
+        stages: [{ name: "prod" }, { name: "dev", keepData: false }],
+      },
     },
     stage,
   });
@@ -112,7 +115,7 @@ test("each operational table has its key and point-in-time recovery", () => {
   );
 });
 
-test("prod tables have deletion protection and are retained; a dev stage's are not", () => {
+test("the tables of a stage that keeps its data have deletion protection and are retained; those of a stage with keepData: false are not", () => {
   const prod = Object.values(archive("prod").template.findResources("AWS::DynamoDB::Table"));
   const dev = Object.values(archive("dev").template.findResources("AWS::DynamoDB::Table"));
 

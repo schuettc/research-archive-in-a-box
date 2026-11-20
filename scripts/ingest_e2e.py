@@ -1,4 +1,5 @@
-"""The ingest pipeline's scripted run on a deployed non-prod stage: `just ingest-e2e <stage>`.
+"""The ingest pipeline's scripted run on a deployed stage with `keepData: false`:
+`just ingest-e2e <stage>`.
 
 It reads the stack's outputs, creates three throwaway users with the admin APIs (a contributor,
 a curator who is also an admin, and a second curator), signs them in through the test-only `e2e`
@@ -539,16 +540,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0] if __doc__ else None)
     parser.add_argument("stage")
     args = parser.parse_args(argv)
-    if args.stage == "prod":
-        print("ingest-e2e never runs on prod", file=sys.stderr)
-        return 2
 
     import boto3
 
     outputs = stack_outputs(cast(CloudFormation, boto3.client("cloudformation")), args.stage)
     missing = {"E2eClientId", "UserPoolId", "SiteDomain"} - outputs.keys()
     if missing:
-        print(f"ResearchArchive-{args.stage} has no {', '.join(sorted(missing))} output")
+        print(
+            f"ResearchArchive-{args.stage} has no {', '.join(sorted(missing))} output; "
+            "ingest-e2e needs a stage with keepData: false in its config"
+        )
         return 2
     cognito = cast(CognitoIdp, boto3.client("cognito-idp"))
     pool, client = outputs["UserPoolId"], outputs["E2eClientId"]
