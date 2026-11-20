@@ -1,5 +1,7 @@
 # research-archive-in-a-box
 
+[![CI](https://github.com/schuettc/research-archive-in-a-box/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/schuettc/research-archive-in-a-box/actions/workflows/ci.yml) [![Latest release](https://img.shields.io/github/v/release/schuettc/research-archive-in-a-box)](https://github.com/schuettc/research-archive-in-a-box/releases/latest) [![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
+
 research-archive-in-a-box is a kit for running a research data archive: a place where a research group publishes its datasets so that other people can find, cite and download them. A field station, for example, can use it to check its plot data on a laptop, submit it to its own archive in its own AWS account, have a curator review it, and publish it at a stable address with a search page, a citation and, if it wants, a DOI (a Digital Object Identifier, a permanent link such as `https://doi.org/10.1234/abcd` that keeps resolving even if the archive moves).
 
 ![The search page of an example archive, the Invented Research Cooperative: its introduction, a search box, filters by access, licence and format, and two published datasets.](docs/images/reading-room.png)

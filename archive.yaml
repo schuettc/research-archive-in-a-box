@@ -1,4 +1,5 @@
-# The archive config: the one file a fork edits.
+# The archive config, the one file a fork edits. These are example values: replace them in
+# your fork.
 publisher: Invented Research Cooperative
 profiles: [core, ecology]
 brand:
