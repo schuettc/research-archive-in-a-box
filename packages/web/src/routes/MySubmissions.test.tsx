@@ -2,6 +2,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import axe from "axe-core";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, test, vi, type Mock } from "vitest";
+import { PACKAGES_GUIDE } from "../site";
 import { event, item } from "../test-fixtures";
 import { MySubmissions } from "./MySubmissions";
 
@@ -93,6 +94,36 @@ test("with none yet, it says so and offers Submit a package", async () => {
   const empty = lead.closest(".empty") as HTMLElement;
   expect(within(empty).getByRole("link", { name: "Submit a package" })).toBeDefined();
   expect(screen.getAllByRole("link", { name: "Submit a package" })).toHaveLength(1);
+});
+
+test("with none yet, a link to the packages guide follows the sentence and opens in a new tab", async () => {
+  fetchMock.mockImplementationOnce(async () => Response.json({ submissions: [] }));
+  renderPage();
+
+  const link = await screen.findByRole("link", {
+    name: "How to make a package (opens in a new tab)",
+  });
+  expect(link.getAttribute("href")).toBe(PACKAGES_GUIDE);
+  expect(link.getAttribute("target")).toBe("_blank");
+  expect(link.getAttribute("rel")).toBe("noreferrer");
+  expect(link.closest("p")?.textContent).toMatch(
+    /^Make a package with cruise, then send it here\. .*published\. How to make a package/,
+  );
+});
+
+test("with submissions listed, there is no link to the packages guide", async () => {
+  renderPage();
+  await screen.findAllByRole("row");
+
+  expect(screen.queryByRole("link", { name: /How to make a package/ })).toBeNull();
+});
+
+test("an axe check of the empty Submissions page finds no violations", async () => {
+  fetchMock.mockImplementationOnce(async () => Response.json({ submissions: [] }));
+  const { container } = renderPage();
+  await screen.findByText(/haven't submitted/);
+
+  expect((await axe.run(container)).violations).toEqual([]);
 });
 
 test("an axe check of My submissions finds no violations", async () => {

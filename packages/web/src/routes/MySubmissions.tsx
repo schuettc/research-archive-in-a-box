@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { getSubmission, listSubmissions, type Submission } from "../api";
 import { PageHeading, useTitle } from "../page";
+import { PACKAGES_GUIDE } from "../site";
 import { StatusBadge } from "../StatusBadge";
 import { useDatasetTitle } from "./Submission";
 
@@ -99,7 +100,10 @@ export function MySubmissions() {
           <p className="lead">You haven't submitted a package yet.</p>
           <p className="muted">
             Make a package with cruise, then send it here. A curator reviews it before it's
-            published.
+            published.{" "}
+            <a href={PACKAGES_GUIDE} target="_blank" rel="noreferrer">
+              How to make a package <span className="visually-hidden">(opens in a new tab)</span>
+            </a>
           </p>
           <p className="actions">
             <Link className="button primary" to="/submit">

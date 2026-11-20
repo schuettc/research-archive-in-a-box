@@ -32,6 +32,7 @@ import {
   type ReadyFile,
 } from "../package";
 import { PageHeading, useTitle } from "../page";
+import { PACKAGES_GUIDE } from "../site";
 import { Trail } from "../Trail";
 
 /** A new submission, or the next round (or new links) for one that exists. */
@@ -498,6 +499,12 @@ export function Submit() {
       <p className="lede">
         Send a package made with cruise. The archive checks it, and a curator reviews it before it
         is published.
+      </p>
+      <p className="prose">
+        New to packages?{" "}
+        <a href={PACKAGES_GUIDE} target="_blank" rel="noreferrer">
+          How to make one with cruise <span className="visually-hidden">(opens in a new tab)</span>
+        </a>
       </p>
       <PackageFlow
         mode={{ kind: "new" }}
