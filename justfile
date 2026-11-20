@@ -212,9 +212,10 @@ seed stage:
 demo-video stage:
     #!/usr/bin/env bash
     set -euo pipefail
-    # It makes two accounts on the stage, publishes the sample packages the stage lacks and makes
-    # two submissions; demo/README.md says what it needs. Run from a laptop, never CI.
-    for tool in vhs ffmpeg ffprobe node jq; do
+    # It makes three accounts on the stage, publishes the sample packages the stage lacks and makes
+    # two submissions, one of them from a Claude Code session that uses the Claude sign-in on
+    # this laptop; demo/README.md says what it needs. Run from a laptop, never CI.
+    for tool in vhs ffmpeg ffprobe node jq claude; do
         if ! command -v "$tool" >/dev/null; then
             echo "demo-video needs $tool, which is not installed: demo/README.md has the install commands"
             exit 1
@@ -235,13 +236,15 @@ demo-video stage:
     # An earlier take's video and screenshots stay until this take writes its own.
     rm -rf demo/out/raw demo/out/scenes demo/out/captions demo/out/timeline.json
     mkdir -p demo/out/scenes demo/out/screenshots
-    # The accounts, the sample datasets, the two package folders and a submission left waiting.
+    # The accounts, the sample datasets, an empty review queue, the two package folders and
+    # what the agent scene runs.
     uv run --all-packages --frozen python demo/setup.py "{{stage}}"
     work="$(jq -r .work demo/out/run.json)"
-    # The terminal scene, which gives the plot survey the title the browser scenes submit it with.
-    (cd "$work" && PATH="$work/bin:$PATH" vhs "$root/demo/terminal.tape")
-    mv "$work/terminal.mp4" demo/out/scenes/terminal-raw.mp4
-    mv "$work/demo-cruise-diagnose.png" demo/out/screenshots/demo-cruise-diagnose.png
+    # The agent scene: Claude Code with the cruise plugin gives the plot survey a title and
+    # submits it. The browser scenes then submit the second package and review both.
+    (cd "$work" && PATH="$work/.demo/bin:$PATH" vhs "$root/demo/agent.tape")
+    mv "$work/agent.mp4" demo/out/scenes/agent-raw.mp4
+    mv "$work/demo-agent-session.png" demo/out/scenes/agent-screenshot.png
     # The browser scenes and screenshots, then the six scenes joined under their captions.
     node demo/scenes.mjs
     node demo/assemble.mjs

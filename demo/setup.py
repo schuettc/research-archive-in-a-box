@@ -3,21 +3,23 @@
 On a deployed stage with `keepData: false` it
 
 1. reads the site's domain, the user pool and the test sign-in client from the stack's outputs;
-2. makes the two accounts of the video, a contributor and a curator, each with a password it
-   generates here and sets as permanent;
+2. makes the three accounts of the video, two contributors and a curator, each with a
+   password it generates here and sets as permanent;
 3. publishes every sample package under `examples/` that the stage doesn't hold yet, as the
    curator, through `scripts/seed.py`;
-4. builds the two package folders of the video in a new temporary folder: the plot survey of
-   docs/guide/packages.md with its title left out, for the terminal scene to fix, and a second
-   small package;
-5. submits that second package as the contributor and leaves it waiting for a curator, so the
-   review queue holds more than one row;
-6. writes what the recording needs to `demo/out/run.json`: the site, the two accounts with
+4. clears what an earlier take left: it rejects every submission still waiting for a curator
+   and withdraws the plot survey an earlier take published;
+5. builds the two package folders of the video in a new temporary folder: the plot survey of
+   docs/guide/packages.md with its title left out, for the agent to fix and submit, and a
+   small snow-depth package for the Submit page;
+6. puts what the agent scene needs in that folder's `.demo/`: the cruise plugin from this
+   checkout with its MCP server run from the checkout, the stage saved as the plugin's
+   archive, and the commands that start Claude Code and drive the plugin's browser sign-in;
+7. writes what the recording needs to `demo/out/run.json`: the site, the three accounts with
    their passwords, and the folders. `demo/out/` is ignored by git, and the accounts go with
    the stage when it is destroyed.
 
-`python demo/setup.py --packages-only <folder>` does step 4 alone, with no AWS call: enough to
-record the terminal scene.
+`python demo/setup.py --packages-only <folder>` does step 5 alone, with no AWS call.
 """
 
 from __future__ import annotations
@@ -25,7 +27,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import secrets
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -43,8 +47,11 @@ import seed  # noqa: E402
 ACCOUNTS = {
     # The curator seeds the stage too, and submitting takes the contributor role.
     "curator": ("curator@example.org", ["contributor", "curator", "admin"]),
+    # The agent scene's contributor, and the one who submits on the web app's Submit page.
     "contributor": ("contributor@example.org", ["contributor"]),
+    "second": ("field-team@example.org", ["contributor"]),
 }
+EARLIER = "An earlier take of the demo video."
 POLL_SECONDS = 5.0
 WAIT_SECONDS = 15 * 60.0
 
@@ -62,8 +69,8 @@ PLOT_FIELDS = [
     {"name": "canopy_cover", "type": "integer"},
     {"name": "stems", "type": "integer"},
 ]
-# docs/guide/packages.md's edits for the plot survey, with the title (which the terminal scene
-# sets) and the three fields the ecology profile asks for.
+# docs/guide/packages.md's edits for the plot survey, with the title (which is then taken out
+# again, for the agent to draft) and the three fields the ecology profile asks for.
 PLOT_EDITS: list[dict[str, Any]] = [
     {"target": "title", "value": PLOT_TITLE},
     {
@@ -226,10 +233,11 @@ def build_package(
 
 
 def build_packages(work: Path, plot_id: str = "plot-survey") -> dict[str, str]:
-    """Build both folders under `work`, and a `cruise` on `work/bin` for the terminal scene.
+    """Build both folders under `work`.
 
-    The plot survey is left with one error, its missing title: the terminal scene shows it,
-    sets the title and shows the package publishable, and the browser scene submits that folder.
+    The plot survey is left with one error, its missing title: in the agent scene Claude Code
+    finds it, drafts a title, writes it on the person's yes and submits the folder. The
+    snow-depth package is publishable as built; the Submit page sends it.
     """
     plot = work / "plot-survey"
     build_package(
@@ -239,8 +247,7 @@ def build_packages(work: Path, plot_id: str = "plot-survey") -> dict[str, str]:
     edits_file.write_text(json.dumps([{"target": "title", "value": None}]), "utf-8")
     cruise("set", str(plot), "--file", str(edits_file))
     edits_file.unlink()
-    snow = work / "waiting" / "snow-depth"
-    snow.parent.mkdir()
+    snow = work / "snow-depth"
     build_package(
         snow,
         "snow-depth",
@@ -249,16 +256,69 @@ def build_packages(work: Path, plot_id: str = "plot-survey") -> dict[str, str]:
         SNOW_FIELDS,
         SNOW_EDITS,
     )
-    # The terminal scene types `cruise`, as a reader with cruise installed would.
-    wrapper = work / "bin" / "cruise"
-    wrapper.parent.mkdir()
-    wrapper.write_text(
-        "#!/usr/bin/env bash\n"
-        f'exec uv run --project "{ROOT}" --all-packages --frozen cruise "$@"\n',
-        "utf-8",
+    return {"work": str(work), "plot": str(plot), "snow": str(snow)}
+
+
+# The agent scene's Claude Code session.
+
+AGENT = """\
+#!/usr/bin/env bash
+# Claude Code for the agent scene, with the laptop's own sign-in and nothing else of the
+# laptop's: no user settings (so no status line, hooks, plugins or instruction files), no
+# claude.ai connectors and no notices, the cruise plugin from this folder, its tools allowed
+# for this session, and no shell tool.
+cd "{work}"
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 ENABLE_CLAUDEAI_MCP_SERVERS=false
+exec claude --plugin-dir "{plugin}" --setting-sources project --model sonnet \\
+    --allowedTools mcp__plugin_cruise_cruise --disallowedTools Bash
+"""
+OPEN_SIGN_IN = """\
+#!/usr/bin/env bash
+# The plugin's "browser": Python's webbrowser runs this (BROWSER) with the sign-in page's
+# address. It hands the address to demo/agent-signin.mjs and returns at once.
+nohup "{node}" "{script}" "$1" >"{log}" 2>&1 &
+"""
+
+
+def build_agent(work: Path, site: str) -> None:
+    """Write `work/.demo/`: the plugin, the archive it starts on and the two commands."""
+    support = work / ".demo"
+    agent = ROOT / "packages" / "agent"
+    plugin = support / "plugin"
+    (plugin / ".claude-plugin").mkdir(parents=True)
+    shutil.copy(agent / ".claude-plugin" / "plugin.json", plugin / ".claude-plugin")
+    shutil.copytree(agent / "skills", plugin / "skills")
+    # The plugin's own .mcp.json fetches a released tag; this one runs the checkout's server.
+    opener = support / "bin" / "open-sign-in"
+    server = {
+        "command": "uv",
+        "args": ["run", "--project", str(ROOT), "--all-packages", "--frozen", "python"]
+        + [str(ROOT / "demo" / "archive_mcp.py")],
+        "env": {"XDG_CONFIG_HOME": str(support / "config"), "BROWSER": str(opener)},
+    }
+    (plugin / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"cruise": server}}, indent=2) + "\n", "utf-8"
     )
-    wrapper.chmod(0o755)
-    return {"work": str(work), "plot": str(plot), "plotTitle": PLOT_TITLE, "snow": str(snow)}
+    # The stage as the plugin's saved archive, written by the plugin's own connect, in a
+    # config folder of the recording's own.
+    from archive_agent import server as plugin_server
+    from archive_agent.state import Session
+
+    os.environ["XDG_CONFIG_HOME"] = str(support / "config")
+    plugin_server.connect(Session(), site)
+    opener.parent.mkdir()
+    node = shutil.which("node")
+    if node is None:
+        raise Failed("node is not installed")
+    commands = {
+        opener: OPEN_SIGN_IN.format(
+            node=node, script=ROOT / "demo" / "agent-signin.mjs", log=support / "sign-in.log"
+        ),
+        support / "bin" / "cruise-agent": AGENT.format(work=work, plugin=plugin),
+    }
+    for path, text in commands.items():
+        path.write_text(text, "utf-8")
+        path.chmod(0o755)
 
 
 # The stage.
@@ -351,68 +411,56 @@ def publish_samples(domain: str, token: str) -> None:
         time.sleep(POLL_SECONDS)
 
 
+def decide(domain: str, curator_token: str, sid: str, decision: str) -> None:
+    status, raw = seed.http_send(
+        "POST",
+        f"https://{domain}/api/submissions/{urllib.parse.quote(sid, safe='')}/decision",
+        {"Authorization": curator_token, "content-type": "application/json"},
+        json.dumps({"decision": decision, "note": EARLIER}).encode(),
+    )
+    if status not in (200, 202):
+        raise Failed(f"the {decision} of submission {sid} answered {status}: {raw[:300]!r}")
+
+
+def clear_queue(domain: str, curator_token: str) -> None:
+    """Reject every submission an earlier take left waiting for a curator, so this take's
+    review queue holds its own two and nothing else."""
+    as_curator = seeder(domain, curator_token)
+    for waiting in as_curator.call("GET", "?status=in-review")["submissions"]:
+        decide(domain, curator_token, str(waiting["submissionId"]), "reject")
+        print(f"rejected {waiting.get('datasetId')}, an earlier take's submission")
+
+
 def free_plot_id(domain: str, curator_token: str) -> str:
     """The id this take's plot survey is published under: `plot-survey`, or after an earlier
     take on the same stage `plot-survey-2` and so on. An earlier take's dataset is withdrawn
-    first, so Browse opens on the six sample datasets again."""
-    held = published(domain)
-    if PLOT_TITLE in held:
-        earlier = held[PLOT_TITLE]
+    first, so Browse opens on the six sample datasets again. It is found by its id: its title
+    is the one the agent drafted in that take."""
+
+    def earlier() -> list[str]:
+        return [i for i in published(domain).values() if i.startswith("plot-survey")]
+
+    for dataset in earlier():
         status, raw = seed.http_send(
             "POST",
-            f"https://{domain}/api/admin/datasets/{urllib.parse.quote(earlier, safe='')}/withdraw",
+            f"https://{domain}/api/admin/datasets/{urllib.parse.quote(dataset, safe='')}/withdraw",
             {"Authorization": curator_token, "content-type": "application/json"},
-            json.dumps({"reason": "An earlier take of the demo video."}).encode(),
+            json.dumps({"reason": EARLIER}).encode(),
         )
         if status != 200:
-            raise Failed(f"withdrawing {earlier} answered {status}: {raw[:300]!r}")
-        print(f"withdrew {earlier}, an earlier take's dataset")
-        deadline = time.monotonic() + WAIT_SECONDS
-        while PLOT_TITLE in published(domain):
-            if time.monotonic() >= deadline:
-                raise Failed(f"search still lists {earlier} after its withdrawal")
-            time.sleep(POLL_SECONDS)
+            raise Failed(f"withdrawing {dataset} answered {status}: {raw[:300]!r}")
+        print(f"withdrew {dataset}, an earlier take's dataset")
+    deadline = time.monotonic() + WAIT_SECONDS
+    while left := earlier():
+        if time.monotonic() >= deadline:
+            raise Failed(f"search still lists {left} after its withdrawal")
+        time.sleep(POLL_SECONDS)
     for number in range(1, 50):
         candidate = "plot-survey" if number == 1 else f"plot-survey-{number}"
         status, _ = get_json(f"https://{domain}/api/datasets/{candidate}")
         if status == 404:
             return candidate
     raise Failed("no free plot-survey id; destroy the stage and deploy it again")
-
-
-def leave_one_waiting(
-    domain: str, curator_token: str, contributor_token: str, folder: Path
-) -> None:
-    """Submit the second package as the contributor and wait until it is in review, unless one
-    from an earlier take still waits there."""
-    as_curator = seeder(domain, curator_token)
-    waiting = as_curator.call("GET", "?status=in-review")["submissions"]
-    if any(str(s.get("datasetId", "")).startswith("snow-depth") for s in waiting):
-        print("snow-depth: already waiting for a curator")
-        return
-    as_contributor = seeder(domain, contributor_token)
-    created = as_contributor.call(
-        "POST", body={"files": seed.file_list(folder), "datasetId": "snow-depth"}, expect=201
-    )
-    for item in created["uploads"]:
-        data = (folder / item["path"]).read_bytes()
-        status, _ = seed.http_send("PUT", item["url"], dict(item["headers"]), data)
-        if status != 200:
-            raise Failed(f"the upload of {item['path']} answered {status}")
-    sid = str(created["submissionId"])
-    as_contributor.call("POST", f"/{sid}/submit", expect=202)
-    deadline = time.monotonic() + WAIT_SECONDS
-    while True:
-        answer = as_contributor.call("GET", f"/{sid}")
-        status = str(answer["submission"].get("status"))
-        if status == "in-review":
-            print("snow-depth: waiting for a curator")
-            return
-        if status != "checking":
-            raise Failed(f"snow-depth stopped: {status}\n{as_contributor.details(answer)}")
-        if time.monotonic() >= deadline:
-            raise Failed(f"snow-depth is still {status} after {WAIT_SECONDS:g} seconds")
-        time.sleep(POLL_SECONDS)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -456,11 +504,13 @@ def main(argv: list[str] | None = None) -> int:
             tokens[role] = id_token(cognito, pool, client, email, secret)
             print(f"{email}: ready ({', '.join(groups)})")
         publish_samples(domain, tokens["curator"])
+        clear_queue(domain, tokens["curator"])
         plot_id = free_plot_id(domain, tokens["curator"])
-        # The realpath: on macOS the temporary folder is behind a symlink.
-        work = Path(tempfile.mkdtemp(prefix="demo-video-")).resolve()
+        # Under /tmp, not the laptop user's own temporary folder, since Claude Code and the
+        # plugin's dialog show the path; and the realpath, as /tmp is behind a symlink on macOS.
+        work = Path(tempfile.mkdtemp(prefix="demo-video-", dir="/tmp")).resolve()
         folders = build_packages(work, plot_id)
-        leave_one_waiting(domain, tokens["curator"], tokens["contributor"], Path(folders["snow"]))
+        build_agent(work, f"https://{domain}")
     except (Failed, seed.Failed, OSError) as error:
         print(error)
         return 1

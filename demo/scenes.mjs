@@ -1,7 +1,8 @@
 /* global document, fetch */
 // The browser scenes, the screenshots and the caption strips of the demo video, with Playwright.
-// `just demo-video` runs this after demo/setup.py (which wrote out/run.json) and the terminal
-// scene (which gave the plot survey its title). It writes one .webm per scene to out/scenes/,
+// `just demo-video` runs this after demo/setup.py (which wrote out/run.json) and the agent
+// scene (in which Claude Code gave the plot survey its title and submitted it through the
+// cruise plugin). It writes one .webm per scene to out/scenes/,
 // the parts of each to keep to out/timeline.json, the screenshots to out/screenshots/ and one
 // transparent caption strip per scene to out/captions/. demo/assemble.mjs joins them.
 //
@@ -156,11 +157,11 @@ async function openBrowse(page) {
   await resultsHead(page).filter({ hasText: "6 datasets" }).waitFor();
 }
 
-/** Submit, signed in as the contributor, with the plot survey chosen and its checks shown. */
-async function chooseFolder(page) {
+/** Submit, signed in as a contributor, with a package folder chosen and its checks shown. */
+async function chooseFolder(page, folder) {
   // The folder goes to the page's own "Choose folder" input: a script can't drop a real
   // folder from the desktop, and the page treats a chosen folder and a dropped one alike.
-  await page.locator(".dropzone input[type=file]").setInputFiles(run.plot);
+  await page.locator(".dropzone input[type=file]").setInputFiles(folder);
   const checks = page.locator(".pre-checks");
   await checks.getByRole("heading", { name: "Checks before upload" }).waitFor();
   await checks.locator("p.muted[role=status]").waitFor({ state: "detached" });
@@ -169,10 +170,13 @@ async function chooseFolder(page) {
 const queueRow = (page, title) =>
   page.locator("table.queue").getByRole("link", { name: title, exact: true });
 
+/** The review queue, as the curator, once both of the video's submissions wait in it. */
 async function openQueue(page) {
   await signIn(page, run.accounts.curator, "/review");
-  await queueRow(page, run.plotTitle).waitFor();
-  await queueRow(page, run.snowTitle).waitFor();
+  // The archive checks a submission for a minute or two before a curator sees it; the page
+  // reads the queue again every ten seconds.
+  for (const title of [run.plotTitle, run.snowTitle])
+    await queueRow(page, title).waitFor({ timeout: LONG_WAIT });
 }
 
 const datasetPath = () => `/datasets/${encodeURIComponent(run.plotId)}`;
@@ -268,14 +272,16 @@ const browser = await chromium.launch();
 try {
   for (const folder of ["scenes", "screenshots", "captions"])
     await mkdir(path.join(out, folder), { recursive: true });
+  // The plot survey's title is the one the agent drafted in this take.
   const manifest = JSON.parse(await readFile(path.join(run.plot, "datapackage.json"), "utf8"));
-  if (manifest.title !== run.plotTitle)
-    throw new Error("the plot survey has no title yet: record the terminal scene first");
+  if (!manifest.title)
+    throw new Error("the plot survey has no title: the agent scene didn't fix and submit it");
+  run.plotTitle = manifest.title;
 
   await captionStrips(browser);
 
   // Scene 1. Browse: six datasets, and a search for "stream" narrows them to two. (Scene 2 is
-  // the terminal's, recorded by VHS before this script runs.)
+  // the agent's, recorded by VHS before this script runs.)
   await still(browser, "demo-browse", {}, openBrowse);
   await scene(browser, "browse", {}, async (page, keep) => {
     await openBrowse(page);
@@ -291,21 +297,23 @@ try {
     });
   });
 
-  // Scene 3. Submit, as the contributor: the folder, Checks before upload, Upload and submit, and
-  //    the submission's page saying Being checked. Then, off camera, the wait for a curator.
+  // Scene 3. Submit, as a second contributor, the other way: the snow-depth folder, Checks before
+  //    upload, Upload and submit, and the submission's page saying Being checked. Then, off
+  //    camera, the wait for a curator. The screenshot is of the plot survey's checks, which
+  //    hold a warning; nothing is sent from it.
   await still(browser, "demo-submit-checks", {}, async (page) => {
     await signIn(page, run.accounts.contributor, "/submit");
-    await chooseFolder(page);
+    await chooseFolder(page, run.plot);
     return "full";
   });
   await scene(browser, "submit", {}, async (page, keep) => {
-    await signIn(page, run.accounts.contributor, "/submit");
+    await signIn(page, run.accounts.second, "/submit");
     await page.getByRole("heading", { name: "Submit a package" }).waitFor();
     const badge = page.locator(".status-row .badge");
     await keep(async () => {
       await pause(page, 1500);
       await point(page, page.locator(".dropzone .choose"));
-      await chooseFolder(page);
+      await chooseFolder(page, run.snow);
       await pause(page, 5000);
       await press(page, page.getByRole("button", { name: "Upload and submit" }));
       await page.waitForURL((url) => url.pathname.startsWith("/submissions/"));
@@ -319,8 +327,8 @@ try {
       throw new Error(`the submission stopped at "${status}", not waiting for a curator`);
   });
 
-  // Scene 4. Review, as the curator: the queue, the submission, a file previewed, Approve. Then, off
-  //    camera, the wait for the dataset to be published.
+  // Scene 4. Review, as the curator: the queue with both submissions, the plot survey, a file
+  //    previewed, Approve. Then, off camera, the wait for the dataset to be published.
   await still(browser, "demo-review-queue", {}, openQueue);
   await scene(browser, "review", {}, async (page, keep) => {
     await openQueue(page);

@@ -5,14 +5,14 @@
     "caption": "A research data archive your group runs in its own AWS account."
   },
   {
-    "scene": "terminal",
-    "seconds": 20,
-    "caption": "Check a dataset on your laptop: every problem comes with its fix."
+    "scene": "agent",
+    "seconds": 30,
+    "caption": "Ask your agent to check a dataset, fix it and submit it."
   },
   {
     "scene": "submit",
     "seconds": 17,
-    "caption": "Submit it; the archive scans it and runs the same checks."
+    "caption": "Or submit in the browser; the archive runs the same checks."
   },
   {
     "scene": "review",
