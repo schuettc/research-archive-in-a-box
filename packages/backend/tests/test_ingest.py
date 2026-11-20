@@ -50,6 +50,7 @@ ENV = Env(
     catalog_table_a="catalog-a",
     catalog_table_b="catalog-b",
     site_domain="d111.cloudfront.net",
+    lifecycle_function="lifecycle",
 )
 
 
@@ -90,6 +91,7 @@ class FakeS3:
         self.tags: dict[str, str] = {}
         self.pending: dict[str, str] = {}
         self.copies: list[tuple[str, str]] = []
+        self.copy_calls: list[dict[str, Any]] = []
         self.fail_copy = False
         self.sizes: dict[str, int] = {}
         self.downloads: list[str] = []
@@ -115,24 +117,27 @@ class FakeS3:
             self.objects[Key] = body
         return {}
 
-    def head_object(self, *, Bucket: str, Key: str, **_: Any) -> dict[str, Any]:
+    def head_object(self, *, Bucket: str, Key: str, **extra: Any) -> dict[str, Any]:
         if Bucket == STAGING and Key in self.objects:
-            return {
-                "Metadata": {},
-                "ContentLength": self.sizes.get(Key, len(self.objects[Key])),
-                "ChecksumSHA256": self._sha256(self.objects[Key]),
-            }
-        if (Bucket, Key) not in self.published:
+            body = self.objects[Key]
+            size = self.sizes.get(Key, len(body))
+        elif (Bucket, Key) in self.published:
+            body = self.published[(Bucket, Key)]
+            size = len(body)
+        else:
             raise ClientError({"Error": {"Code": "404"}}, "HeadObject")
-        body = self.published[(Bucket, Key)]
-        return {"Metadata": {}, "ContentLength": len(body), "ChecksumSHA256": self._sha256(body)}
+        head: dict[str, Any] = {"Metadata": {}, "ContentLength": size}
+        # S3 answers with the checksum only when asked for it.
+        if extra.get("ChecksumMode") == "ENABLED":
+            head["ChecksumSHA256"] = self._sha256(body)
+        return head
 
     @staticmethod
     def _sha256(body: bytes) -> str:
         return base64.b64encode(hashlib.sha256(body).digest()).decode()
 
     def copy_object(
-        self, *, Bucket: str, Key: str, CopySource: dict[str, str], **_: Any
+        self, *, Bucket: str, Key: str, CopySource: dict[str, str], **extra: Any
     ) -> dict[str, Any]:
         if self.fail_copy:
             raise RuntimeError("copy refused")
@@ -145,8 +150,19 @@ class FakeS3:
             return {"CopyObjectResult": {"ChecksumSHA256": self._sha256(body)}}
         assert CopySource["Bucket"] == STAGING
         assert Bucket == STAGING
-        self.objects[Key] = self.objects[CopySource["Key"]]
+        body = self.objects[CopySource["Key"]]
+        self.objects[Key] = body
         self.copies.append((CopySource["Key"], Key))
+        self.copy_calls.append(extra)
+        # S3 copies the source's tags unless told to replace them.
+        tag = self.tags.get(CopySource["Key"])
+        if extra.get("TaggingDirective") == "REPLACE" or tag is None:
+            self.tags.pop(Key, None)
+        else:
+            self.tags[Key] = tag
+        # And answers with the copy's checksum only when asked to compute one.
+        if extra.get("ChecksumAlgorithm") == "SHA256":
+            return {"CopyObjectResult": {"ChecksumSHA256": self._sha256(body)}}
         return {}
 
     def get_paginator(self, name: str) -> "FakeS3":
@@ -236,6 +252,18 @@ class FakeSNS:
         return [p for p in self.published if p["TopicArn"] == topic]
 
 
+class FakeLambda:
+    def __init__(self) -> None:
+        self.invokes: list[dict[str, Any]] = []
+        self.fail = False
+
+    def invoke(self, **kwargs: Any) -> dict[str, Any]:
+        if self.fail:
+            raise RuntimeError("invoke refused")
+        self.invokes.append(kwargs)
+        return {"StatusCode": 202}
+
+
 class FakeDynamoDB:
     def __init__(self) -> None:
         self.items: dict[tuple[str, str, str], dict[str, Any]] = {}
@@ -293,14 +321,20 @@ returning one."""
 class FakeContext:
     """Runs steps once, recording each operation's name and result for a replay."""
 
-    def __init__(self, world: "World", script: Script) -> None:
+    def __init__(
+        self, world: "World", script: Script, before: dict[str, Callable[[], object]] | None = None
+    ) -> None:
         self.world = world
         self.script = list(script)
+        # What happens just before the step of each name runs, once.
+        self.before = dict(before or {})
         self.log: list[tuple[str, str | None, Any]] = []
         self.timeouts: list[tuple[str | None, int]] = []
         self.polls: list[int] = []
 
     def step(self, func: Callable[[Any], Any], name: str | None = None) -> Any:
+        if name in self.before:
+            self.before.pop(name)()
         try:
             result = func(None)
         except Exception as error:
@@ -398,6 +432,7 @@ class World:
         self.submissions = FakeSubmissions()
         self.reviews = FakeReviews()
         self.settings = FakeSettings()
+        self.lambda_ = FakeLambda()
         self.now = datetime(2026, 11, 1, tzinfo=UTC)
         self.clients = Clients(
             s3=cast(ingest.S3, self.s3),
@@ -408,6 +443,7 @@ class World:
             reviews=cast(submissions.Table, self.reviews),
             settings=cast(submissions.Table, self.settings),
             bedrock=cast(Bedrock, None),
+            lambda_=self.lambda_,
         )
         monkeypatch.setattr(ingest, "clients", lambda env: self.clients)
         monkeypatch.setattr(ingest, "_clock", lambda: self.now)
@@ -425,6 +461,7 @@ class World:
             "CATALOG_TABLE_A": ENV.catalog_table_a,
             "CATALOG_TABLE_B": ENV.catalog_table_b,
             "SITE_DOMAIN": ENV.site_domain,
+            "LIFECYCLE_FUNCTION": ENV.lifecycle_function,
         }.items():
             monkeypatch.setenv(name, value)
         self.submissions.items[SID] = {
@@ -469,8 +506,10 @@ class World:
 
         return send
 
-    def run(self, script: Script) -> tuple[dict[str, Any], FakeContext]:
-        context = FakeContext(self, script)
+    def run(
+        self, script: Script, before: dict[str, Callable[[], object]] | None = None
+    ) -> tuple[dict[str, Any], FakeContext]:
+        context = FakeContext(self, script, before)
         result = ingest.run({"submissionId": SID}, cast(DurableContext, context))
         assert context.script == [], "every scripted callback was used"
         return result, context
@@ -656,6 +695,81 @@ def test_a_stored_file_of_another_size_than_declared_blocks_the_round_unread(
     ]
     assert world.reviews.events[1]["blocked"] is True
     assert world.s3.downloads == [] and world.s3.copies == []
+
+
+LOGGER = f"incoming/{SID}/1/data/logger.csv"
+
+
+def _other(body: bytes) -> bytes:
+    """Other bytes of the same length."""
+    return body[:-2] + b"0\n"
+
+
+def test_a_stored_file_with_another_sha256_than_declared_blocks_the_round_unread(
+    world: World,
+) -> None:
+    world.s3.objects[LOGGER] = _other(world.s3.objects[LOGGER])
+
+    result, _ = world.run(["timeout"])
+
+    assert result["status"] == "abandoned"
+    report = json.loads(world.s3.objects[f"reports/{SID}/1.json"])
+    assert [
+        (f["ruleId"], f["severity"], f["target"], f["message"]) for f in report["findings"]
+    ] == [
+        (
+            "upload.checksum",
+            "error",
+            {"path": "data/logger.csv"},
+            "data/logger.csv as uploaded has another SHA-256 than the submission declared.",
+        )
+    ]
+    assert world.reviews.events[1]["blocked"] is True
+    assert world.s3.downloads == [] and world.s3.copies == []
+
+
+def test_a_file_that_changes_between_check_and_hold_ends_the_submission_failed(
+    world: World,
+) -> None:
+    def change() -> None:
+        world.s3.objects[LOGGER] = _other(world.s3.objects[LOGGER])
+
+    result, _ = world.run([], before={"hold-1": change})
+
+    assert result["status"] == "failed"
+    assert world.types() == ["scanned", "checked", "failed"]
+    assert "data/logger.csv" in world.reviews.events[-1]["error"]
+    assert world.s3.keys(f"held/{SID}/") == []
+    [alert] = world.sns.to(ALERTS)
+    assert SID in alert["Subject"]
+
+
+def test_a_file_with_no_clean_scan_result_at_hold_ends_the_submission_failed(
+    world: World,
+) -> None:
+    result, _ = world.run([], before={"hold-1": lambda: world.s3.tags.pop(LOGGER)})
+
+    assert result["status"] == "failed"
+    assert "scan" in world.reviews.events[-1]["error"]
+    assert world.s3.keys(f"held/{SID}/") == []
+
+
+def test_hold_copies_with_the_sha256_and_leaves_the_scan_result_on_each_copy(
+    world: World,
+) -> None:
+    held: dict[str, str | None] = {}
+
+    def look() -> None:
+        held.update({key: world.s3.tags.get(key) for key in world.s3.keys(f"held/{SID}/")})
+
+    world.run([_decision("reject")], before={"policy-1": look})
+
+    assert len(held) == len(_package())
+    assert set(held.values()) == {"NO_THREATS_FOUND"}
+    assert all(
+        call["ChecksumAlgorithm"] == "SHA256" and "TaggingDirective" not in call
+        for call in world.s3.copy_calls
+    )
 
 
 def test_stored_files_totalling_more_than_the_limit_block_the_round_unread(world: World) -> None:

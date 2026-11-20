@@ -16,6 +16,7 @@ ENV = Env(
     catalog_tables={"A": "catalog-a", "B": "catalog-b"},
     user_pool_id="pool",
     archive_config_parameter="config",
+    user_profiles_table="user-profiles",
 )
 
 USERS = {
@@ -38,6 +39,9 @@ class FakeCognito:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        # The caller's id and the groups the pool has for them, set by `call` from the token.
+        self.caller = ""
+        self.groups: list[str] = []
 
     def list_users(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append(("list_users", kwargs))
@@ -45,7 +49,13 @@ class FakeCognito:
         prefix, sub = kwargs["Filter"].split(" = ")
         assert prefix == "sub"
         sub = json.loads(sub)
+        if sub == self.caller:
+            return {"Users": [{"Username": sub, "Attributes": [{"Name": "sub", "Value": sub}]}]}
         return {"Users": [_user(sub)] if sub in USERS else []}
+
+    def admin_list_groups_for_user(self, **kwargs: Any) -> dict[str, Any]:
+        assert (kwargs["UserPoolId"], kwargs["Username"]) == ("pool", self.caller)
+        return {"Groups": [{"GroupName": name} for name in self.groups]}
 
     def list_users_in_group(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append(("list_users_in_group", kwargs))
@@ -56,6 +66,13 @@ class FakeCognito:
         if index + 1 < len(CURATORS):
             page["NextToken"] = str(index + 1)
         return page
+
+
+class NoProfiles:
+    """A profile table with no profile for anyone."""
+
+    def get_item(self, **kwargs: Any) -> dict[str, Any]:
+        return {}
 
 
 @pytest.fixture
@@ -80,7 +97,10 @@ def call(
         settings=none,
         table=none,
         cognito=cast(submissions.Cognito, cognito),
+        profiles=cast(submissions.Table, NoProfiles()),
     )
+    cognito.caller = user
+    cognito.groups = [g for g in groups.split(",") if g]
     event = {
         "httpMethod": "GET",
         "resource": resource,
@@ -91,6 +111,10 @@ def call(
         "requestContext": {"authorizer": {"claims": {"sub": user, "cognito:groups": groups}}},
     }
     response = submissions.handle(event, c, ENV)
+    # The caller's own lookup comes first; the assertions count only the route's lookups.
+    own = ("list_users", {"UserPoolId": "pool", "Filter": f'sub = "{user}"', "Limit": 1})
+    if cognito.calls[:1] == [own]:
+        del cognito.calls[0]
     return response["statusCode"], json.loads(response["body"])
 
 

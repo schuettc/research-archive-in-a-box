@@ -18,8 +18,10 @@ inside S3 to the version's folder under `open/` or `restricted/` in the archive 
 file checked against its line in `checksums.sha256`, each zip against the one built, the
 manifest last), put the catalog items the reindex would build into the active table (the
 dataset item last, which moves `currentVersion` and drops the claim), write the dataset page,
-rewrite the catalog file search reads and the sitemap, and finish, which empties
-`held/<id>/`. The unfinished version is built in the staging bucket because the archive
+rewrite the catalog file search reads and the sitemap, start the dataset's lifecycle run,
+which moves an older version's files when the new version made the dataset stricter, and
+finish, which empties `held/<id>/`. The unfinished version is built in the staging bucket
+because the archive
 bucket is versioned and may be locked: whatever is written there stays stored. So until the
 copy step nothing of the version is in the archive bucket, and the reindex, which looks for
 manifests, finds the version only once every file and zip is there. Readers get the version
@@ -130,6 +132,10 @@ class SSM(Protocol):
     def get_parameter(self, **kwargs: Any) -> dict[str, Any]: ...
 
 
+class Lambda(Protocol):
+    def invoke(self, **kwargs: Any) -> Any: ...
+
+
 class DynamoDB(Protocol):
     """The low-level client, for the catalog tables' DynamoDB JSON items."""
 
@@ -152,6 +158,7 @@ class Clients:
     reviews: Table
     settings: Table
     bedrock: Bedrock
+    lambda_: Lambda
 
 
 @dataclass(frozen=True)
@@ -169,6 +176,7 @@ class Env:
     catalog_table_a: str
     catalog_table_b: str
     site_domain: str
+    lifecycle_function: str
 
     @classmethod
     def from_environ(cls) -> Env:
@@ -186,6 +194,7 @@ class Env:
             catalog_table_a=os.environ["CATALOG_TABLE_A"],
             catalog_table_b=os.environ["CATALOG_TABLE_B"],
             site_domain=os.environ["SITE_DOMAIN"],
+            lifecycle_function=os.environ["LIFECYCLE_FUNCTION"],
         )
 
 
@@ -204,6 +213,7 @@ def clients(env: Env) -> Clients:
         reviews=table(env.reviews_table),
         settings=table(env.settings_table),
         bedrock=cast(Bedrock, boto3.client("bedrock-runtime")),
+        lambda_=cast(Lambda, boto3.client("lambda")),
     )
 
 
@@ -340,17 +350,30 @@ def _scan_findings(tags: dict[str, str]) -> list[Finding]:
     ]
 
 
-def _size_findings(c: Clients, env: Env, sid: str, round: int, gib: int) -> list[Finding]:
+def _hex(checksum: object) -> str | None:
+    """S3's base64 SHA-256 as hex, or None when S3 gave none."""
+    if not isinstance(checksum, str) or not checksum:
+        return None
+    try:
+        return base64.b64decode(checksum).hex()
+    except ValueError:
+        return None
+
+
+def _upload_findings(c: Clients, env: Env, sid: str, round: int, gib: int) -> list[Finding]:
     """What the round's stored objects weigh against what the submission declared: a finding for
     each file whose stored size differs, and one when the stored files total more than the
     archive's limit. The upload link signs a file's SHA-256 and not its size, so the API's check
-    of the declared total holds only for a client that declares true sizes."""
+    of the declared total holds only for a client that declares true sizes. And a finding for
+    each file whose stored SHA-256 is not the one the submission declared for it."""
     files = (_submission(c, sid).get("files") or {}).get(str(round)) or []
     findings: list[Finding] = []
     total = 0
     for entry in files:
         path, declared = str(entry["path"]), int(entry["size"])
-        head = c.s3.head_object(Bucket=env.staging_bucket, Key=_incoming(sid, round, path))
+        head = c.s3.head_object(
+            Bucket=env.staging_bucket, Key=_incoming(sid, round, path), ChecksumMode="ENABLED"
+        )
         stored = int(head["ContentLength"])
         total += stored
         if stored != declared:
@@ -360,6 +383,15 @@ def _size_findings(c: Clients, env: Env, sid: str, round: int, gib: int) -> list
                     severity="error",
                     message=f"{path} is {stored:,} bytes as uploaded, not the {declared:,} bytes "
                     "the submission declared.",
+                    target=Target(path=path),
+                )
+            )
+        if _hex(head.get("ChecksumSHA256")) != str(entry["sha256"]).lower():
+            findings.append(
+                Finding(
+                    rule_id="upload.checksum",
+                    severity="error",
+                    message=f"{path} as uploaded has another SHA-256 than the submission declared.",
                     target=Target(path=path),
                 )
             )
@@ -438,15 +470,15 @@ def _check(
     tags: dict[str, str],
 ) -> dict[str, Any]:
     """Diagnose the round (unless the scan blocked it, or its stored files are not the sizes
-    declared or total more than the archive takes: then nothing is downloaded), store the
-    report, block on an error."""
+    declared or total more than the archive takes, or are not the files declared: then nothing
+    is downloaded), store the report, block on an error."""
     report: dict[str, Any] = {"round": round, "validation": None, "quality": None}
     findings = _scan_findings(tags)
     facts = _facts({})
     config = None
     if not findings:
         config = read_archive_config(c.ssm, env.archive_config_parameter)
-        findings = _size_findings(c, env, sid, round, config.submissions.max_package_gib)
+        findings = _upload_findings(c, env, sid, round, config.submissions.max_package_gib)
     if config is not None and not findings:
         with tempfile.TemporaryDirectory(prefix="ingest-") as tmp:
             folder = Path(tmp)
@@ -481,17 +513,35 @@ def _check(
     return {"blocked": blocked, **facts}
 
 
+class HeldMismatch(Exception):
+    """A file arrived in held/ with other bytes than the round declared, or with no clean scan
+    result."""
+
+
 @durable_step
 def _hold(_: StepContext, c: Clients, env: Env, sid: str, round: int, paths: list[str]) -> None:
-    """Replace `held/<id>/` with this round's files."""
+    """Replace `held/<id>/` with this round's files, each copy checked against the SHA-256 the
+    round declared for it and carrying the scan's clean result."""
     held = f"held/{sid}/"
     _delete_prefix(c, env, held)
+    files = (_submission(c, sid).get("files") or {}).get(str(round)) or []
+    declared = {str(f["path"]): str(f["sha256"]).lower() for f in files}
     for path in paths:
-        c.s3.copy_object(
+        # With no TaggingDirective, so the copy carries the source's scan tag.
+        copied = c.s3.copy_object(
             Bucket=env.staging_bucket,
             Key=held + path,
             CopySource={"Bucket": env.staging_bucket, "Key": _incoming(sid, round, path)},
+            ChecksumAlgorithm="SHA256",
         )
+        stored = _hex(copied.get("CopyObjectResult", {}).get("ChecksumSHA256"))
+        if stored is None or stored != declared.get(path):
+            _delete_prefix(c, env, held)
+            raise HeldMismatch(f"the held copy of {path} differs from the file the round declared")
+        tagging = c.s3.get_object_tagging(Bucket=env.staging_bucket, Key=held + path)
+        if not any(t["Key"] == SCAN_TAG and t["Value"] == CLEAN for t in tagging["TagSet"]):
+            _delete_prefix(c, env, held)
+            raise HeldMismatch(f"the held copy of {path} has no clean scan result")
     put_event(c.reviews, sid, "held", PIPELINE, round, files=len(paths))
 
 
@@ -1122,6 +1172,32 @@ def _sitemap(_: StepContext, c: Clients, env: Env, target: dict[str, Any]) -> in
 
 
 @durable_step
+def _lifecycle(_: StepContext, c: Clients, env: Env, target: dict[str, Any]) -> None:
+    """Start the lifecycle run for the dataset, as a withdrawal does, so each older version's
+    files move to where the dataset's record now puts them without waiting for the daily run.
+    Safe to repeat: a run that finds everything in place moves nothing."""
+    c.lambda_.invoke(
+        FunctionName=env.lifecycle_function,
+        InvocationType="Event",
+        Payload=json.dumps({"datasetId": target["datasetId"]}).encode("utf-8"),
+    )
+
+
+@durable_step
+def _lifecycle_alert(
+    _: StepContext, c: Clients, env: Env, target: dict[str, Any], error: str
+) -> None:
+    dataset_id, version = target["datasetId"], int(target["version"])
+    _alert(
+        c,
+        env,
+        f"Lifecycle run not started: {dataset_id} v{version}",
+        f"Version {version} of {dataset_id} is published, but the run that moves its older "
+        f"versions' files did not start: {error}\n\nThe daily run at 00:15 UTC moves them.",
+    )
+
+
+@durable_step
 def _doi(
     _: StepContext, c: Clients, env: Env, target: dict[str, Any], filled: dict[str, Any]
 ) -> dict[str, str]:
@@ -1267,6 +1343,12 @@ def publish(
         _register_doi(context, c, env, sid, target, filled, name)
     context.step(_catalog_file(c, env, target), name=name("catalog-file"))
     context.step(_sitemap(c, env, target), name=name("sitemap"))
+    try:
+        context.step(_lifecycle(c, env, target), name=name("lifecycle"))
+    except Exception as error:
+        # The step's last failure after its retries; never SuspendExecution, a BaseException.
+        failed = str(error) or type(error).__name__
+        context.step(_lifecycle_alert(c, env, target, failed), name=name("lifecycle-alert"))
     context.step(_finish(c, env, sid, round, rule, target), name=name("finish"))
     return {"datasetId": target["datasetId"], "version": int(target["version"])}
 

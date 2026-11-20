@@ -19,6 +19,7 @@ SUB = re.compile(r"[A-Za-z0-9-]{1,128}")
 class Cognito(Protocol):
     def list_users(self, **kwargs: Any) -> dict[str, Any]: ...
     def list_users_in_group(self, **kwargs: Any) -> dict[str, Any]: ...
+    def admin_list_groups_for_user(self, **kwargs: Any) -> dict[str, Any]: ...
 
 
 class Groups(Protocol):
@@ -75,15 +76,20 @@ class NotAllowed(Exception):
 
 def require_live(
     cognito: Groups, pool: str, sub: str, *, disabled: bool, roles: set[str], refusal: str
-) -> None:
+) -> set[str]:
     """Refuse a token older than a disable or a demotion: it stays valid until it expires, so
     take the UserProfiles `disabled` mark as read by the caller, and read the account's groups
-    live; one of `roles` must be among them. Raise NotAllowed with the reason."""
+    live; one of `roles` must be among them. Raise NotAllowed with the reason. Returns every
+    group the account is in now."""
     if disabled:
         raise NotAllowed("your account is disabled")
     user = find(cognito, pool, sub) if SUB.fullmatch(sub) else None
-    if user is None or not roles & set(groups(cognito, pool, user["Username"])):
+    if user is None:
         raise NotAllowed(refusal)
+    live = set(groups(cognito, pool, user["Username"]))
+    if not roles & live:
+        raise NotAllowed(refusal)
+    return live
 
 
 def emails(cognito: Cognito, pool: str, subs: list[str]) -> dict[str, dict[str, str]]:

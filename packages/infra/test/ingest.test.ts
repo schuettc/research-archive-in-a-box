@@ -122,7 +122,7 @@ test("the ingest's rights in the staging bucket are exactly these", () => {
     "s3:AbortMultipartUpload": ["/held/*"],
     "s3:DeleteObject": ["/held/*"],
     "s3:GetObject": ["/held/*", "/incoming/*"],
-    "s3:GetObjectTagging": ["/incoming/*"],
+    "s3:GetObjectTagging": ["/held/*", "/incoming/*"],
     "s3:ListBucket": ["(bucket)"],
     "s3:PutObject": ["/held/*", "/reports/*"],
     "s3:PutObjectTagging": ["/held/*"],
@@ -182,6 +182,7 @@ test("every environment variable either handler reads is set", () => {
       "CATALOG_TABLE_A",
       "CATALOG_TABLE_B",
       "SITE_DOMAIN",
+      "LIFECYCLE_FUNCTION",
     ].sort(),
   );
   expect(ingest.Variables.CURATOR_TOPIC_ARN).toEqual({ Ref: logicalId(archive.curatorTopic) });
@@ -200,11 +201,23 @@ test("every environment variable either handler reads is set", () => {
       "CATALOG_TABLE_B",
       "USER_POOL_ID",
       "ARCHIVE_CONFIG_PARAMETER",
+      "USER_PROFILES_TABLE",
     ].sort(),
   );
   expect(api.Variables.USER_POOL_ID).toEqual({ Ref: logicalId(archive.userPool) });
   expect(JSON.stringify(api.Variables.INGEST_ALIAS_ARN)).toContain(
     ":function:ResearchArchive-prod-Ingest:live",
+  );
+});
+
+test("the ingest names the lifecycle function by its fixed name and may invoke only it", () => {
+  const ingest = fn(INGEST).properties.Environment as { Variables: Record<string, unknown> };
+  expect(ingest.Variables.LIFECYCLE_FUNCTION).toBe("ResearchArchive-prod-Lifecycle");
+  const invokes = statements(INGEST).filter((s) => actions(s).includes("lambda:InvokeFunction"));
+  expect(invokes).toHaveLength(1);
+  expect(actions(invokes[0]!)).toEqual(["lambda:InvokeFunction"]);
+  expect(JSON.stringify(invokes[0]!.Resource)).toMatch(
+    /:function:ResearchArchive-prod-Lifecycle"\]\]\}$/,
   );
 });
 
@@ -504,17 +517,23 @@ test("the ingest may call Bedrock only with the embeddings module, to embed what
   expect(statements(INGEST).flatMap(actions)).not.toContain("bedrock:InvokeModel");
 });
 
-test("the submissions function may only list the user pool's users and a group's members", () => {
-  const cognito = statements(SUBMISSIONS).filter((s) =>
-    actions(s).some((action) => action.startsWith("cognito-idp:")),
-  );
-
-  expect(cognito).toEqual([
-    expect.objectContaining({
-      Action: ["cognito-idp:ListUsers", "cognito-idp:ListUsersInGroup"],
-      Resource: { "Fn::GetAtt": [logicalId(archive.userPool), "Arn"] },
-    }),
+test("the submissions function may list the pool's users, a group's members and a user's groups", () => {
+  const onPool = statements(SUBMISSIONS)
+    .flatMap(actions)
+    .filter((action) => action.startsWith("cognito-idp:"));
+  expect(onPool.sort()).toEqual([
+    "cognito-idp:AdminListGroupsForUser",
+    "cognito-idp:ListUsers",
+    "cognito-idp:ListUsersInGroup",
   ]);
+});
+
+test("the submissions function may read a profile, and nothing else of UserProfiles", () => {
+  const profiles = logicalId(archive.userProfiles);
+  const onProfiles = statements(SUBMISSIONS)
+    .filter((s) => JSON.stringify(s.Resource).includes(profiles))
+    .flatMap(actions);
+  expect(onProfiles).toEqual(["dynamodb:GetItem"]);
 });
 
 test("the submissions function may read the archive config, so a check runs the archive's rules", () => {

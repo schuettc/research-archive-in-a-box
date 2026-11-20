@@ -2,7 +2,8 @@
 
 A submission is one item in the Submissions table, keyed by `submissionId`; every state change
 and decision is one event in the Reviews table, keyed by `submissionId` and `eventKey` =
-`<ISO time>#<uuid>`. The API checks the caller's role from the token's `cognito:groups` claim,
+`<ISO time>#<uuid>`. The API checks the caller's role from the token's `cognito:groups` claim
+and from the user pool's groups now (`ROLES`),
 hands out presigned PUTs that require each file's SHA-256, starts the ingest execution (named by
 the submission id) through its `live` alias, and completes the execution's open callback on a
 resubmit or a curator's decision.
@@ -139,6 +140,7 @@ class Clients:
     settings: Table
     table: Callable[[str], Table]
     cognito: Cognito
+    profiles: Table
 
 
 @dataclass(frozen=True)
@@ -152,6 +154,7 @@ class Env:
     catalog_tables: dict[str, str]
     user_pool_id: str
     archive_config_parameter: str
+    user_profiles_table: str
 
     @classmethod
     def from_environ(cls) -> Env:
@@ -165,6 +168,7 @@ class Env:
             catalog_tables={"A": os.environ["CATALOG_TABLE_A"], "B": os.environ["CATALOG_TABLE_B"]},
             user_pool_id=os.environ["USER_POOL_ID"],
             archive_config_parameter=os.environ["ARCHIVE_CONFIG_PARAMETER"],
+            user_profiles_table=os.environ["USER_PROFILES_TABLE"],
         )
 
 
@@ -183,6 +187,7 @@ def clients(env: Env) -> Clients:
         settings=table(env.settings_table),
         table=table,
         cognito=cast(Cognito, boto3.client("cognito-idp")),
+        profiles=table(env.user_profiles_table),
     )
 
 
@@ -820,6 +825,43 @@ def list_curators(c: Clients, env: Env, caller: Caller) -> dict[str, Any]:
     return _response(200, [curator.answer() for curator in listed])
 
 
+ROLES: dict[tuple[str, str], tuple[str, ...]] = {
+    ("POST", "/api/submissions"): (CONTRIBUTOR,),
+    ("GET", "/api/submissions"): (CONTRIBUTOR, CURATOR),
+    ("GET", "/api/submissions/policy"): (ADMIN,),
+    ("PUT", "/api/submissions/policy"): (ADMIN,),
+    ("POST", "/api/submissions/{id}/uploads"): (CONTRIBUTOR,),
+    ("POST", "/api/submissions/{id}/submit"): (CONTRIBUTOR,),
+    ("GET", "/api/submissions/{id}"): (CONTRIBUTOR, CURATOR),
+    ("GET", "/api/submissions/{id}/files"): (CURATOR,),
+    ("POST", "/api/submissions/{id}/decision"): (CURATOR,),
+    ("POST", "/api/submissions/{id}/edits"): (CONTRIBUTOR, CURATOR, ADMIN),
+    ("GET", "/api/people"): (CURATOR, ADMIN),
+    ("GET", "/api/curators"): (ADMIN,),
+    ("POST", "/api/checks"): (CONTRIBUTOR,),
+}
+"""The roles each route takes; the caller must hold one in the token and in the user pool now."""
+
+
+def _live(c: Clients, env: Env, caller: Caller, roles: tuple[str, ...]) -> Caller:
+    """The caller with the groups that hold both in the token and in the user pool now; refused
+    unless one of `roles` is among them and the account is not disabled."""
+    caller.need(*roles)
+    profile = c.profiles.get_item(Key={"userId": caller.user}).get("Item") or {}
+    try:
+        live = people.require_live(
+            c.cognito,
+            env.user_pool_id,
+            caller.user,
+            disabled=profile.get("disabled") is True,
+            roles=set(roles),
+            refusal=f"needs the {' or '.join(roles)} group",
+        )
+    except people.NotAllowed as refused:
+        raise Refused(403, str(refused)) from None
+    return Caller(caller.user, caller.groups & frozenset(live))
+
+
 def handle(event: dict[str, Any], c: Clients, env: Env) -> dict[str, Any]:
     """Route one API Gateway proxy event by method and resource."""
     claims: dict[str, Any] = event["requestContext"]["authorizer"]["claims"]
@@ -835,6 +877,9 @@ def handle(event: dict[str, Any], c: Clients, env: Env) -> dict[str, Any]:
         body = json.loads(text)
         if route[0] in ("POST", "PUT") and not isinstance(body, dict):
             raise Refused(400, "the body must be a JSON object")
+        if route not in ROLES:
+            return _response(404, {"error": f"no route {route[0]} {route[1]}"})
+        caller = _live(c, env, caller, ROLES[route])
         match route:
             case ("POST", "/api/submissions"):
                 return create(c, env, caller, body)
