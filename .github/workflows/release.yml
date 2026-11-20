@@ -48,6 +48,17 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Refuse a tag that is not v plus the version in packages/tool/pyproject.toml
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"$/\1/p' packages/tool/pyproject.toml | head -n 1)"
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::the tag is $GITHUB_REF_NAME, but packages/tool/pyproject.toml says $version (which needs the tag v$version), so no release"
+            exit 1
+          fi
+          echo "the tag $GITHUB_REF_NAME matches the version $version in packages/tool/pyproject.toml"
       - run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
