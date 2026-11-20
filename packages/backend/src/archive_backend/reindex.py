@@ -187,7 +187,7 @@ def catalog_items(
                     pk, sk, path, name, fmt, member.get("bytes"), member.get("hash")
                 )
     # The version's zips, beside it under _zips/, as file items the download route accepts;
-    # their size and hash aren't known until the page step writes them.
+    # no size or hash is recorded for them.
     for name, path in zip_files(manifest):
         files.setdefault(path, _file_item(pk, sk, path, name, "zip", None, None))
     items.extend(files.values())

@@ -1263,13 +1263,10 @@ def publish(
 
 @durable_step
 def _fail(_: StepContext, c: Clients, env: Env, sid: str, error: str) -> None:
-    """End the submission as `failed`, release its claim on a version that never went live,
-    removing what it wrote of that version, and alert the admins."""
+    """End the submission as `failed` and alert the admins. The release step follows."""
     item = _submission(c, sid)
     round = int(item.get("round") or 1)
     _set(c, sid, {"status": "failed"}, remove=("callbackId",))
-    # After the status: a later publish may take over the claim of a submission that failed.
-    _release(c, env, sid, item)
     put_event(c.reviews, sid, "failed", PIPELINE, round, error=error[:1000])
     _alert(
         c,
@@ -1277,6 +1274,15 @@ def _fail(_: StepContext, c: Clients, env: Env, sid: str, error: str) -> None:
         f"Ingest failed: submission {sid}",
         f"Submission {sid} round {round} failed: {error}",
     )
+
+
+@durable_step
+def _released(_: StepContext, c: Clients, env: Env, sid: str) -> None:
+    """Release the failed submission's claim on a version that never went live, removing what
+    it wrote of that version. Its own step, after the fail step: the admins have been told of
+    the failure even when this cannot finish, and a later publish may take over the claim of a
+    submission that is already `failed`."""
+    _release(c, env, sid, _submission(c, sid))
 
 
 def _store_callback(c: Clients, sid: str) -> Any:
@@ -1483,6 +1489,7 @@ def run(event: dict[str, Any], context: DurableContext) -> dict[str, Any]:
         return _ingest(context, c, env, sid)
     except (DurableOperationError, BadCallback) as error:
         context.step(_fail(c, env, sid, str(error) or type(error).__name__), name="fail")
+        context.step(_released(c, env, sid), name="release")
         return {"submissionId": sid, "status": "failed"}
 
 

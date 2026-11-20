@@ -492,8 +492,9 @@ class World:
         return copied
 
     def fail(self, sid: str, error: str) -> None:
-        """The fail step alone, as `run` calls it when a step has failed for good."""
+        """The fail and release steps, as `run` calls them when a step has failed for good."""
         ingest._fail(self.clients, ENV, sid, error)(None)  # type: ignore[arg-type]
+        ingest._released(self.clients, ENV, sid)(None)  # type: ignore[arg-type]
 
     def catalog(self, sid: str, target: dict[str, Any], prefix: str = "open") -> None:
         """The catalog step alone, for a version whose files are in the archive bucket."""
@@ -1336,6 +1337,41 @@ def test_a_release_whose_claim_was_taken_over_deletes_nothing_of_the_new_holder(
     assert world.table()[META]["claimedBy"] == {"S": "sub-c"}
     assert record in world.table()
     assert world.s3.keys(ARCHIVE, "open/stream/2/") == ["open/stream/2/datapackage.json"]
+
+
+def test_a_release_deletes_nothing_once_the_live_version_has_moved(world: World) -> None:
+    _two_versions_claimed(world)
+    world.s3.objects[(ARCHIVE, "open/stream/2/datapackage.json")] = b"{}"
+    read = world.dynamodb.get_item
+
+    def went_live_after_the_read(**kwargs: Any) -> dict[str, Any]:
+        answer = copy.deepcopy(read(**kwargs))
+        if kwargs["Key"]["SK"] == {"S": "META"}:
+            world.table()[META]["currentVersion"] = {"N": "2"}
+        return answer
+
+    world.monkeypatch.setattr(world.dynamodb, "get_item", went_live_after_the_read)
+
+    world.fail("sub-b", "boom")
+
+    assert world.table()[META]["claimedBy"] == {"S": "sub-b"}
+    assert world.s3.keys(ARCHIVE, "open/stream/2/") == ["open/stream/2/datapackage.json"]
+
+
+def test_a_failed_publish_is_reported_even_when_its_release_fails(world: World) -> None:
+    _two_versions_claimed(world)
+
+    def refused(**_: Any) -> dict[str, Any]:
+        raise RuntimeError("the catalog can't be written")
+
+    world.monkeypatch.setattr(world.dynamodb, "update_item", refused)
+
+    with pytest.raises(RuntimeError):
+        world.fail("sub-b", "copy refused")
+
+    assert world.submissions.items["sub-b"]["status"] == "failed"
+    [alert] = world.sns.messages
+    assert "sub-b" in alert["Message"] and "copy refused" in alert["Message"]
 
 
 def test_a_first_version_claim_left_by_a_failed_submission_is_taken_over(world: World) -> None:
