@@ -91,6 +91,7 @@ The guide, for people deploying and using an archive:
 - [Deploying](docs/guide/deploying.md): setting up an archive with the skill and CI, or with the same commands by hand, updating it from upstream, and tearing a stage down.
 - [Using the archive](docs/guide/using-the-archive.md): the web app for readers, contributors, curators and admins.
 - [Running cost](docs/guide/running-cost.md): what an archive pays for, and what costs almost nothing when idle.
+- [For your archive's users](docs/guide/for-your-users.md): which page to send a reader, a contributor and a curator, and a welcome text for contributors.
 - [Troubleshooting](docs/guide/troubleshooting.md): what to do when the setup, the first deploy or a first submission goes wrong.
 
 The optional modules and curating:

@@ -37,7 +37,13 @@ Its `_build/` folder holds the script that generated it. `cruise` leaves the top
 
 ## Installing cruise
 
-`cruise` is a Python program. The README's **Install cruise** section gives the one command that installs it with [uv](https://docs.astral.sh/uv/), and `cruise --version` then prints `cruise 0.1.0`. Inside a clone of this repository, `uv run cruise` runs it without installing anything.
+`cruise` is a Python program. Install it with [uv](https://docs.astral.sh/uv/), at a release tag:
+
+```
+uv tool install "git+https://github.com/schuettc/research-archive-in-a-box@v0.1.1#subdirectory=packages/tool"
+```
+
+`cruise --version` then prints `cruise 0.1.0`. Inside a clone of this repository, `uv run cruise` runs it without installing anything.
 
 `cruise` has three commands:
 
