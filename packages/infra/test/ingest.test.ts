@@ -182,6 +182,7 @@ test("every environment variable either handler reads is set", () => {
       "CATALOG_TABLE_A",
       "CATALOG_TABLE_B",
       "SITE_DOMAIN",
+      "LIFECYCLE_FUNCTION",
     ].sort(),
   );
   expect(ingest.Variables.CURATOR_TOPIC_ARN).toEqual({ Ref: logicalId(archive.curatorTopic) });
@@ -206,6 +207,17 @@ test("every environment variable either handler reads is set", () => {
   expect(api.Variables.USER_POOL_ID).toEqual({ Ref: logicalId(archive.userPool) });
   expect(JSON.stringify(api.Variables.INGEST_ALIAS_ARN)).toContain(
     ":function:ResearchArchive-prod-Ingest:live",
+  );
+});
+
+test("the ingest names the lifecycle function by its fixed name and may invoke only it", () => {
+  const ingest = fn(INGEST).properties.Environment as { Variables: Record<string, unknown> };
+  expect(ingest.Variables.LIFECYCLE_FUNCTION).toBe("ResearchArchive-prod-Lifecycle");
+  const invokes = statements(INGEST).filter((s) => actions(s).includes("lambda:InvokeFunction"));
+  expect(invokes).toHaveLength(1);
+  expect(actions(invokes[0]!)).toEqual(["lambda:InvokeFunction"]);
+  expect(JSON.stringify(invokes[0]!.Resource)).toMatch(
+    /:function:ResearchArchive-prod-Lifecycle"\]\]\}$/,
   );
 });
 

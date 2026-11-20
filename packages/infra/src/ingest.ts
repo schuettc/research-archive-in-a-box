@@ -6,6 +6,7 @@ import * as lambda from "aws-cdk-lib/aws-lambda";
 import type * as s3 from "aws-cdk-lib/aws-s3";
 import * as sns from "aws-cdk-lib/aws-sns";
 import { Construct } from "constructs";
+import { lifecycleFunctionName } from "./curation";
 import type { ResearchArchive } from "./research-archive";
 
 export interface IngestProps {
@@ -94,6 +95,7 @@ export class Ingest extends Construct {
         ARCHIVE_BUCKET: archive.archiveBucket.bucketName,
         DERIVED_BUCKET: archive.derivedBucket.bucketName,
         SITE_DOMAIN: archive.siteDomain,
+        LIFECYCLE_FUNCTION: lifecycleFunctionName(props.stage),
       },
     });
     // A submission's durable execution runs on the version it started on, and may wait months
@@ -179,6 +181,21 @@ export class Ingest extends Construct {
     archive.alertTopic.grantPublish(fn);
     this.curatorTopic.grantPublish(fn);
     archive.grantDoi(fn);
+    // A publish starts the dataset's lifecycle run; the name is a string, not a reference, for
+    // the reason the ingest's own name is.
+    fn.addToRolePolicy(
+      allow(
+        ["lambda:InvokeFunction"],
+        [
+          Stack.of(this).formatArn({
+            service: "lambda",
+            resource: "function",
+            resourceName: lifecycleFunctionName(props.stage),
+            arnFormat: ArnFormat.COLON_RESOURCE_NAME,
+          }),
+        ],
+      ),
+    );
     // Publish embeds the dataset item before its put.
     if (archive.embeddings) {
       archive.grantEmbedding(fn);
@@ -228,7 +245,8 @@ export class Ingest extends Construct {
     );
 
     // /api/people turns ids into emails; /api/curators lists the curator group.
-    // Each route reads the caller's disabled mark and their groups live, as the curation function does.
+    // Each route reads the caller's disabled mark and their groups live, as the curation
+    // function does.
     archive.userProfiles.grant(api, "dynamodb:GetItem");
     api.addToRolePolicy(
       allow(

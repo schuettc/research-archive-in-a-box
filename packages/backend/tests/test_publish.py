@@ -46,6 +46,7 @@ ENV = Env(
     catalog_table_a="catalog-a",
     catalog_table_b="catalog-b",
     site_domain=DOMAIN,
+    lifecycle_function="lifecycle",
 )
 
 
@@ -405,6 +406,18 @@ class FakeSNS:
         return {}
 
 
+class FakeLambda:
+    def __init__(self) -> None:
+        self.invokes: list[dict[str, Any]] = []
+        self.fail = False
+
+    def invoke(self, **kwargs: Any) -> dict[str, Any]:
+        if self.fail:
+            raise RuntimeError("invoke refused")
+        self.invokes.append(kwargs)
+        return {"StatusCode": 202}
+
+
 class FakeBedrock:
     def __init__(self) -> None:
         self.texts: list[str] = []
@@ -435,6 +448,7 @@ class World:
         self.ssm = FakeSSM()
         self.bedrock = FakeBedrock()
         self.sns = FakeSNS()
+        self.lambda_ = FakeLambda()
         self.datacite = FakeDataCite()
         self.submissions = FakeTable()
         self.reviews = FakeTable()
@@ -448,6 +462,7 @@ class World:
             reviews=cast(submissions.Table, self.reviews),
             settings=cast(submissions.Table, None),
             bedrock=cast(Bedrock, self.bedrock),
+            lambda_=self.lambda_,
         )
         monkeypatch.setattr(ingest, "_clock", lambda: self.now)
         monkeypatch.setattr(doi, "client", lambda ssm, settings: self.datacite)
@@ -606,6 +621,52 @@ def test_a_second_publish_of_the_same_id_is_version_2(world: World) -> None:
     assert world.table()[("DATASET#stream", "META")]["currentVersion"] == {"N": "2"}
     assert ("DATASET#stream", "V#000001") in world.table()
     assert world.submissions.items["sub-b"]["datasetId"] == "stream"
+
+
+def test_publishing_a_restricted_version_2_starts_the_datasets_lifecycle_run(
+    world: World,
+) -> None:
+    world.hold("sub-a", _package(), datasetId="stream")
+    world.publish("sub-a")
+    world.lambda_.invokes.clear()
+    world.hold(
+        "sub-b", _package(**{"archive:access": "restricted"}), datasetId="stream", newVersion=True
+    )
+
+    context = world.publish("sub-b")
+
+    assert world.lambda_.invokes == [
+        {
+            "FunctionName": "lifecycle",
+            "InvocationType": "Event",
+            "Payload": json.dumps({"datasetId": "stream"}).encode("utf-8"),
+        }
+    ]
+    assert context.names[-3:] == [
+        "publish-1-sitemap",
+        "publish-1-lifecycle",
+        "publish-1-finish",
+    ]
+
+
+def test_a_lifecycle_run_that_cannot_start_alerts_and_the_publish_still_finishes(
+    world: World,
+) -> None:
+    world.lambda_.fail = True
+    world.hold(SID, _package(), datasetId="stream")
+
+    context = world.publish()
+
+    assert world.submissions.items[SID]["status"] == "published"
+    [alert] = world.sns.messages
+    assert alert["TopicArn"] == ENV.alert_topic_arn
+    assert alert["Subject"] == "Lifecycle run not started: stream v1"
+    assert "00:15 UTC" in alert["Message"]
+    assert context.names[-3:] == [
+        "publish-1-lifecycle",
+        "publish-1-lifecycle-alert",
+        "publish-1-finish",
+    ]
 
 
 @pytest.mark.parametrize("access", ["limited", "restricted"])
@@ -977,7 +1038,7 @@ def test_without_the_doi_module_the_steps_are_exactly_todays(world: World) -> No
     assert context.names == [
         f"publish-1-{part}"
         for part in ("version", "fill", "zips", "copy", "catalog", "page")
-        + ("catalog-file", "sitemap", "finish")
+        + ("catalog-file", "sitemap", "lifecycle", "finish")
     ]
     assert world.datacite.calls == []
 
@@ -1000,7 +1061,7 @@ def test_with_the_doi_module_publish_registers_a_findable_doi_and_shows_it(world
     for key in ("site/datasets/stream/index.html", "site/datasets/stream/v1/index.html"):
         assert f'href="{DOI_ADDRESS}"' in world.s3.objects[(DERIVED, key)].decode()
     assert _verifies(world, "open/stream/1/")
-    assert context.names[-3:] == ["publish-1-catalog-file", "publish-1-sitemap", "publish-1-finish"]
+    assert context.names[-3:] == ["publish-1-sitemap", "publish-1-lifecycle", "publish-1-finish"]
     assert "publish-1-doi" in context.names
     at = context.names.index("publish-1-doi-identifier")
     assert context.names[at + 1 : at + 4] == [
@@ -1052,10 +1113,11 @@ def test_a_failure_after_registering_alerts_and_the_publish_still_finishes(
     context = world.publish()
 
     assert world.submissions.items[SID]["status"] == "published"
-    assert context.names[-4:] == [
+    assert context.names[-5:] == [
         "publish-1-doi-alert",
         "publish-1-catalog-file",
         "publish-1-sitemap",
+        "publish-1-lifecycle",
         "publish-1-finish",
     ]
     [alert] = world.sns.messages

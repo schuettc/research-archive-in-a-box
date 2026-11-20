@@ -8,6 +8,11 @@ import type * as lambda from "aws-cdk-lib/aws-lambda";
 import { Construct } from "constructs";
 import type { ResearchArchive } from "./research-archive";
 
+/** The lifecycle function's fixed name, for whatever names it by string. */
+export function lifecycleFunctionName(stage: string): string {
+  return `ResearchArchive-${stage}-Lifecycle`;
+}
+
 export interface CurationProps {
   readonly archive: ResearchArchive;
   readonly stage: string;
@@ -38,7 +43,7 @@ export class Curation extends Construct {
     // A fixed name: the curation function names the lifecycle by string, not by reference. The
     // lifecycle's SITE_DOMAIN and DISTRIBUTION_ID refer to the distribution, whose API origin
     // refers to the stage that deploys the curation routes, so a reference would be a cycle.
-    const functionName = `ResearchArchive-${props.stage}-Lifecycle`;
+    const functionName = lifecycleFunctionName(props.stage);
     const functionArn = Stack.of(this).formatArn({
       service: "lambda",
       resource: "function",

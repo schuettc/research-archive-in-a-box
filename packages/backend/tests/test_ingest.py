@@ -50,6 +50,7 @@ ENV = Env(
     catalog_table_a="catalog-a",
     catalog_table_b="catalog-b",
     site_domain="d111.cloudfront.net",
+    lifecycle_function="lifecycle",
 )
 
 
@@ -251,6 +252,18 @@ class FakeSNS:
         return [p for p in self.published if p["TopicArn"] == topic]
 
 
+class FakeLambda:
+    def __init__(self) -> None:
+        self.invokes: list[dict[str, Any]] = []
+        self.fail = False
+
+    def invoke(self, **kwargs: Any) -> dict[str, Any]:
+        if self.fail:
+            raise RuntimeError("invoke refused")
+        self.invokes.append(kwargs)
+        return {"StatusCode": 202}
+
+
 class FakeDynamoDB:
     def __init__(self) -> None:
         self.items: dict[tuple[str, str, str], dict[str, Any]] = {}
@@ -419,6 +432,7 @@ class World:
         self.submissions = FakeSubmissions()
         self.reviews = FakeReviews()
         self.settings = FakeSettings()
+        self.lambda_ = FakeLambda()
         self.now = datetime(2026, 11, 1, tzinfo=UTC)
         self.clients = Clients(
             s3=cast(ingest.S3, self.s3),
@@ -429,6 +443,7 @@ class World:
             reviews=cast(submissions.Table, self.reviews),
             settings=cast(submissions.Table, self.settings),
             bedrock=cast(Bedrock, None),
+            lambda_=self.lambda_,
         )
         monkeypatch.setattr(ingest, "clients", lambda env: self.clients)
         monkeypatch.setattr(ingest, "_clock", lambda: self.now)
@@ -446,6 +461,7 @@ class World:
             "CATALOG_TABLE_A": ENV.catalog_table_a,
             "CATALOG_TABLE_B": ENV.catalog_table_b,
             "SITE_DOMAIN": ENV.site_domain,
+            "LIFECYCLE_FUNCTION": ENV.lifecycle_function,
         }.items():
             monkeypatch.setenv(name, value)
         self.submissions.items[SID] = {

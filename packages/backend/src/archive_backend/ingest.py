@@ -18,8 +18,10 @@ inside S3 to the version's folder under `open/` or `restricted/` in the archive 
 file checked against its line in `checksums.sha256`, each zip against the one built, the
 manifest last), put the catalog items the reindex would build into the active table (the
 dataset item last, which moves `currentVersion` and drops the claim), write the dataset page,
-rewrite the catalog file search reads and the sitemap, and finish, which empties
-`held/<id>/`. The unfinished version is built in the staging bucket because the archive
+rewrite the catalog file search reads and the sitemap, start the dataset's lifecycle run,
+which moves an older version's files when the new version made the dataset stricter, and
+finish, which empties `held/<id>/`. The unfinished version is built in the staging bucket
+because the archive
 bucket is versioned and may be locked: whatever is written there stays stored. So until the
 copy step nothing of the version is in the archive bucket, and the reindex, which looks for
 manifests, finds the version only once every file and zip is there. Readers get the version
@@ -130,6 +132,10 @@ class SSM(Protocol):
     def get_parameter(self, **kwargs: Any) -> dict[str, Any]: ...
 
 
+class Lambda(Protocol):
+    def invoke(self, **kwargs: Any) -> Any: ...
+
+
 class DynamoDB(Protocol):
     """The low-level client, for the catalog tables' DynamoDB JSON items."""
 
@@ -152,6 +158,7 @@ class Clients:
     reviews: Table
     settings: Table
     bedrock: Bedrock
+    lambda_: Lambda
 
 
 @dataclass(frozen=True)
@@ -169,6 +176,7 @@ class Env:
     catalog_table_a: str
     catalog_table_b: str
     site_domain: str
+    lifecycle_function: str
 
     @classmethod
     def from_environ(cls) -> Env:
@@ -186,6 +194,7 @@ class Env:
             catalog_table_a=os.environ["CATALOG_TABLE_A"],
             catalog_table_b=os.environ["CATALOG_TABLE_B"],
             site_domain=os.environ["SITE_DOMAIN"],
+            lifecycle_function=os.environ["LIFECYCLE_FUNCTION"],
         )
 
 
@@ -204,6 +213,7 @@ def clients(env: Env) -> Clients:
         reviews=table(env.reviews_table),
         settings=table(env.settings_table),
         bedrock=cast(Bedrock, boto3.client("bedrock-runtime")),
+        lambda_=cast(Lambda, boto3.client("lambda")),
     )
 
 
@@ -1162,6 +1172,32 @@ def _sitemap(_: StepContext, c: Clients, env: Env, target: dict[str, Any]) -> in
 
 
 @durable_step
+def _lifecycle(_: StepContext, c: Clients, env: Env, target: dict[str, Any]) -> None:
+    """Start the lifecycle run for the dataset, as a withdrawal does, so each older version's
+    files move to where the dataset's record now puts them without waiting for the daily run.
+    Safe to repeat: a run that finds everything in place moves nothing."""
+    c.lambda_.invoke(
+        FunctionName=env.lifecycle_function,
+        InvocationType="Event",
+        Payload=json.dumps({"datasetId": target["datasetId"]}).encode("utf-8"),
+    )
+
+
+@durable_step
+def _lifecycle_alert(
+    _: StepContext, c: Clients, env: Env, target: dict[str, Any], error: str
+) -> None:
+    dataset_id, version = target["datasetId"], int(target["version"])
+    _alert(
+        c,
+        env,
+        f"Lifecycle run not started: {dataset_id} v{version}",
+        f"Version {version} of {dataset_id} is published, but the run that moves its older "
+        f"versions' files did not start: {error}\n\nThe daily run at 00:15 UTC moves them.",
+    )
+
+
+@durable_step
 def _doi(
     _: StepContext, c: Clients, env: Env, target: dict[str, Any], filled: dict[str, Any]
 ) -> dict[str, str]:
@@ -1307,6 +1343,12 @@ def publish(
         _register_doi(context, c, env, sid, target, filled, name)
     context.step(_catalog_file(c, env, target), name=name("catalog-file"))
     context.step(_sitemap(c, env, target), name=name("sitemap"))
+    try:
+        context.step(_lifecycle(c, env, target), name=name("lifecycle"))
+    except Exception as error:
+        # The step's last failure after its retries; never SuspendExecution, a BaseException.
+        failed = str(error) or type(error).__name__
+        context.step(_lifecycle_alert(c, env, target, failed), name=name("lifecycle-alert"))
     context.step(_finish(c, env, sid, round, rule, target), name=name("finish"))
     return {"datasetId": target["datasetId"], "version": int(target["version"])}
 
