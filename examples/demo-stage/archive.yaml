@@ -1,0 +1,25 @@
+# The archive config for the demo stage, the one `just demo-video demo` records the README's
+# video on. Deploy it with ARCHIVE_CONFIG pointing here, so archive.yaml is never edited for a
+# recording.
+# It lists only the demo stage, which is disposable (keepData: false), so a deploy can't touch any other, and `just destroy demo` deletes it whole with its data. It has no domain and no WAF: the stage is up for an hour and thrown away.
+# Review is required, as on every new archive: the review policy is a setting of the running
+# archive (Settings, Review policy), not of this file, and it starts with Review required on.
+publisher: Invented Research Cooperative
+profiles: [core, ecology]
+brand:
+  intro: >-
+    The Invented Research Cooperative shares the data behind its field studies: streams, lakes,
+    snow and the land around them. Every dataset comes with its files, a description of each
+    column, and a citation you can copy.
+  contact: archive-admin@example.org
+  logo: ../brand/logo.svg
+  favicon: ../brand/favicon.svg
+  primaryColor: "#24395f"
+infrastructure:
+  alertEmail: archive-admin@example.org
+  monthlyBudgetUsd: 50
+  modules:
+    waf: false
+  stages:
+    - name: demo
+      keepData: false
