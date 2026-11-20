@@ -451,6 +451,19 @@ infrastructure:
   monthlyBudgetUsd: 100
 ```
 
+### `infrastructure.requestsPerAddressPerFiveMinutes`
+
+With the WAF on, how many API requests one address may make in five minutes. Past it, that address is refused until its count falls again; other addresses are not affected. A campus or an office can share one address, so keep it well above one person's use. It is unused with [`modules.waf: false`](#infrastructuremoduleswaf).
+
+- **Type:** a whole number, 10 or more.
+- **Default:** `2000`.
+
+```yaml
+infrastructure:
+  alertEmail: archive-admin@example.org
+  requestsPerAddressPerFiveMinutes: 1000
+```
+
 ### `infrastructure.stages`
 
 The stages to deploy, in order: CI deploys the first, then the next only if the first succeeded. Each stage becomes a CloudFormation stack named `ResearchArchive-<name>`.
@@ -648,28 +661,30 @@ This stage's DOI prefix: the live repository's, on a stage with `test: false`.
 
 ### `infrastructure.modules`
 
-The optional parts of every stage, each built only when it is switched on here.
+The optional parts of every stage: the WAF is built unless it is switched off here, the others only when they are switched on.
 
 - **Type:** a block of the fields below.
-- **Default:** every module off.
+- **Default:** the WAF on, the others off.
 
 ```yaml
 infrastructure:
   alertEmail: archive-admin@example.org
   modules:
-    waf: true
+    waf: false
 ```
 
 ### `infrastructure.modules.waf`
 
-`true` puts one AWS WAF web ACL in front of the stage's API and its sign-in: AWS's managed rule groups for common attacks, known bad inputs and addresses with a poor reputation, and rate limits on sign-up, sign-in and the calls that send email. A web ACL bills monthly whether or not it is used ([Running cost](running-cost.md)).
+On unless it is `false`. It puts one AWS WAF web ACL in front of the stage's API and its sign-in: AWS's managed rule groups for common attacks, known bad inputs and addresses with a poor reputation, rate limits on sign-up, sign-in and the calls that send email, and a limit on the API requests one address may make ([`requestsPerAddressPerFiveMinutes`](#infrastructurerequestsperaddressperfiveminutes)). With it on, the API answers only requests that come through the site's address. A web ACL bills monthly whether or not it is used ([Running cost](running-cost.md)).
+
+`false` turns it off for every stage in the file: a stage without it shares one allowance of 50 requests a second among all its callers, so one busy caller can use it all.
 
 - **Type:** true or false.
-- **Default:** `false`.
+- **Default:** `true`.
 
 ```yaml
   modules:
-    waf: true
+    waf: false
 ```
 
 ### `infrastructure.modules.objectLock`

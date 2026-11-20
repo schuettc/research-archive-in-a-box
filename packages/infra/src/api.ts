@@ -112,6 +112,14 @@ export class Api extends Construct {
         throttlingRateLimit: 50,
         throttlingBurstLimit: 100,
         metricsEnabled: true,
+        // The one write open to everyone has its own allowance, apart from the stage's.
+        methodOptions: {
+          "/api/datasets/{id}/usage/POST": {
+            throttlingRateLimit: 5,
+            throttlingBurstLimit: 5,
+            metricsEnabled: true,
+          },
+        },
       },
       ...(props.waf ? { defaultMethodOptions: { apiKeyRequired: true } } : {}),
     });

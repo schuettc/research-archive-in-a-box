@@ -4,7 +4,7 @@ import { expect, test } from "vitest";
 import { ResearchArchive } from "../src/research-archive";
 import { testApp } from "./test-app";
 
-function archive(waf?: boolean): { template: Template } {
+function archive(waf?: boolean, requestsPerAddressPerFiveMinutes?: number): { template: Template } {
   const stack = new Stack(testApp(), "S");
   new ResearchArchive(stack, "Archive", {
     config: {
@@ -13,6 +13,9 @@ function archive(waf?: boolean): { template: Template } {
         alertEmail: "a@example.org",
         stages: [{ name: "prod" }],
         ...(waf === undefined ? {} : { modules: { waf } }),
+        ...(requestsPerAddressPerFiveMinutes === undefined
+          ? {}
+          : { requestsPerAddressPerFiveMinutes }),
       },
     },
     stage: "prod",
@@ -53,7 +56,7 @@ test("health is public and whoami uses the Cognito authorizer", () => {
 
 test("the stage throttles at 50 per second with a burst of 100", () => {
   archive().template.hasResourceProperties("AWS::ApiGateway::Stage", {
-    MethodSettings: [
+    MethodSettings: Match.arrayWith([
       Match.objectLike({
         HttpMethod: "*",
         ResourcePath: "/*",
@@ -61,15 +64,52 @@ test("the stage throttles at 50 per second with a burst of 100", () => {
         ThrottlingBurstLimit: 100,
         MetricsEnabled: true,
       }),
-    ],
+    ]),
   });
 });
 
-test("WAF appears only when modules.waf is true, associated with the API stage", () => {
-  for (const off of [archive().template, archive(false).template]) {
-    off.resourceCountIs("AWS::WAFv2::WebACL", 0);
-    off.resourceCountIs("AWS::WAFv2::WebACLAssociation", 0);
-  }
+test("a config with no modules block has the web ACL with the per-address rule; waf: false has none", () => {
+  const left = archive().template;
+  left.resourceCountIs("AWS::WAFv2::WebACL", 1);
+  left.resourceCountIs("AWS::WAFv2::WebACLAssociation", 2);
+  const [acl] = Object.values(left.findResources("AWS::WAFv2::WebACL"));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const limit = acl?.Properties.Rules.find((rule: any) => rule.Name === "ApiRateLimit");
+  expect(limit.Statement.RateBasedStatement.Limit).toBe(2000);
+
+  const off = archive(false).template;
+  off.resourceCountIs("AWS::WAFv2::WebACL", 0);
+  off.resourceCountIs("AWS::WAFv2::WebACLAssociation", 0);
+  off.resourceCountIs("AWS::ApiGateway::ApiKey", 0);
+});
+
+test("requestsPerAddressPerFiveMinutes sets the per-address rule's limit", () => {
+  const [acl] = Object.values(archive(undefined, 500).template.findResources("AWS::WAFv2::WebACL"));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const limit = acl?.Properties.Rules.find((rule: any) => rule.Name === "ApiRateLimit");
+  expect(limit.Statement.RateBasedStatement.Limit).toBe(500);
+});
+
+test.each([undefined, false])(
+  "the usage route has its own throttle of 5 a second (modules.waf: %s)",
+  (waf) => {
+    archive(waf).template.hasResourceProperties("AWS::ApiGateway::Stage", {
+      MethodSettings: Match.arrayWith([
+        Match.objectLike({
+          HttpMethod: "POST",
+          ResourcePath: "/~1api~1datasets~1{id}~1usage",
+          ThrottlingRateLimit: 5,
+          ThrottlingBurstLimit: 5,
+        }),
+      ]),
+    });
+  },
+);
+
+test("WAF appears unless modules.waf is false, associated with the API stage", () => {
+  const off = archive(false).template;
+  off.resourceCountIs("AWS::WAFv2::WebACL", 0);
+  off.resourceCountIs("AWS::WAFv2::WebACLAssociation", 0);
 
   const { template } = archive(true);
   const [stage] = Object.keys(template.findResources("AWS::ApiGateway::Stage"));
@@ -99,9 +139,7 @@ test("WAF appears only when modules.waf is true, associated with the API stage",
 });
 
 test("with WAF on, the same web ACL guards the user pool and rate-limits its sign-up and sign-in calls per address", () => {
-  for (const off of [archive().template, archive(false).template]) {
-    off.resourceCountIs("AWS::WAFv2::WebACLAssociation", 0);
-  }
+  archive(false).template.resourceCountIs("AWS::WAFv2::WebACLAssociation", 0);
 
   const { template } = archive(true);
   const [pool] = Object.keys(template.findResources("AWS::Cognito::UserPool"));

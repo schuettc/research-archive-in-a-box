@@ -634,7 +634,9 @@ test("with a domain, /data and /api keep their own functions, so both addresses 
   expect(functionCode(built.template, data?.FunctionAssociations[0].FunctionARN)).not.toContain(
     "301",
   );
-  expect(api?.FunctionAssociations).toBeUndefined();
+  const apiFunction = functionCode(built.template, api?.FunctionAssociations[0].FunctionARN);
+  expect(apiFunction).toContain("x-viewer-address");
+  expect(apiFunction).not.toContain("301");
 });
 
 test("with a domain, robots.txt names the sitemap on the name", () => {

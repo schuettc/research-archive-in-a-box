@@ -28,8 +28,15 @@ export type Test = boolean;
 export type Alertemail = string;
 export type Model = "amazon.titan-embed-text-v2:0";
 export type Retentiondays = number;
+/**
+ * true: one AWS WAF web ACL guards the API and sign-in of every stage, with a limit on the requests one address may make. false: no web ACL, and every caller of a stage shares one allowance of 50 requests a second. Left out: true.
+ */
 export type Waf = boolean;
 export type Monthlybudgetusd = number;
+/**
+ * With the WAF on, the API requests one address may make in five minutes before more are refused for a while. At least 10. Left out: 2000. Unused with modules.waf: false.
+ */
+export type Requestsperaddressperfiveminutes = number;
 /**
  * @minItems 1
  */
@@ -130,10 +137,11 @@ export interface Infrastructure {
   alertEmail: Alertemail;
   modules?: Modules;
   monthlyBudgetUsd?: Monthlybudgetusd;
+  requestsPerAddressPerFiveMinutes?: Requestsperaddressperfiveminutes;
   stages?: Stages;
 }
 /**
- * The optional parts, each built only when switched on.
+ * The optional parts: the WAF is on unless switched off, the others only when switched on.
  */
 export interface Modules {
   embeddings?: Embeddings | null;

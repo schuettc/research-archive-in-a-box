@@ -105,9 +105,28 @@ def test_infrastructure_defaults_to_prod_only() -> None:
 
     assert [s.name for s in infrastructure.stages] == ["prod"]
     assert infrastructure.monthly_budget_usd == 50
-    assert infrastructure.modules.waf is False
+    assert infrastructure.modules.waf is True
     assert infrastructure.modules.object_lock is None
     assert infrastructure.modules.embeddings is None
+
+
+def test_waf_is_on_unless_turned_off_and_the_limit_defaults_to_2000() -> None:
+    left_out = Infrastructure.model_validate({"alertEmail": "a@b.c"})
+    assert left_out.modules.waf is True
+    assert left_out.requests_per_address_per_five_minutes == 2000
+    off = Infrastructure.model_validate({"alertEmail": "a@b.c", "modules": {"waf": False}})
+    assert off.modules.waf is False
+    named = Infrastructure.model_validate(
+        {"alertEmail": "a@b.c", "requestsPerAddressPerFiveMinutes": 500}
+    )
+    assert named.requests_per_address_per_five_minutes == 500
+
+
+def test_the_limit_is_at_least_10() -> None:
+    with pytest.raises(ValidationError):
+        Infrastructure.model_validate(
+            {"alertEmail": "a@b.c", "requestsPerAddressPerFiveMinutes": 9}
+        )
 
 
 def test_embeddings_present_means_on_with_titan_v2() -> None:

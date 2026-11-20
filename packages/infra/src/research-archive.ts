@@ -234,7 +234,8 @@ export class ResearchArchive extends Construct {
 
     const api = new Api(this, "Api", {
       userPool: this.userPool,
-      waf: infrastructure.modules?.waf ?? false,
+      waf: infrastructure.modules?.waf ?? true,
+      requestsPerFiveMinutes: infrastructure.requestsPerAddressPerFiveMinutes ?? 2000,
       health: this.pythonFunction("HealthFunction", { handler: "archive_backend.health.handler" }),
       whoami: this.pythonFunction("WhoamiFunction", { handler: "archive_backend.whoami.handler" }),
     });

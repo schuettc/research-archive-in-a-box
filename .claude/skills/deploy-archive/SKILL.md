@@ -59,8 +59,10 @@ tell the person.
    signed-in account downloads them), `restricted` (an admin approves each person's request) and
    `description-only` (the page and its description are published, with no files).
 2. Then walk through every other setting, one at a time, with its default, and keep the default
-   unless they want something else. Optional modules (such as WAF and object lock) are off unless
-   they switch them on; say what each adds.
+   unless they want something else. The WAF is on unless they set `waf: false`: say it costs
+   about $12 a month per stage, and that with `false` every caller of a stage shares one
+   allowance of 50 requests a second. The other optional modules (such as object lock) are off
+   unless they switch them on; say what each adds.
 3. When you reach `brand`, say that every archive has a privacy page at `/privacy`, linked from
    the footer, which says what the archive keeps about the people who use it (request logs kept
    90 days, an account's email and name, a submitter's name, an access request's reason). The
@@ -268,9 +270,10 @@ to 55; after that it fails and rolls back), and then the stage's account emails 
 `no-reply@<name>`.
 
 **What it costs.** Say what bills while the archive sits idle: storage in S3 and DynamoDB, the
-CloudWatch alarms and dashboard, retained logs, and the WAF web ACL if they switched WAF on. Say
-what bills per use: Lambda, API Gateway, CloudFront, DynamoDB reads and writes, and Cognito past
-its free tier. Give no dollar figure; none has been measured. Point to the budget alarm: AWS
+CloudWatch alarms and dashboard, retained logs, and the WAF web ACL unless they set `waf: false`
+(about $12 a month per stage). Say what bills per use: Lambda, API Gateway, CloudFront, DynamoDB
+reads and writes, and Cognito past its free tier. Give no other dollar figure; none has been
+measured. Point to the budget alarm: AWS
 Budgets emails the alert email when the month passes `monthlyBudgetUsd`.
 
 **Wait for:** "deploy it" (or a clear yes).
