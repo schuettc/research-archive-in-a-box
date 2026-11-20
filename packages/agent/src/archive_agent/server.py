@@ -167,11 +167,16 @@ def build(session: Session) -> MCPServer:
         return read.get_dataset(session, id, version)
 
     @mcp.tool(name="download")
-    def download_tool(id: str, version: int, paths: list[str], to: str) -> dict[str, Any]:
+    def download_tool(
+        id: str, version: int, paths: list[str], to: str, overwrite: bool = False
+    ) -> dict[str, Any]:
         """Download the named files (paths as listed in the version's files) of one version
         into the local folder `to`, checking each against its recorded SHA-256. Restricted
-        files need sign_in first. Answers what was written and anything that failed."""
-        return read.download(session, id, version, paths, to)
+        files need sign_in first. A file already in the folder is left as it is unless
+        `overwrite` is true; a hidden name (any part starting with a dot) and a file named
+        CLAUDE.md, CLAUDE.local.md or AGENTS.md are never written. Answers what was written,
+        what was replaced, what was skipped and why, and anything that failed."""
+        return read.download(session, id, version, paths, to, overwrite)
 
     @mcp.tool(name="diagnose")
     def diagnose_tool(folder: str) -> dict[str, Any]:

@@ -14,6 +14,7 @@ from archive_agent.errors import LocalError, Refused
 from archive_agent.state import Session
 from archive_contract.exports.readme import citation
 from archive_contract.manifest import Manifest
+from archive_contract.validate import is_hidden
 
 
 def search(
@@ -83,6 +84,20 @@ def get_dataset(session: Session, id: str, version: int | None = None) -> dict[s
     }
 
 
+AGENT_FILES = ("CLAUDE.md", "CLAUDE.local.md", "AGENTS.md")
+"""File names a coding agent reads as instructions. download never writes one, at any depth,
+whatever the letters' case."""
+
+HIDDEN = (
+    "its name has a part that starts with a dot, and download never writes hidden files or folders"
+)
+AGENT_FILE = (
+    "download never writes a file named CLAUDE.md, CLAUDE.local.md or AGENTS.md; "
+    "get it from the dataset's page in a browser if you want it"
+)
+EXISTS = "a file is already there; call download again with overwrite set to true to replace it"
+
+
 def _target(root: Path, path: str) -> Path:
     pure = PurePosixPath(path)
     target = (root / Path(*pure.parts)).resolve() if pure.parts else root
@@ -98,13 +113,17 @@ def _write(target: Path, data: bytes) -> None:
     os.replace(out.name, target)
 
 
-def download(session: Session, id: str, version: int, paths: list[str], to: str) -> dict[str, Any]:
+def download(
+    session: Session, id: str, version: int, paths: list[str], to: str, overwrite: bool = False
+) -> dict[str, Any]:
     """Write the named files of one version under `to`, each checked against its SHA-256.
 
     Open files come from `/data/...`; restricted ones through the signed-in link route. A file
     whose hash doesn't match is not kept and is listed under `failed`. A file with no SHA-256
     of its own (none recorded, or one shared by several files) is written and listed under
-    `not_checked`.
+    `not_checked`. A hidden name, an agent instruction file and, unless `overwrite` is set, a
+    file already there are not fetched and are listed under `skipped` with the reason; a file
+    that was there and was written over is listed under `replaced`.
     """
     root = Path(to).expanduser().resolve()
     targets = {path: _target(root, path) for path in paths}
@@ -118,9 +137,24 @@ def download(session: Session, id: str, version: int, paths: list[str], to: str)
     # A multi-file resource's one hash is stamped on every part of it, so a hash several
     # files share checks none of them (as the contract's validate skips it).
     hashes = Counter(item.get("hash") for item in items.values() if item.get("hash"))
+    agent_files = {name.casefold() for name in AGENT_FILES}
+    skipped: list[dict[str, str]] = []
+    wanted: dict[str, Path] = {}
+    existing: list[str] = []
+    for path, target in targets.items():
+        if is_hidden(path):
+            skipped.append({"path": path, "reason": HIDDEN})
+        elif PurePosixPath(path).name.casefold() in agent_files:
+            skipped.append({"path": path, "reason": AGENT_FILE})
+        elif target.exists() and not overwrite:
+            skipped.append({"path": path, "reason": EXISTS})
+        else:
+            wanted[path] = target
+            if target.exists():
+                existing.append(path)
     written: list[dict[str, Any]] = []
     failed: list[dict[str, str]] = []
-    for path, target in targets.items():
+    for path, target in wanted.items():
         if is_open:
             data = archive.fetch(f"/data/{_quote(id)}/{version}/{urllib.parse.quote(path)}")
         else:
@@ -144,4 +178,11 @@ def download(session: Session, id: str, version: int, paths: list[str], to: str)
         _write(target, data)
         written.append({"path": path, "to": str(target), "bytes": len(data), "checked": checked})
     not_checked = [w["path"] for w in written if not w["checked"]]
-    return {"written": written, "failed": failed, "not_checked": not_checked}
+    done = {w["path"] for w in written}
+    return {
+        "written": written,
+        "failed": failed,
+        "not_checked": not_checked,
+        "skipped": skipped,
+        "replaced": [path for path in existing if path in done],
+    }
