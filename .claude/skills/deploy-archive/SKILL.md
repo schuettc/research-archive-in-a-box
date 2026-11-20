@@ -142,6 +142,11 @@ which only `main` may deploy from.
 **What it costs.** The provider and role cost nothing. The CDK bootstrap bucket bills for the
 little it stores.
 
+Before creating the role, say two things. Anyone who can push to `main`, or change the workflow
+there, can run code with the deploy role, and that role can do anything in the AWS account: write
+access to `main` is admin of the account. So recommend an AWS account that holds nothing but the
+archive, and write access to `main` only for people they would give the account to.
+
 **Wait for:** "connect it" (or a clear yes).
 
 Then, for the account and region of the stages (run it once more against each other account a

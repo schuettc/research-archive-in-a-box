@@ -50,6 +50,8 @@ This step deploys the one stack you deploy from your laptop, **`ResearchArchiveD
 
 The role trusts a run only when it comes from your fork and runs in a GitHub **environment** named for one of your stages. The skill creates one environment per stage, lets only the `main` branch deploy from it, and stores in it the role's ARN (`AWS_DEPLOY_ROLE_ARN`) and the stage's Region (`AWS_REGION`). To require a person's approval before `prod` deploys, add a required reviewer to the `prod` environment in the fork's settings.
 
+Anyone who can push to `main`, or change the workflow there, can run code with the deploy role, and that role can do anything in the AWS account. Write access to `main` is admin of the account. Use an AWS account that holds nothing but the archive, and give write access to `main` only to people you would give the account to.
+
 A stage in another AWS account (an `account` in `archive.yaml`) needs this step again, signed in to that account.
 
 #### The repository's subject, and a recreated repository
