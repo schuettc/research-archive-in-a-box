@@ -53,6 +53,7 @@ def _normalise(url: str) -> str:
             f"{url!r} isn't a web address. Give the archive's address with https://, "
             "such as https://d111111abcdef8.cloudfront.net."
         )
+    state.require_https(url.strip())
     return urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path.rstrip("/"), "", ""))
 
 
@@ -145,7 +146,8 @@ def build(session: Session) -> MCPServer:
     @mcp.tool(name="connect")
     def connect_tool(url: str) -> dict[str, Any]:
         """Use the archive at this web address (such as https://d111.cloudfront.net) in this
-        window from now on, after checking it answers. It signs this window out of the archive
+        window from now on, after checking it answers. The address starts with https://; http://
+        is taken only for an archive on this computer. It signs this window out of the archive
         it was on, and saves the address, with the requirement sets the archive checks packages
         against, as the default for new windows; other open windows keep the archive they
         started with."""

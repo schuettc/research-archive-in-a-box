@@ -81,6 +81,46 @@ def test_connect_refuses_an_address_that_isnt_a_web_address(config_home: Path) -
         server.connect(Session(), "archive.example.org")
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://example.org",
+        "http://archive.example.org:8080/",
+        "http://localhost.example.org",
+        "http://127.0.0.1.example.org",
+    ],
+)
+def test_connect_refuses_an_http_address_on_another_computer(config_home: Path, url: str) -> None:
+    with pytest.raises(NotConnected, match="with https://"):
+        server.connect(Session(), url)
+
+    assert not (config_home / "research-archive-in-a-box" / "archive.json").exists()
+
+
+@pytest.mark.parametrize(
+    "url", ["http://localhost:8000", "http://127.0.0.1:8000", "http://[::1]:8000"]
+)
+def test_an_http_address_on_this_computer_is_taken(url: str) -> None:
+    state.require_https(url)
+
+    assert Session(address=url).url() == url
+
+
+def test_a_saved_http_address_is_refused_with_a_note_to_connect_again(archive: Any) -> None:
+    state.save_url("http://example.org", ECOLOGY)
+    session = Session()
+
+    with pytest.raises(NotConnected, match="Call connect with its https:// address"):
+        session.url()
+    with pytest.raises(NotConnected, match="http://example.org"):
+        session.archive()
+
+    assert session.known() == "http://example.org"
+    assert session.checks == ECOLOGY
+    server.connect(session, archive.url)
+    assert session.url() == archive.url
+
+
 def test_a_tool_before_connect_says_to_call_connect() -> None:
     with pytest.raises(NotConnected, match="connect"):
         server.sign_in(Session())
