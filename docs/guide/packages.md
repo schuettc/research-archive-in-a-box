@@ -54,6 +54,10 @@ Each finding also names the **rule** that raised it, such as `field.description-
 
 The **score** at the end counts how many of the checks under three of those questions passed, and the **verdict** says whether the package can be published.
 
+A CSV table that can't be parsed is an error, `values.malformed`, and blocks publishing: a file that is not UTF-8, a row with more or fewer cells than the schema has fields, or a quote that is never closed. Nothing else can check such a table, so fix the file first. A table `cruise` leaves unread on purpose, such as one in a format other than CSV, gets the note `values.unreadable` and does not block.
+
+A finding under the heading "Checks that could not run (a fault in cruise, not in your package)" means `cruise` itself failed on that one check, so what the check looks at was not checked. It is an error and blocks publishing, and its rule ends in `.check-failed`, such as `values.check-failed`. Nothing in your data caused it: send the message to the archive's maintainers. Every other check's result still stands.
+
 ## Checking the sample package
 
 Copy the sample package somewhere first, so the edits below don't change the repository:
@@ -89,7 +93,7 @@ Can I trust the values?
     evidence: rows 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20; values "TL-100"; 60 rows in all
     fix: Move logger_model into the description, or drop it.
 
-Score: 95% (find 5 of 5, understand 42 of 45, trust 31 of 32)
+Score: 95% (find 5 of 5, understand 42 of 45, trust 32 of 33)
 Verdict: publishable, with 4 warnings
 ```
 
@@ -111,7 +115,7 @@ Wrote datapackage.json, README.md, checksums.sha256 in sample-package.
 `--resource` names the file (by its `name` in the manifest) and `--column` the column. Diagnosing again shows one warning fewer:
 
 ```
-Score: 96% (find 5 of 5, understand 44 of 46, trust 31 of 32)
+Score: 96% (find 5 of 5, understand 44 of 46, trust 32 of 33)
 Verdict: publishable, with 3 warnings
 ```
 
@@ -231,7 +235,7 @@ In Frictionless, each file is a **resource**: `name` is how the manifest and `cr
 
 `"archive:kind": "table"` says the file is a table of rows and columns. A resource with no `archive:kind` counts as a plain file, which `cruise` never opens, so none of its values would be checked: an `abc` in the `stems` column would pass.
 
-`"format": "csv"` says how the table is written. `cruise` reads only CSV tables, so without it a table's values aren't checked either.
+`"format": "csv"` says how the table is written. `cruise` reads only CSV tables: a table whose `format` is `csv`, or one with no `format` whose `path` ends in `.csv`. A table with any other `format` isn't read, so its values aren't checked.
 
 ### 2. Diagnose it
 
@@ -384,9 +388,35 @@ plot-survey/
   data/plots.csv
 ```
 
+### What the manifest declares is checked
+
+`cruise diagnose` holds each CSV table to what its manifest says about it. Every finding below is an error, so it blocks publishing.
+
+The table's **header row** must hold the schema's field names, spelled exactly (capital letters and spaces count) and in the same order. If it doesn't, the finding is `structure.header-mismatch`, which names the column, what the file calls it and what the manifest calls it, and none of the table's values are checked until it is fixed. A table with no header row says so in its dialect, `"dialect": { "header": false }`, and is then not compared.
+
+A table's `primaryKey` must name fields of that table; one that doesn't is `structure.primary-key`.
+
+A table's foreign keys, and the [constraints](https://datapackage.org/standard/table-schema/#field-constraints) on its columns, are checked against the values in the file. Each finding lists the rows and the values:
+
+| Rule | What it catches |
+| --- | --- |
+| `values.foreign-key-missing` | Rows whose foreign-key value is not in the column the key points at. |
+| `values.required-missing` | Empty cells in a column whose constraints say `required`. |
+| `values.not-unique` | Rows that repeat a value in a column whose constraints say `unique`. |
+| `values.not-in-enum` | Values that are not in the column's `enum`. |
+| `values.below-minimum` | Values below the column's `minimum`. |
+| `values.above-maximum` | Values above the column's `maximum`. |
+| `values.too-short` | Text values with fewer characters than the column's `minLength`. |
+| `values.too-long` | Text values with more characters than the column's `maxLength`. |
+| `values.pattern-mismatch` | Text values that don't match the column's `pattern`. |
+
+An empty cell (or one of the table's `missingValues`) breaks only `required`; no other rule reports it. `minimum`, `maximum` and `enum` compare by the column's type, so on a `date` column `2020-06-01` is after `2019-12-31`, and on a `number` column `1e3` equals `1000`. `minimum` and `maximum` are checked on `number`, `integer`, `date`, `datetime`, `time` and `year` columns, and `minLength`, `maxLength` and `pattern` on `string` columns. Foreign keys and `unique` compare the text as written, so `1` and `1.0` are different values.
+
+A `pattern` is read as a DuckDB (RE2) regular expression and must match the whole value: `S[0-9]` matches `S1` but not `S12`. RE2 refuses some escapes that XML Schema patterns allow, such as `\i`. A constraint `cruise` can't apply, such as that pattern or a `minimum` of `0.5` on an `integer` column, is itself reported under the same rule, as "Column a's minimum constraint (0.5) does not read as integer, so it can't be checked."
+
 ### Comment lines and placeholders
 
-Many published CSV files start with lines of notes before the header row, each beginning with `#`, such as `# Monthly means from the station's weather mast`. `cruise` can't read a table like that yet: it reads the first line as the header, so it reports only a note, `values.unreadable` with "CSV Error on Line: 2", checks none of the table's values, and can still say the package is publishable. Before you make the package, move those lines out of the CSV file: put what they say in the package's `description` or `archive:methods`, or in a document in the package, and keep the original file in a folder such as `original/`, as the sample package does.
+Many published CSV files start with lines of notes before the header row, each beginning with `#`, such as `# Monthly means from the station's weather mast`. `cruise` refuses a table like that: it reads the first line as the header, so it reports the error `structure.header-mismatch`, "data/plots.csv: column 1 is named "# Monthly means from the station's weather mast" in the file's header row, but the manifest names it 'plot'", and checks none of the table's values. Before you make the package, move those lines out of the CSV file: put what they say in the package's `description` or `archive:methods`, or in a document in the package, and keep the original file in a folder such as `original/`, as the sample package does.
 
 Older data often writes a number such as `-9999` or `-99.99` where a value is missing; that number is a **placeholder**. `cruise diagnose` warns about one with `values.placeholder`, "Column canopy_cover has 1 value that looks like a placeholder for no value." If the number really means "no value", declare it in the table's schema in `datapackage.json` with `missingValues`, next to `fields`: `"missingValues": ["", "-9999"]`. Each entry is the text exactly as it appears in the file. The list replaces the default, which is `[""]` (an empty cell), so keep `""` in it. `cruise set` has no target for `missingValues`, so edit it by hand, then run any `cruise set` so the checksums match again.
 
@@ -466,7 +496,7 @@ cruise audit .
 ```
 path            errors  warnings  notes  score                                                   most fired
 plot-survey     0       1         0      96% (find 5 of 5, understand 14 of 14, trust 12 of 13)  package.creator-orcid-missing
-sample-package  0       3         0      96% (find 5 of 5, understand 44 of 46, trust 31 of 32)  field.description-repeats-name
+sample-package  0       3         0      96% (find 5 of 5, understand 44 of 46, trust 32 of 33)  field.description-repeats-name
 ```
 
 "Most fired" is the rule that raised the most findings in that package, which is usually the first thing to fix. `--profile`, `--config` and `--json` work as they do for `diagnose`.

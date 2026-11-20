@@ -1,5 +1,6 @@
 import json
 import shutil
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +9,8 @@ import pytest
 from archive_contract.findings import Finding
 from archive_contract.manifest import QualityVerdict, ValidationVerdict
 from cruise.cli import main
+from cruise.diagnose import diagnose
+from cruise.rules import Context, Outcome, Registry
 
 SAMPLE = Path(__file__).parents[3] / "examples" / "sample-package"
 
@@ -186,3 +189,23 @@ def test_set_still_reads_a_rights_status_object_as_json(package: Path) -> None:
     assert main(["set", str(package), "archive:rightsStatus", json.dumps(status)]) == 0
 
     assert manifest_json(package)["archive:rightsStatus"] == status
+
+
+def test_diagnose_prints_a_failed_check_under_its_own_heading_and_exits_1(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    registry = Registry()
+
+    @registry.rule("values.broken", question="trust", scope="table", severity="warning")
+    def broken(ctx: Context) -> Outcome:
+        raise RuntimeError("no such thing")
+
+    monkeypatch.setattr("cruise.cli.diagnose", partial(diagnose, registry=registry))
+
+    code = main(["diagnose", str(SAMPLE)])
+
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "Checks that could not run (a fault in cruise, not in your package)" in out
+    assert "  error  values.check-failed  package" in out
+    assert out.rstrip().splitlines()[-1] == "Verdict: blocks publishing (1)"

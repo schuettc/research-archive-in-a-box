@@ -78,7 +78,7 @@ def test_submit_refuses_a_package_with_an_error_finding(
 ) -> None:
     (package / "data" / "logger.csv").write_text("changed\n")
 
-    with pytest.raises(Refused, match="3 error findings"):
+    with pytest.raises(Refused, match="4 error findings"):
         submit.submit(session, str(package))
 
     assert [(s.method, s.path) for s in connected.seen] == [("GET", "/archive-checks.json")]
