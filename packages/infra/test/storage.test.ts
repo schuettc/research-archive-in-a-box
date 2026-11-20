@@ -79,6 +79,8 @@ test("only staging's incoming/ objects expire after 30 days", () => {
 
   expect(staging.Properties.LifecycleConfiguration.Rules).toEqual([
     expect.objectContaining({ ExpirationInDays: 30, Prefix: "incoming/", Status: "Enabled" }),
+    // A large zip is written to held/ in parts; a write that died leaves none billed.
+    { AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }, Status: "Enabled" },
   ]);
 });
 
