@@ -1,0 +1,82 @@
+{
+  "$schema": "https://datapackage.org/profiles/2.0/datapackage.json",
+  "id": "tree-rings",
+  "name": "tree-rings",
+  "version": "1",
+  "resources": [
+    {
+      "name": "rings",
+      "path": "data/rings.csv",
+      "type": "table",
+      "title": "Ring widths",
+      "description": "One row per tree and year.",
+      "format": "csv",
+      "mediatype": "text/csv",
+      "encoding": "utf-8",
+      "bytes": 422,
+      "hash": "sha256:c1b3de226db5243548fd6c5dedf92d7f362cda31bee9decf6dfcb3a811412a47",
+      "schema": {
+        "fields": [
+          {
+            "name": "tree",
+            "type": "string",
+            "title": "Tree",
+            "description": "Tree code, T01 or T02.",
+            "archive:measurementScale": "nominal"
+          },
+          {
+            "name": "year",
+            "type": "year",
+            "title": "Year",
+            "description": "The calendar year the ring grew in.",
+            "archive:measurementScale": "dateTime"
+          },
+          {
+            "name": "ring_width_mm",
+            "type": "number",
+            "title": "Ring width (mm)",
+            "description": "Width of the whole ring along the core, in millimetres.",
+            "archive:unit": "mm",
+            "archive:measurementScale": "ratio"
+          },
+          {
+            "name": "latewood_width_mm",
+            "type": "number",
+            "title": "Latewood width (mm)",
+            "description": "Width of the ring's darker, late-season wood, in millimetres.",
+            "archive:unit": "mm",
+            "archive:measurementScale": "ratio"
+          }
+        ]
+      },
+      "archive:kind": "table"
+    }
+  ],
+  "archive:access": "public",
+  "title": "Tree-ring widths from one stand",
+  "description": "Annual ring widths for 2014 to 2023 measured on cores from two invented sugar maples in one stand, with the latewood part of each ring. Every tree and width is invented.",
+  "keywords": ["tree rings", "dendrochronology", "sugar maple", "growth"],
+  "contributors": [
+    {
+      "title": "Invented Research Cooperative",
+      "organization": "Invented Research Cooperative",
+      "roles": ["creator"]
+    }
+  ],
+  "licenses": [
+    {
+      "name": "CC-BY-4.0",
+      "path": "https://creativecommons.org/licenses/by/4.0/",
+      "title": "Creative Commons Attribution 4.0 International"
+    }
+  ],
+  "archive:temporalCoverage": {
+    "start": "2014-01-01",
+    "end": "2023-12-31"
+  },
+  "archive:spatialCoverage": {
+    "bbox": [-72.75, 44.25, -72.74, 44.26],
+    "description": "One invented hardwood stand."
+  },
+  "archive:methods": "One 5 mm core per tree was taken at breast height in October 2023, sanded, and measured to 0.01 mm on a sliding stage under a microscope."
+}

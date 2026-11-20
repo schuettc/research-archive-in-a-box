@@ -1,0 +1,91 @@
+{
+  "$schema": "https://datapackage.org/profiles/2.0/datapackage.json",
+  "id": "weather-station",
+  "name": "weather-station",
+  "version": "1",
+  "resources": [
+    {
+      "name": "daily",
+      "path": "data/daily.csv",
+      "type": "table",
+      "title": "Daily weather",
+      "description": "One row per day.",
+      "format": "csv",
+      "mediatype": "text/csv",
+      "encoding": "utf-8",
+      "bytes": 660,
+      "hash": "sha256:e4078189d0c4f98ea4d103b184b1dc10cd59484091fb2d045bf572a6fb5e57a5",
+      "schema": {
+        "fields": [
+          {
+            "name": "date",
+            "type": "date",
+            "title": "Date",
+            "description": "The day, midnight to midnight local standard time.",
+            "archive:measurementScale": "dateTime"
+          },
+          {
+            "name": "air_temp_max_c",
+            "type": "number",
+            "title": "Highest air temperature (C)",
+            "description": "Highest air temperature of the day at 2 m, in degrees Celsius.",
+            "archive:unit": "degC",
+            "archive:measurementScale": "interval"
+          },
+          {
+            "name": "air_temp_min_c",
+            "type": "number",
+            "title": "Lowest air temperature (C)",
+            "description": "Lowest air temperature of the day at 2 m, in degrees Celsius.",
+            "archive:unit": "degC",
+            "archive:measurementScale": "interval"
+          },
+          {
+            "name": "rain_mm",
+            "type": "number",
+            "title": "Rainfall (mm)",
+            "description": "Rain caught by the tipping-bucket gauge over the day, in millimetres.",
+            "archive:unit": "mm",
+            "archive:measurementScale": "ratio"
+          },
+          {
+            "name": "wind_speed_m_s",
+            "type": "number",
+            "title": "Mean wind speed (m/s)",
+            "description": "Mean wind speed over the day at 3 m, in metres per second.",
+            "archive:unit": "m/s",
+            "archive:measurementScale": "ratio"
+          }
+        ]
+      },
+      "archive:kind": "table"
+    }
+  ],
+  "archive:access": "public",
+  "title": "Daily weather at the field station",
+  "description": "Daily highest and lowest air temperature, rainfall and mean wind speed at an invented field station for the first three weeks of June 2024. Every value is invented.",
+  "keywords": ["weather", "air temperature", "rainfall", "wind"],
+  "contributors": [
+    {
+      "title": "Invented Research Cooperative",
+      "organization": "Invented Research Cooperative",
+      "roles": ["creator"]
+    }
+  ],
+  "licenses": [
+    {
+      "name": "CC-BY-4.0",
+      "path": "https://creativecommons.org/licenses/by/4.0/",
+      "title": "Creative Commons Attribution 4.0 International"
+    }
+  ],
+  "archive:temporalCoverage": {
+    "start": "2024-06-01",
+    "end": "2024-06-21"
+  },
+  "archive:spatialCoverage": {
+    "bbox": [-72.73, 44.26, -72.72, 44.27],
+    "description": "One invented field station."
+  },
+  "archive:methods": "An automatic station logged every ten minutes; the daily values are the highest and lowest temperature, the summed rainfall and the mean wind speed of each day's readings."
+}
