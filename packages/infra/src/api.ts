@@ -95,8 +95,8 @@ function cognitoRateRule(
  * The REST API under `/api`, with fixed stage throttling and a Cognito authorizer. `whoami`
  * exists because CDK refuses an authorizer attached to no method, and it proves a signed-in call.
  * With the WAF module on, one regional web ACL guards both the API stage and the user pool, the
- * API answers only requests that carry the key the archive's distribution sends, and it limits
- * them per visitor address.
+ * API answers only requests that carry the key the archive's distribution sends, the web ACL
+ * refuses the others, and it limits requests per visitor address.
  */
 export class Api extends Construct {
   readonly restApi: apigateway.RestApi;
@@ -180,15 +180,53 @@ export class Api extends Construct {
               sampledRequestsEnabled: true,
             },
           })),
+          // A request to the API's own address must carry the key the distribution sends. The
+          // user pool's requests carry another host, so this never matches them.
+          {
+            name: "ApiThroughSite",
+            priority: MANAGED_RULE_GROUPS.length,
+            action: { block: {} },
+            statement: {
+              andStatement: {
+                statements: [
+                  {
+                    byteMatchStatement: {
+                      fieldToMatch: { singleHeader: { Name: "host" } },
+                      positionalConstraint: "ENDS_WITH",
+                      searchString: `.execute-api.${stack.region}.${stack.urlSuffix}`,
+                      textTransformations: [{ priority: 0, type: "LOWERCASE" }],
+                    },
+                  },
+                  {
+                    notStatement: {
+                      statement: {
+                        byteMatchStatement: {
+                          fieldToMatch: { singleHeader: { Name: ORIGIN_KEY_HEADER } },
+                          positionalConstraint: "EXACTLY",
+                          searchString: this.originKey,
+                          textTransformations: [{ priority: 0, type: "NONE" }],
+                        },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+            visibilityConfig: {
+              cloudWatchMetricsEnabled: true,
+              metricName: "ApiThroughSite",
+              sampledRequestsEnabled: true,
+            },
+          },
           cognitoRateRule(
             "SignInRateLimit",
-            MANAGED_RULE_GROUPS.length,
+            MANAGED_RULE_GROUPS.length + 1,
             RATE_LIMITED_CALLS,
             SIGN_IN_RATE_LIMIT,
           ),
           cognitoRateRule(
             "EmailRateLimit",
-            MANAGED_RULE_GROUPS.length + 1,
+            MANAGED_RULE_GROUPS.length + 2,
             EMAIL_CALLS,
             EMAIL_RATE_LIMIT,
             EMAIL_RATE_WINDOW_SECONDS,
@@ -196,7 +234,7 @@ export class Api extends Construct {
           // Counted only over requests that carry the key, by the address the distribution set.
           {
             name: "ApiRateLimit",
-            priority: MANAGED_RULE_GROUPS.length + 2,
+            priority: MANAGED_RULE_GROUPS.length + 3,
             action: { block: {} },
             statement: {
               rateBasedStatement: {

@@ -176,8 +176,8 @@ test("with WAF on, one rule limits each visitor address to 2,000 API requests in
   const [acl] = Object.keys(template.findResources("AWS::WAFv2::WebACL"));
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rules: any[] = template.toJSON().Resources[acl!].Properties.Rules;
-  expect(rules).toHaveLength(6);
-  expect(new Set(rules.map((rule) => rule.Priority)).size).toBe(6);
+  expect(rules).toHaveLength(7);
+  expect(new Set(rules.map((rule) => rule.Priority)).size).toBe(7);
   const limit = rules.find((rule) => rule.Name === "ApiRateLimit");
   expect(limit).toMatchObject({
     Action: { Block: {} },
@@ -208,6 +208,58 @@ test("with WAF on, one rule limits each visitor address to 2,000 API requests in
   const search =
     limit.Statement.RateBasedStatement.ScopeDownStatement.ByteMatchStatement.SearchString;
   expect(search).toHaveProperty("Fn::GetAtt");
+});
+
+test("with WAF on, the web ACL takes API requests only with the key CloudFront sends", () => {
+  const { template } = archive(true);
+  const [acl] = Object.keys(template.findResources("AWS::WAFv2::WebACL"));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rules: any[] = template.toJSON().Resources[acl!].Properties.Rules;
+  expect(rules).toHaveLength(7);
+  const through = rules.find((rule) => rule.Name === "ApiThroughSite");
+  expect(through).toMatchObject({
+    Action: { Block: {} },
+    Statement: {
+      AndStatement: {
+        Statements: [
+          {
+            ByteMatchStatement: {
+              FieldToMatch: { SingleHeader: { Name: "host" } },
+              PositionalConstraint: "ENDS_WITH",
+              TextTransformations: [{ Priority: 0, Type: "LOWERCASE" }],
+            },
+          },
+          {
+            NotStatement: {
+              Statement: {
+                ByteMatchStatement: {
+                  FieldToMatch: { SingleHeader: { Name: "x-api-key" } },
+                  PositionalConstraint: "EXACTLY",
+                  TextTransformations: [{ Priority: 0, Type: "NONE" }],
+                },
+              },
+            },
+          },
+        ],
+      },
+    },
+  });
+  // Only the API's own address ends this way; the user pool's requests carry another host.
+  const [host, notKey] = through.Statement.AndStatement.Statements;
+  expect(JSON.stringify(host.ByteMatchStatement.SearchString)).toMatch(
+    /^\{"Fn::Join":\["",\["\.execute-api\.",\{"Ref":"AWS::Region"\},"\.",\{"Ref":"AWS::URLSuffix"\}\]\]\}$/,
+  );
+  // The key compared is the one the per-address limit counts by.
+  const limit = rules.find((rule) => rule.Name === "ApiRateLimit");
+  expect(notKey.NotStatement.Statement.ByteMatchStatement.SearchString).toEqual(
+    limit.Statement.RateBasedStatement.ScopeDownStatement.ByteMatchStatement.SearchString,
+  );
+  // It is evaluated before every rate rule.
+  for (const rule of rules.filter((r) => r.Statement.RateBasedStatement)) {
+    expect(through.Priority).toBeLessThan(rule.Priority);
+  }
+
+  archive(false).template.resourceCountIs("AWS::WAFv2::WebACL", 0);
 });
 
 test("the integrity check runs weekly with no retries", () => {
