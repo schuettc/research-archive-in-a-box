@@ -9,7 +9,12 @@ import pytest
 
 from archive_contract import write_checksums
 from archive_contract.findings import Finding
-from archive_contract.validate import validate_package
+from archive_contract.validate import (
+    is_hidden,
+    package_files,
+    readable_member,
+    validate_package,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -185,8 +190,8 @@ def test_only_the_top_level_build_folder_is_exempt_from_checksums(tmp_path: Path
     assert validate_package(root) == []
 
 
-@pytest.mark.parametrize("extra", [".DS_Store", "data/_readings.csv", "docs/_build/x.txt"])
-def test_hidden_and_underscore_files_need_a_checksums_line(tmp_path: Path, extra: str) -> None:
+@pytest.mark.parametrize("extra", ["data/_readings.csv", "docs/_build/x.txt"])
+def test_underscore_files_need_a_checksums_line(tmp_path: Path, extra: str) -> None:
     root = edited(tmp_path, lambda m: None)
     (root / extra).parent.mkdir(parents=True, exist_ok=True)
     (root / extra).write_text("x", encoding="utf-8")
@@ -195,6 +200,94 @@ def test_hidden_and_underscore_files_need_a_checksums_line(tmp_path: Path, extra
 
     assert rule_ids(findings) == ["structure.checksums-unlisted"]
     assert findings[0].target is not None and findings[0].target.path == extra
+
+
+HIDDEN_CASES = json.loads((FIXTURES / "hidden-paths.json").read_text(encoding="utf-8"))["cases"]
+
+
+@pytest.mark.parametrize("case", HIDDEN_CASES, ids=lambda case: case["path"])
+def test_is_hidden_answers_the_shared_cases(case: dict[str, Any]) -> None:
+    assert is_hidden(case["path"]) is case["hidden"]
+
+
+@pytest.mark.parametrize(
+    "extra", [".DS_Store", "data/.DS_Store", ".git/config", "docs/.cache/x.txt"]
+)
+def test_a_hidden_file_is_not_package_content_and_is_not_reported(
+    tmp_path: Path, extra: str
+) -> None:
+    root = edited(tmp_path, lambda m: None)
+    (root / extra).parent.mkdir(parents=True, exist_ok=True)
+    (root / extra).write_text("x", encoding="utf-8")
+
+    assert validate_package(root) == []
+    assert extra not in package_files(root)[0]
+
+
+def test_a_hidden_symlink_is_not_reported_or_followed(tmp_path: Path) -> None:
+    root = edited(tmp_path, lambda m: None)
+    (root / ".venv").symlink_to(outside_copy(tmp_path, "docs"))
+
+    assert validate_package(root) == []
+    assert package_files(root) == (package_files(FIXTURES / "valid")[0], [])
+
+
+def test_a_package_under_a_hidden_folder_is_walked_as_usual(tmp_path: Path) -> None:
+    root = edited(tmp_path / ".work", lambda m: None)
+
+    assert validate_package(root) == []
+    assert "datapackage.json" in package_files(root)[0]
+
+
+def test_a_checksums_line_for_a_hidden_file_says_to_remove_it(tmp_path: Path) -> None:
+    root = edited(tmp_path, lambda m: None)
+    (root / ".DS_Store").write_text("x", encoding="utf-8")
+    with (root / "checksums.sha256").open("a", encoding="utf-8") as out:
+        out.write(f"{hashlib.sha256(b'x').hexdigest()}  .DS_Store\n")
+
+    [finding] = validate_package(root)
+
+    assert finding.rule_id == "structure.checksums-hidden"
+    assert finding.severity == "error"
+    assert finding.message == (
+        "checksums.sha256 lists .DS_Store, a hidden file (a name starting with a dot), "
+        "which a package never holds; remove its line"
+    )
+    assert finding.target is not None and finding.target.path == ".DS_Store"
+
+
+def test_a_checksums_line_for_an_absent_hidden_file_gets_the_same_one_finding(
+    tmp_path: Path,
+) -> None:
+    root = edited(tmp_path, lambda m: None)
+    with (root / "checksums.sha256").open("a", encoding="utf-8") as out:
+        out.write(f"{'0' * 64}  .git/config\n")
+
+    assert rule_ids(validate_package(root)) == ["structure.checksums-hidden"]
+
+
+def test_a_resource_whose_path_is_hidden_is_refused_and_not_read(tmp_path: Path) -> None:
+    def edit(manifest: dict[str, Any]) -> None:
+        manifest["resources"][0]["path"] = "data/.hidden.csv"
+
+    root = edited(tmp_path, edit)
+
+    findings = [f for f in validate_package(root) if f.rule_id == "structure.path-hidden"]
+
+    assert [f.message for f in findings] == [
+        "data/.hidden.csv is a hidden file (a name starting with a dot), "
+        "which a package never holds"
+    ]
+    assert findings[0].target is not None and findings[0].target.path == "data/.hidden.csv"
+    assert "structure.file-missing" not in rule_ids(validate_package(root))
+
+
+def test_a_hidden_path_is_not_a_readable_member(tmp_path: Path) -> None:
+    root = edited(tmp_path, lambda m: None)
+    (root / "data" / ".hidden.csv").write_text("a\n1\n", encoding="utf-8")
+
+    assert readable_member(root, "data/.hidden.csv") is False
+    assert readable_member(root, "datapackage.json") is True
 
 
 def outside_copy(tmp_path: Path, relative: str) -> Path:

@@ -51,7 +51,7 @@ def test_search_passes_the_filters_and_answers_rows_total_and_facets(connected: 
         size=10,
     )
 
-    assert result == answer
+    assert result == {**answer, "archive": connected.url}
     assert connected.seen[0].query == {
         "q": ["ozone"],
         "access": ["public"],

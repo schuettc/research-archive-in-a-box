@@ -1,3 +1,4 @@
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -7,6 +8,7 @@ import pytest
 
 from archive_agent import local
 from archive_agent.errors import LocalError
+from archive_agent.state import Session
 from archive_contract.exports.readme import render_readme
 from archive_contract.manifest import Manifest
 
@@ -30,7 +32,7 @@ def rule_ids(answer: dict[str, Any]) -> list[str]:
 
 
 def test_diagnose_answers_the_json_cruise_prints_with_the_verdict(package: Path) -> None:
-    answer = local.diagnose(str(package))
+    answer = local.diagnose(Session(), str(package))
 
     assert set(answer) == {"validation", "quality", "findings", "verdict", "note"}
     assert answer["validation"]["valid"] is True
@@ -39,9 +41,18 @@ def test_diagnose_answers_the_json_cruise_prints_with_the_verdict(package: Path)
     assert answer["verdict"] == "publishable, with 4 warnings"
 
 
+def test_diagnose_names_the_windows_archive_even_when_it_publishes_no_checks(
+    package: Path,
+) -> None:
+    answer = local.diagnose(Session(address="https://a.example"), str(package))
+
+    assert answer["archive"] == "https://a.example"
+    assert "checks" not in answer
+
+
 def test_diagnose_refuses_a_folder_that_isnt_there(tmp_path: Path) -> None:
     with pytest.raises(LocalError, match="no folder"):
-        local.diagnose(str(tmp_path / "missing"))
+        local.diagnose(Session(), str(tmp_path / "missing"))
 
 
 def test_edit_manifest_applies_a_column_description_and_a_license(package: Path) -> None:
@@ -74,7 +85,7 @@ def test_edit_manifest_applies_a_column_description_and_a_license(package: Path)
     assert answer["written"] == list(WRITTEN)
     assert answer["applied"] == 2
 
-    after = local.diagnose(str(package))
+    after = local.diagnose(Session(), str(package))
     assert after["validation"]["valid"] is True
     assert not [r for r in rule_ids(after) if r.startswith("structure.")]
     assert "field.description-missing" not in rule_ids(after)
@@ -164,3 +175,22 @@ def test_edit_manifest_sets_and_clears_the_embargo_date(package: Path) -> None:
 
     local.edit_manifest(str(package), [{"target": "archive:embargoUntil", "value": None}])
     assert "archive:embargoUntil" not in json.loads(path.read_text())
+
+
+def test_edit_manifest_leaves_a_hidden_file_out_of_the_checksums(package: Path) -> None:
+    (package / ".DS_Store").write_bytes(b"x")
+    (package / "data" / ".DS_Store").write_bytes(b"x")
+
+    local.edit_manifest(str(package), [{"target": "title", "value": "A new title"}])
+
+    assert ".DS_Store" not in (package / "checksums.sha256").read_text()
+    findings = local.diagnose(Session(), str(package))["findings"]
+    assert not [f for f in findings if f["severity"] == "error"]
+
+
+def test_diagnose_names_a_hidden_file_the_checksums_list(package: Path) -> None:
+    (package / ".DS_Store").write_bytes(b"x")
+    with (package / "checksums.sha256").open("a") as out:
+        out.write(f"{hashlib.sha256(b'x').hexdigest()}  .DS_Store\n")
+
+    assert "structure.checksums-hidden" in rule_ids(local.diagnose(Session(), str(package)))

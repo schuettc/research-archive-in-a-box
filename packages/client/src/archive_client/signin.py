@@ -42,15 +42,19 @@ class AuthConfig:
 
 @dataclass(frozen=True)
 class Tokens:
-    """The one-hour tokens from a sign-in. `expires_at` is seconds since the epoch."""
+    """The one-hour tokens from a sign-in. `expires_at` is seconds since the epoch; `site` is
+    the archive whose sign-in page issued them, with no trailing slash."""
 
     access_token: str
     id_token: str
     expires_at: float
+    site: str
 
 
 class _Callback(HTTPServer):
     state: str = ""
+    site: str = ""
+    """The archive being signed in to, which the tokens record as their issuer."""
     done: str = ""
     """Where the tab goes once the form is taken: the archive's page, from the site sign_in was
     given and never from the request."""
@@ -87,7 +91,9 @@ class _Handler(BaseHTTPRequestHandler):
         body = self.rfile.read(length).decode("utf-8", "replace")
         # Check the form before answering, so the browser says signed in only when it is.
         try:
-            self.server.tokens = _tokens(dict(urllib.parse.parse_qsl(body)), self.server.state)
+            self.server.tokens = _tokens(
+                dict(urllib.parse.parse_qsl(body)), self.server.state, self.server.site
+            )
         except SignInError as exc:
             self.server.refused = str(exc)
             self.send_error(400)
@@ -114,8 +120,9 @@ def _wait(server: _Callback, timeout: float) -> Tokens:
     return server.tokens
 
 
-def _tokens(form: dict[str, str], state: str) -> Tokens:
-    """The tokens from the callback's form, once its state is the one this sign-in made."""
+def _tokens(form: dict[str, str], state: str, site: str) -> Tokens:
+    """The tokens from the callback's form, once its state is the one this sign-in made,
+    recorded as issued by `site`."""
     for name in _FIELDS:
         if not form.get(name):
             raise SignInError(f"the sign-in callback carried no {name}")
@@ -131,6 +138,7 @@ def _tokens(form: dict[str, str], state: str) -> Tokens:
         access_token=form["access_token"],
         id_token=form["id_token"],
         expires_at=time.time() + expires_in,
+        site=site,
     )
 
 
@@ -157,6 +165,7 @@ def sign_in(
     with listener as server:
         server.state = state
         site = config.site.rstrip("/")
+        server.site = site
         server.done = f"{site}/sign-in?cli=done"
         query = urllib.parse.urlencode({"cli": server.server_address[1], "state": state})
         page = f"{site}/sign-in?{query}"

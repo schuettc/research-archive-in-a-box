@@ -20,10 +20,10 @@ def _sha256(path: Path) -> str:
 def checksums_text(root: Path, replaced: Mapping[str, bytes] | None = None) -> str:
     """The text of `checksums.sha256` for the package at `root`: `<sha256>  <path>` lines.
 
-    Every path `package_files` lists (so not `_build/`, and no symlink) except the checksums
-    file itself, sorted, in the format `validate_package` reads. `replaced` maps relative
-    paths to content about to be written, which is hashed instead of the file on disk, so a
-    writer can build every file before writing any.
+    Every path `package_files` lists (so not `_build/`, no hidden file and no symlink) except
+    the checksums file itself, sorted, in the format `validate_package` reads. `replaced` maps
+    relative paths to content about to be written, which is hashed instead of the file on
+    disk, so a writer can build every file before writing any.
     """
     replaced = replaced or {}
     paths, _ = package_files(root)

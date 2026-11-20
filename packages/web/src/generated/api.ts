@@ -1658,7 +1658,8 @@ export interface components {
     };
     /**
      * SubmittedFile
-     * @description One file of a round: a relative path, its size in bytes and its SHA-256 in hex.
+     * @description One file of a round: a relative path with no part starting with a dot, its size in
+     *     bytes and its SHA-256 in hex.
      */
     SubmittedFile: {
       /** Path */

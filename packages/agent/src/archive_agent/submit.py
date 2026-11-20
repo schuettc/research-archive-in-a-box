@@ -77,8 +77,8 @@ def submit(session: Session, folder: str, submission: str | None = None) -> dict
     way answers the plain error; nothing is retried.
     """
     # The archive may have changed what it checks since connect; check what it checks now.
-    state.refresh_checks(session.url())
-    findings = local.diagnose(folder)["findings"]
+    state.refresh_checks(session)
+    findings = local.diagnose(session, folder)["findings"]
     errors = sum(1 for f in findings if f.get("severity") == "error")
     if errors:
         noun = "error finding" if errors == 1 else "error findings"
@@ -115,7 +115,12 @@ def submit(session: Session, folder: str, submission: str | None = None) -> dict
         with (root / f["path"]).open("rb") as stream:
             archive.put(upload["url"], stream, f["size"], headers)
     sent = archive.post(f"/api/submissions/{_quote(sid)}/submit", {}, group=CONTRIBUTOR)
-    return {"id": sid, "round": sent.get("round"), "status": sent.get("status")}
+    return {
+        "id": sid,
+        "round": sent.get("round"),
+        "status": sent.get("status"),
+        "archive": archive.url,
+    }
 
 
 def _report(archive: Archive, link: str) -> tuple[Any, str | None]:
@@ -176,9 +181,10 @@ def decide(session: Session, id: str, decision: str, note: str) -> dict[str, Any
     """Post a curator's decision and note on a submission in review."""
     if decision not in DECISIONS:
         raise Refused(f"{decision!r} isn't a decision; give approve, reject or request-changes.")
-    answer: dict[str, Any] = session.archive().post(
+    archive = session.archive()
+    answer: dict[str, Any] = archive.post(
         f"/api/submissions/{_quote(id)}/decision",
         {"decision": decision, "note": note},
         group=CURATOR,
     )
-    return answer
+    return {**answer, "archive": archive.url}
