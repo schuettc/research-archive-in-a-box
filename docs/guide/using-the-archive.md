@@ -81,16 +81,38 @@ After the upload the archive scans the files, runs every check on the data itsel
 **Submissions** lists your own submissions with the dataset, the status, the kind (a new dataset, or a new version of one), when it started and its last change. A submission's page shows its status, its checks and its history. The statuses:
 
 ```mermaid
-flowchart LR
-  draft["Draft"] --> checking["Being checked"]
-  checking --> review["Waiting for a curator"]
-  checking --> changes["Changes requested"]
-  review --> changes
-  changes -->|"Resubmit"| checking
-  review --> publishing["Publishing"]
-  publishing --> published["Published"]
-  review --> rejected["Rejected"]
-  checking -->|"no review needed"| publishing
+stateDiagram-v2
+  state "Draft" as draft
+  state "Being checked" as checking
+  state "Changes requested" as changes
+  state "Waiting for a curator" as review
+  state "Publishing" as publishing
+  state "Published" as published
+  state "Rejected" as rejected
+  state "Abandoned" as abandoned
+  state "Expired" as expired
+  state "Failed" as failed
+
+  [*] --> draft: the submission is created
+  draft --> checking: every file uploaded, then submitted
+  checking --> changes: an error, or a file not scanned clean
+  checking --> review: no errors, and a review is needed
+  checking --> publishing: no errors, and no review needed
+  review --> changes: a curator requests changes
+  review --> publishing: approved
+  review --> rejected: a curator rejects it
+  changes --> draft: the upload of the next round starts
+  changes --> abandoned: no resubmission within 30 days
+  publishing --> published: the version is live
+  review --> expired: still open after 360 days
+  changes --> expired: still open after 360 days
+  checking --> failed: a file not scanned within one day, or a step fails
+  publishing --> failed: a step fails
+  published --> [*]
+  rejected --> [*]
+  abandoned --> [*]
+  expired --> [*]
+  failed --> [*]
 ```
 
 - **Draft**: not every file was uploaded, or the upload links ran out; choose the folder again.
@@ -100,7 +122,7 @@ flowchart LR
 - **Publishing**, then **Published**: the curator approved it (or the review policy let it through without review) and the dataset is live.
 - **Rejected**: a curator declined it, with a note saying why.
 
-A submission kept for a year without finishing is closed as **expired**; one the pipeline couldn't finish is **failed**.
+A submission still open 360 days after it was first submitted is closed as **expired**; one the pipeline couldn't finish is **failed**.
 
 A new version of a published dataset is submitted the same way, from the folder of its next version.
 

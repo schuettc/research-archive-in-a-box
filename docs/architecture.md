@@ -73,6 +73,45 @@ flowchart TD
 
 Every wait in an execution is capped so that a submission still open after 360 days ends as `expired`, before the one-year limit on a durable execution would end it without a record. A step that fails after its retries ends the submission as `failed` and alerts the admins. One invocation of the function runs for at most 15 minutes, so each step that reads or writes a whole package (hold, zips, copy) is preceded by a one-second wait: the wait ends the invocation, and the step starts the next one with the full 15 minutes.
 
+The statuses a submission passes through, as the web app names them, and every way it ends:
+
+```mermaid
+stateDiagram-v2
+  state "Draft" as draft
+  state "Being checked" as checking
+  state "Changes requested" as changes
+  state "Waiting for a curator" as review
+  state "Publishing" as publishing
+  state "Published" as published
+  state "Rejected" as rejected
+  state "Abandoned" as abandoned
+  state "Expired" as expired
+  state "Failed" as failed
+
+  [*] --> draft: the submission is created
+  draft --> checking: every file uploaded, then submitted
+  checking --> changes: an error, or a file not scanned clean
+  checking --> review: no errors, and a review is needed
+  checking --> publishing: no errors, and no review needed
+  review --> changes: a curator requests changes
+  review --> publishing: approved
+  review --> rejected: a curator rejects it
+  changes --> draft: the upload of the next round starts
+  changes --> abandoned: no resubmission within 30 days
+  publishing --> published: the version is live
+  review --> expired: still open after 360 days
+  changes --> expired: still open after 360 days
+  checking --> failed: a file not scanned within one day, or a step fails
+  publishing --> failed: a step fails
+  published --> [*]
+  rejected --> [*]
+  abandoned --> [*]
+  expired --> [*]
+  failed --> [*]
+```
+
+A draft that is never submitted has no execution, so it stays a draft. A fault in the pipeline at any other point, such as a callback it can't read, also ends the submission as **Failed**.
+
 After publishing, curators and admins can correct, withdraw, restore and embargo a dataset. Each of those records the change at once and hands the file moves to a separate lifecycle function, as [curating.md](curating.md) describes.
 
 ## What a stage deploys
