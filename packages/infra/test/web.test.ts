@@ -307,7 +307,7 @@ test("the SiteDomain output names the distribution's domain, for just smoke and 
   template.hasOutput("SiteDomain", { Value: { "Fn::GetAtt": [distribution, "DomainName"] } });
 });
 
-test("CloudFront is denied the archive bucket's restricted/ and publishing/ prefixes", () => {
+test("CloudFront is denied the archive bucket's restricted/ prefix, and no policy names publishing/", () => {
   const { archive: a, stack, template } = archive();
   const policies = template.findResources("AWS::S3::BucketPolicy");
   const archivePolicy = Object.values(policies).find(
@@ -321,26 +321,7 @@ test("CloudFront is denied the archive bucket's restricted/ and publishing/ pref
   expect(deny).toBeDefined();
   expect(deny?.Action).toBe("s3:GetObject");
   expect(JSON.stringify(deny?.Resource)).toContain("/restricted/*");
-  expect(JSON.stringify(deny?.Resource)).toContain("/publishing/*");
-});
-
-test("no origin or behaviour reaches the archive bucket's publishing/ folder", () => {
-  const { archive: a, stack, template } = archive();
-  const config = distributionConfig(a, stack, template);
-  const archiveId = bucketId(stack, a.archiveBucket);
-  const onArchive = (config.Origins as Json[]).filter(
-    (o) => o.DomainName?.["Fn::GetAtt"]?.[0] === archiveId,
-  );
-
-  // The one origin on the archive bucket reads under open/, whatever the request's path.
-  expect(onArchive.map((o) => o.OriginPath)).toEqual(["/open"]);
-  const behaviours = [config.DefaultCacheBehavior, ...(config.CacheBehaviors as Json[])];
-  const reaching = behaviours.filter((b) => b.TargetOriginId === onArchive[0]!.Id);
-  expect(reaching.map((b) => b.PathPattern)).toEqual(["/data/*"]);
-  // A request that names the folder is read as a key under open/, not as the folder.
-  const code = functionCode(template, reaching[0]!.FunctionAssociations[0].FunctionARN);
-  expect(rewrite(code, "/data/publishing/ds-1/2/a.csv")).toBe("/publishing/ds-1/2/a.csv");
-  expect(JSON.stringify(config)).not.toContain("publishing");
+  expect(JSON.stringify(policies)).not.toContain("publishing/");
 });
 
 // Without s3:ListBucket, S3 answers 403 for a missing key. A missing-key GET carries no s3:prefix,

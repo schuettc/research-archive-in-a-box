@@ -113,36 +113,30 @@ export class Ingest extends Construct {
     fn.addToRolePolicy(
       allow(["s3:ListBucket"], [staging.bucketArn], { StringLike: { "s3:prefix": "held/*" } }),
     );
-    // Publish keeps a version's files and zips under publishing/, which nothing serves or
-    // lists, until its move step: it copies and zips there, reads them to move them, and deletes
-    // each once moved (a delete marker). A zip too large for one PUT is written there in parts.
-    fn.addToRolePolicy(
-      allow(
-        ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload"],
-        objects(archive.archiveBucket, "publishing/"),
-      ),
-    );
-    // The move writes each file to its public folder; later steps read the manifest there for
-    // the catalog and the page.
+    // Publish builds a version's zips under held/ before anything of it is in the archive
+    // bucket; a zip too large for one PUT is written in parts, and aborted when that fails.
+    fn.addToRolePolicy(allow(["s3:AbortMultipartUpload"], objects(staging, "held/")));
+    // The copy step writes each file and zip to the version's public folder; later steps read
+    // the manifest there for the catalog and the page.
     fn.addToRolePolicy(
       allow(
         ["s3:PutObject", "s3:GetObject"],
         objects(archive.archiveBucket, "open/", "restricted/"),
       ),
     );
-    // A zip too large for one copy is moved in parts, and the DOI path rewrites one in parts
+    // A zip too large for one copy is copied in parts, and the DOI path rewrites one in parts
     // where it is; either is aborted when it fails.
     fn.addToRolePolicy(
       allow(["s3:AbortMultipartUpload"], objects(archive.archiveBucket, "open/", "restricted/")),
     );
-    // The zips step HEADs each zip to see whether it changed; without list rights S3 answers a
-    // missing key with 403 instead of 404. The move lists the version's private folder.
+    // The DOI path's zips step HEADs each zip to see whether it changed; without list rights S3
+    // answers a missing key with 403 instead of 404. A failed publish lists what to remove.
     fn.addToRolePolicy(
       allow(["s3:ListBucket"], [archive.archiveBucket.bucketArn], {
-        StringLike: { "s3:prefix": ["open/*", "restricted/*", "publishing/*"] },
+        StringLike: { "s3:prefix": ["open/*", "restricted/*"] },
       }),
     );
-    // A publish that fails before its version is live hides what it moved to the public folder,
+    // A publish that fails before its version is live hides what it copied to the public folder,
     // and a later publish that takes over its claim does the same. The bucket is versioned, so the delete
     // adds a delete marker: no right to delete a version or to bypass Object Lock.
     fn.addToRolePolicy(
