@@ -112,9 +112,13 @@ Fields every submission must have, beyond those its profiles require. Each must 
 required: [keywords, archive:funding]
 ```
 
+## Reserved, not enforced yet
+
+The four settings in this section, `vocabularies`, `themes`, `licenses` and `access`, are reserved for later use. The contract validates them, so a mistake in one is still an error, but no part of the kit reads them: setting one changes nothing about what the archive accepts, shows or offers.
+
 ### `vocabularies`
 
-Controlled vocabularies for manifest fields: a **vocabulary** is an agreed list of terms for a field, such as the keywords a community uses. Each item names one. The contract validates this list, but no part of the kit reads it yet: submissions are not checked against it.
+Controlled vocabularies for manifest fields: a **vocabulary** is an agreed list of terms for a field, such as the keywords a community uses. Each item names one. Submissions are not checked against it.
 
 - **Type:** a list of blocks, each with the four fields below.
 - **Default:** an empty list.
@@ -182,7 +186,7 @@ vocabularies:
 
 ### `themes`
 
-The archive's themes, such as `hydrology` or `forest`. The contract validates this list, but no part of the kit reads it yet. A package's own themes, in its manifest's `archive:themes`, are what the review policy's rules and named reviewers match (see [Using the archive](using-the-archive.md#admin)).
+The archive's themes, such as `hydrology` or `forest`. A package's own themes, in its manifest's `archive:themes`, are what the review policy's rules and named reviewers match (see [Using the archive](using-the-archive.md#admin)).
 
 - **Type:** a list of text.
 - **Default:** an empty list.
@@ -193,7 +197,7 @@ themes: [hydrology, forest, snow]
 
 ### `licenses`
 
-The licences the archive offers its contributors. The contract validates this list, but no part of the kit reads it yet: a package may carry any licence.
+The licences the archive offers its contributors. A package may carry any licence, whatever this list says.
 
 - **Type:** a list of text (licence ids, such as `CC-BY-4.0`).
 - **Default:** an empty list.
@@ -204,7 +208,7 @@ licenses: [CC-BY-4.0, CC0-1.0]
 
 ### `access`
 
-The access levels the archive offers, from `public`, `limited`, `restricted` and `description-only` ([Packages and cruise](packages.md#access-levels) says what each means). The contract validates this list, but no part of the kit reads it yet: a package may use any of the four.
+The access levels the archive offers, from `public`, `limited`, `restricted` and `description-only` ([Packages and cruise](packages.md#access-levels) says what each means). A package may use any of the four, whatever this list says.
 
 - **Type:** a list of access levels.
 - **Default:** all four.

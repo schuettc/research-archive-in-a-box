@@ -35,7 +35,7 @@ cruise set examples/sample-package description "Logger battery voltage, in volts
 
 ### Run an archive
 
-An archive is a deployment of this kit: a web site with a search page, a page per dataset, sign-in, a submission form and a review queue, backed by storage and functions in your AWS account. Each copy you deploy is a stage, such as `prod`, or `dev` for trying changes first; every stage gets its own site and its own data. You describe the archive in one file, `archive.yaml`: its name, the licences and access levels it offers, its stages, and any optional modules (DOIs, a custom domain, email through Amazon SES, semantic search).
+An archive is a deployment of this kit: a web site with a search page, a page per dataset, sign-in, a submission form and a review queue, backed by storage and functions in your AWS account. Each copy you deploy is a stage, such as `prod`, or `dev` for trying changes first; every stage gets its own site and its own data. You describe the archive in one file, `archive.yaml`: its name, the profiles and required fields its packages are checked against, its brand (how the site looks), its stages, and any optional modules (DOIs, a custom domain, email through Amazon SES, semantic search).
 
 To run one you need:
 
