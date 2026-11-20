@@ -4,6 +4,13 @@ research-archive-in-a-box is a kit for running a research data archive: a place 
 
 ![The search page of an example archive, the Invented Research Cooperative: its introduction, a search box, filters by access, licence and format, and two published datasets.](docs/images/reading-room.png)
 
+| If you are                         | Start with                                                                                                         |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Deciding whether to run an archive | [What a dataset looks like here](#what-a-dataset-looks-like-here), then [Running cost](docs/guide/running-cost.md) |
+| Deploying one                      | [Run an archive](#run-an-archive), then [Deploying](docs/guide/deploying.md)                                       |
+
+If you are submitting a dataset to an archive someone else runs, start at [docs/guide/packages.md](docs/guide/packages.md).
+
 ## What a dataset looks like here
 
 A dataset travels as a package. A package is a plain folder holding the data files, a manifest called `datapackage.json` that describes them (title, description, contributors, licence, and every column of every table), and `checksums.sha256`, which records a SHA-256 checksum of each file so that a changed or damaged file is noticed. The folder [`examples/sample-package`](examples/sample-package) is one: hourly stream temperatures from three invented sites. The manifest follows the [Frictionless Data Package](https://datapackage.org/) standard, so other tools that read Frictionless packages can read it too. [docs/guide/packages.md](docs/guide/packages.md) explains how to make one from a CSV file.
@@ -25,10 +32,12 @@ Your first command checks one package folder. In a clone of this repository, try
 cruise diagnose examples/sample-package
 ```
 
-It answers in three groups of questions (can I find it, can I understand each column, can I trust the values), gives each problem a fix, and ends with a score and a verdict. On the sample package the verdict is `publishable, with 4 warnings`; one of them is that the column `battery_v` has no description. `cruise set` writes a fix into the manifest and rewrites `README.md` and `checksums.sha256` to match:
+It answers in three groups of questions (can I find it, can I understand each column, can I trust the values), gives each problem a fix, and ends with a score and a verdict. On the sample package the verdict is `publishable, with 4 warnings`; one of them is that the column `battery_v` has no description. `cruise set` writes a fix into the manifest and rewrites `README.md` and `checksums.sha256` to match. Copy the sample package somewhere first, so the fix doesn't change the repository:
 
 ```
-cruise set examples/sample-package description "Logger battery voltage, in volts." --resource logger --column battery_v
+mkdir -p /tmp/guide
+cp -R examples/sample-package /tmp/guide/sample-package
+cruise set /tmp/guide/sample-package description "Logger battery voltage at each reading, in volts." --resource logger --column battery_v
 ```
 
 `cruise audit <folders>` ranks every package under some folders, worst first, so you can see where to start. [docs/guide/packages.md](docs/guide/packages.md) covers all three commands, with their output.
@@ -90,40 +99,9 @@ The optional modules and curating:
 - [A custom domain](docs/domain.md): serving a stage on its own name through Route 53.
 - [Email through SES](docs/email.md): sending account emails from the stage's own domain.
 - [Curating published datasets](docs/curating.md): corrections, withdrawal and restore, embargoes and download counts.
+- [Terms](docs/terms.md): the definition of `ancillaryOf`, the one term of its own that the archive's EML metadata export uses.
 
-For people changing the kit: [Architecture](docs/architecture.md), the packages and how a submission becomes a published dataset.
-
-## Layout
-
-```
-packages/
-  contract/   Python: archive-contract, the package and archive.yaml models and their JSON Schema
-  tool/       Python: cruise, the command-line tool that checks and edits packages
-  backend/    Python: the Lambda functions behind the archive's API and pipeline
-  infra/      TypeScript: the CDK construct (ResearchArchive) and the app CI deploys
-  web/        TypeScript: the React and Vite web app
-  agent/      Python: the Claude Code plugin, its MCP server (archive-mcp) and skills
-  client/     Python: browser sign-in to an archive, for the MCP server
-examples/     the sample package, an example brand (logo and favicon), and femc, an example converter
-              that turns an existing data portal's datasets into packages
-docs/         the guide, the architecture page and the module docs
-```
-
-Python packages form a uv workspace (`pyproject.toml`); TypeScript packages form an npm workspace (`package.json`).
-
-## Develop
-
-Needs uv, Node 24 and [just](https://just.systems/).
-
-```
-uv sync --all-packages
-npm ci
-just check
-```
-
-`just check` runs every format check, lint, type check and test in both languages, plus the schema drift check. Inside a clone, `uv run cruise` runs the tool from the source.
-
-To try the web app locally against a deployed stage, run `ARCHIVE_DEV_SITE=https://<stage domain> npm run dev -w packages/web`. Vite then proxies `/api/`, `/auth-config.json` and `/data/` to that stage; without the variable, `npm run dev` is unchanged. Uploads, the findings report and file Preview fail locally, because the stage's storage refuses a localhost origin: check those on the stage itself.
+For people changing the kit: [Architecture](docs/architecture.md), the packages and how a submission becomes a published dataset, and [CONTRIBUTING.md](CONTRIBUTING.md), the repository's layout, setting up a clone, checking a change and opening a pull request.
 
 ## License
 
