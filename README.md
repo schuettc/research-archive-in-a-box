@@ -44,6 +44,8 @@ To run one you need:
 - [Claude Code](https://claude.com/claude-code), which runs the setup with you;
 - on your machine, [uv](https://docs.astral.sh/uv/), Node 24 or later and [just](https://just.systems/).
 
+Running an archive incurs AWS costs in your own account; [docs/guide/running-cost.md](docs/guide/running-cost.md) lists what it pays for.
+
 Clone your fork, open it in Claude Code and ask it to set up the archive. Its `deploy-archive` skill (in `.claude/skills/deploy-archive/`) checks these prerequisites, writes `archive.yaml` with you, connects GitHub Actions to your AWS account, and pushes to `main`. From then on CI (the repository's GitHub Actions workflow) deploys every stage on each push to `main`; you never deploy the archive from your laptop. The skill also makes the first admin, publishes a seed dataset and checks the site answers. [docs/guide/deploying.md](docs/guide/deploying.md) walks through each step, and [docs/guide/archive-yaml.md](docs/guide/archive-yaml.md) lists every setting in `archive.yaml`.
 
 ![A dataset's page on the example archive: the title, the creator, the publish date and version, a curator's Correct details and Withdraw buttons, the description, and Download all.](docs/images/dataset-page.png)

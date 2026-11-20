@@ -96,6 +96,20 @@ just set-roles <stage> <email> contributor
 
 With `selfSignUp: false` only invited people get an account, so `limited` means the people you invited. On a public stage with sign-up on, use `email: ses`.
 
+Giving someone the curator role does not email them about submissions. The archive sends its review messages (a submission is waiting for review, a reminder, a review gone stale) to a notification topic in Amazon SNS, the stage's curators' topic, and a new stage's topic has no one subscribed to it. Subscribe each curator's email address with:
+
+```
+just add-curator <stage> <email> <userId>
+```
+
+`<userId>` is the account's id in Cognito, its `sub` attribute. With the AWS CLI signed in to the stage's account and set to its Region, this prints it for an account that exists:
+
+```
+aws cognito-idp admin-get-user --user-pool-id "$(just _user-pool <stage>)" --username <email> --query "UserAttributes[?Name=='sub'].Value" --output text
+```
+
+The curator then gets the messages meant for every curator and those meant for them as a named reviewer, once they confirm the subscription from the email AWS sends them. Without this step nobody is emailed about a waiting submission, and the review queue is the only signal that one is waiting.
+
 ### 7. ✋ The seed
 
 ```

@@ -15,10 +15,10 @@ Ground rules:
   deploy from the laptop is `ResearchArchiveDeploy`, the GitHub-to-AWS connection.
 - **✋ means stop.** At a ✋ step, say what will happen and what it costs or changes, then wait for
   the words the step names. Anything else is a no: answer questions, change nothing, and ask again.
-- The recipes you call: `just stages`, `just invite-user`, `just set-roles`, `just set-embargo`,
-  `just seed`, `just smoke`, `just reindex`, `just destroy`, `just check`. Run them from the
-  repo's root. `just set-roles <stage> <email> <roles>` makes a person's roles exactly the
-  comma-separated list given (`contributor`, `curator`, `admin`; `""` removes every role).
+- The recipes you call: `just stages`, `just invite-user`, `just set-roles`, `just add-curator`,
+  `just set-embargo`, `just seed`, `just smoke`, `just reindex`, `just destroy`, `just check`. Run
+  them from the repo's root. `just set-roles <stage> <email> <roles>` makes a person's roles
+  exactly the comma-separated list given (`contributor`, `curator`, `admin`; `""` removes every role).
   `just set-embargo <stage> <dataset id> <YYYY-MM-DD>` moves a dataset's embargo to a date (today
   lifts it), as an admin. It and `just seed` open the archive's own sign-in page in a new browser
   tab: the admin signs in there and presses **Sign in the command line**. Say the tab is coming.
@@ -324,6 +324,22 @@ With `email: ses` and the account still in SES's sandbox (step 3), the invitatio
 if the address is verified in SES.
 
 Then: `just invite-user <stage> <email> admin,curator,contributor`
+
+Then say that the curator role alone emails nobody about submissions: the archive sends its review
+messages (a submission is waiting, a reminder, a stale review) to the stage's curators' topic,
+which starts with no subscribers. Without a subscription nobody is emailed about a waiting
+submission, and the review queue is the only signal. Offer to subscribe the first admin, and later
+each curator. Read the account's user id, its `sub` in Cognito, in the stage's account and region:
+
+```
+aws cognito-idp admin-get-user --user-pool-id "$(just _user-pool <stage>)" --username <email> --query "UserAttributes[?Name=='sub'].Value" --output text
+```
+
+Then subscribe the address; they confirm from the email AWS sends:
+
+```
+just add-curator <stage> <email> <userId>
+```
 
 ### 7. ✋ Seed
 

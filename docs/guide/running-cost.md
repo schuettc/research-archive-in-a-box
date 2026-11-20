@@ -15,6 +15,7 @@ These grow with how much the archive is used, and are near zero when no one uses
 - **Amazon CloudFront**, which serves the site, the dataset pages and the public files: per request and per gigabyte of transfer. Downloads of large datasets are usually the biggest item of a busy archive.
 - **AWS Lambda**, which runs the API, the checks on each submission, publishing, the reindex and the scheduled jobs: per call and per second of running time. Checking a large submission runs longest. The checking function's temporary disk is sized from [`submissions.maxPackageGiB`](archive-yaml.md#submissionsmaxpackagegib) and is billed for the seconds the function runs, so a lower limit costs slightly less.
 - **Amazon API Gateway**, the API behind the web app: per request.
+- **Amazon GuardDuty Malware Protection for S3**, which scans every file uploaded with a submission for malware before the archive checks it: per gigabyte scanned and per object scanned.
 - **Amazon DynamoDB**, which holds the catalog, the submissions, the settings, the download counts and the access requests: billed on demand, per read and per write, with nothing reserved.
 - **Amazon Cognito**, which holds the accounts: free up to its free tier of monthly active users, then per active user.
 - **Amazon Bedrock**, only with the semantic search module (`infrastructure.modules.embeddings`): per call to the embedding model, once for each dataset published or reindexed, and once for each search that has search words.

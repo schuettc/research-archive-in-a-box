@@ -150,6 +150,8 @@ A curator may approve their own submission: no rule stops it, and its history ma
 
 Anyone can create an account unless the archive is by invitation; a new account has no role until you give one here. From a terminal, `just set-roles <stage> <email> <roles>` does the same as **Change roles**.
 
+Giving someone the curator role does not email them about submissions. The person who deployed the archive subscribes each curator's email address from a terminal, with `just add-curator <stage> <email> <userId>`, and the curator confirms from the email AWS sends ([Deploying](deploying.md#6--the-first-admin) explains the command). Without it nobody is emailed about a waiting submission, and the review queue is the only signal that one is waiting.
+
 ### Access requests
 
 **Access requests** lists the requests for `restricted` datasets **Waiting** for a decision, each with the person, the dataset and their reason, to **Approve** or **Decline**, and the **Approvals** already given, each of which can be taken back with **Take back**. Each admin also hears of new requests by email, once they confirm the subscription AWS sends when they are given the admin role.
