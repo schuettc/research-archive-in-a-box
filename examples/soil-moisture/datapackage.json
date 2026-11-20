@@ -1,0 +1,82 @@
+{
+  "$schema": "https://datapackage.org/profiles/2.0/datapackage.json",
+  "id": "soil-moisture",
+  "name": "soil-moisture",
+  "version": "1",
+  "resources": [
+    {
+      "name": "readings",
+      "path": "data/readings.csv",
+      "type": "table",
+      "title": "Probe readings",
+      "description": "One row per plot and visit.",
+      "format": "csv",
+      "mediatype": "text/csv",
+      "encoding": "utf-8",
+      "bytes": 640,
+      "hash": "sha256:5390eced1b913648b7278352d5dca2676df02028742298f728fd470c8f972d3f",
+      "schema": {
+        "fields": [
+          {
+            "name": "plot",
+            "type": "string",
+            "title": "Plot",
+            "description": "Plot code, M01 to M12.",
+            "archive:measurementScale": "nominal"
+          },
+          {
+            "name": "date",
+            "type": "date",
+            "title": "Reading date",
+            "description": "The day the plot was read.",
+            "archive:measurementScale": "dateTime"
+          },
+          {
+            "name": "water_content_pct",
+            "type": "number",
+            "title": "Water content (%)",
+            "description": "Volumetric water content: the share of the soil's volume that is water, at 10 cm depth.",
+            "archive:unit": "percent",
+            "archive:measurementScale": "ratio"
+          },
+          {
+            "name": "soil_temp_c",
+            "type": "number",
+            "title": "Soil temperature (C)",
+            "description": "Soil temperature at 10 cm depth, in degrees Celsius.",
+            "archive:unit": "degC",
+            "archive:measurementScale": "interval"
+          }
+        ]
+      },
+      "archive:kind": "table"
+    }
+  ],
+  "archive:access": "public",
+  "title": "Soil moisture at twelve plots",
+  "description": "Volumetric soil water content and soil temperature at 10 cm depth on twelve invented meadow plots, read by hand probe on two days in summer 2024. Every plot and reading is invented.",
+  "keywords": ["soil moisture", "soil temperature", "meadow plots"],
+  "contributors": [
+    {
+      "title": "Invented Research Cooperative",
+      "organization": "Invented Research Cooperative",
+      "roles": ["creator"]
+    }
+  ],
+  "licenses": [
+    {
+      "name": "CC-BY-4.0",
+      "path": "https://creativecommons.org/licenses/by/4.0/",
+      "title": "Creative Commons Attribution 4.0 International"
+    }
+  ],
+  "archive:temporalCoverage": {
+    "start": "2024-06-10",
+    "end": "2024-07-15"
+  },
+  "archive:spatialCoverage": {
+    "bbox": [-72.73, 44.26, -72.71, 44.28],
+    "description": "Twelve plots in one invented meadow."
+  },
+  "archive:methods": "A handheld capacitance probe was pushed to 10 cm at the centre of each plot; each value is the mean of three readings taken within one metre."
+}

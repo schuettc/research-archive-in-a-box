@@ -16,8 +16,8 @@ ID_TOKEN = "id-token"
 REPORT = "https://staging.example/report.json?signed"
 
 
-def _package(tmp_path: Path) -> Path:
-    folder = tmp_path / "package"
+def _package(tmp_path: Path, name: str = "package") -> Path:
+    folder = tmp_path / name
     (folder / "data").mkdir(parents=True)
     (folder / "_build").mkdir()
     (folder / "datapackage.json").write_text('{"id": "x"}\n', encoding="utf-8")
@@ -28,12 +28,21 @@ def _package(tmp_path: Path) -> Path:
 
 class FakeArchive:
     """The submissions API and S3's presigned PUTs, answering from a list of statuses that
-    `GET /api/submissions/{id}` walks through one read at a time (the last one repeats)."""
+    `GET /api/submissions/{id}` walks through one read at a time (the last one repeats). The
+    first submission created is SID; `later` holds the statuses of each one created after it,
+    which otherwise walks the same list."""
 
-    def __init__(self, statuses: list[dict[str, Any]], events: list[dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        statuses: list[dict[str, Any]],
+        events: list[dict[str, Any]],
+        later: list[list[dict[str, Any]]] | None = None,
+    ) -> None:
         self.statuses = statuses
         self.events = events
-        self.reads = 0
+        self.later = later or []
+        self.sids: list[str] = []
+        self.reads: dict[str, int] = {}
         self.unreachable_report = False
         self.calls: list[tuple[str, str, dict[str, str], Any]] = []
 
@@ -63,21 +72,28 @@ class FakeArchive:
                 }
                 for f in body["files"]
             ]
-            return 201, json.dumps({"submissionId": SID, "round": 1, "uploads": uploads}).encode()
-        if (method, url) == ("POST", f"{BASE}/{SID}/submit"):
-            return 202, json.dumps({"submissionId": SID, "status": "checking"}).encode()
-        if (method, url) == ("POST", f"{BASE}/{SID}/decision"):
-            return 202, json.dumps({"submissionId": SID, "decision": body["decision"]}).encode()
-        if (method, url) == ("GET", f"{BASE}/{SID}"):
-            current = self.statuses[min(self.reads, len(self.statuses) - 1)]
-            self.reads += 1
-            answer: dict[str, Any] = {
-                "submission": {"submissionId": SID, **current},
-                "events": self.events,
-            }
-            if current.get("reportKey"):
-                answer["reportUrl"] = REPORT
-            return 200, json.dumps(answer).encode()
+            sid = SID if not self.sids else f"{SID[:-1]}{len(self.sids) + 5}"
+            self.sids.append(sid)
+            return 201, json.dumps({"submissionId": sid, "round": 1, "uploads": uploads}).encode()
+        for number, sid in enumerate(self.sids):
+            if (method, url) == ("POST", f"{BASE}/{sid}/submit"):
+                return 202, json.dumps({"submissionId": sid, "status": "checking"}).encode()
+            if (method, url) == ("POST", f"{BASE}/{sid}/decision"):
+                return 202, json.dumps({"submissionId": sid, "decision": body["decision"]}).encode()
+            if (method, url) == ("GET", f"{BASE}/{sid}"):
+                statuses = self.statuses
+                if number and number <= len(self.later):
+                    statuses = self.later[number - 1]
+                reads = self.reads.get(sid, 0)
+                current = statuses[min(reads, len(statuses) - 1)]
+                self.reads[sid] = reads + 1
+                answer: dict[str, Any] = {
+                    "submission": {"submissionId": sid, **current},
+                    "events": self.events,
+                }
+                if current.get("reportKey"):
+                    answer["reportUrl"] = REPORT
+                return 200, json.dumps(answer).encode()
         return 404, b'{"message": "not found"}'
 
     def decisions(self) -> list[Any]:
@@ -95,7 +111,9 @@ class Clock:
         self.now += seconds
 
 
-def _run(archive: FakeArchive, package: Path, clock: Clock | None = None) -> int:
+def _run(archive: FakeArchive, *packages: Path, clock: Clock | None = None) -> int:
+    """Run the seed on the packages given, or on its default with none, and check that it
+    signed in once."""
     clock = clock or Clock()
     signed: list[AuthConfig] = []
 
@@ -106,7 +124,7 @@ def _run(archive: FakeArchive, package: Path, clock: Clock | None = None) -> int
         )
 
     code = seed.main(
-        [DOMAIN, "--package", str(package)],
+        [DOMAIN, *(arg for package in packages for arg in ("--package", str(package)))],
         sign_in=sign_in,
         send=archive,
         sleep=clock.sleep,
@@ -202,13 +220,81 @@ def test_it_gives_up_when_the_time_runs_out(
     archive = FakeArchive([{"status": "checking"}], [{"type": "submitted"}])
     clock = Clock()
 
-    code = _run(archive, _package(tmp_path), clock)
+    code = _run(archive, _package(tmp_path), clock=clock)
 
     assert code == 1
     assert clock.now >= 60
     out = capsys.readouterr().out
     assert "still checking after 60 seconds" in out
     assert "events: submitted" in out
+
+
+def test_two_packages_are_published_on_one_sign_in(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    first, second = _package(tmp_path, "first"), _package(tmp_path, "second")
+    archive = FakeArchive(
+        [{"status": "checking"}, {"status": "published", "datasetId": "first"}],
+        [],
+        later=[[{"status": "checking"}, {"status": "published", "datasetId": "second"}]],
+    )
+
+    # _run checks there was one sign-in.
+    code = _run(archive, first, second)
+
+    assert code == 0
+    assert len(archive.sids) == 2
+    out = capsys.readouterr().out.splitlines()
+    assert [line for line in out if line.startswith("https://")] == [
+        f"https://{DOMAIN}/datasets/first",
+        f"https://{DOMAIN}/datasets/second",
+    ]
+
+
+def test_a_package_that_stops_fails_the_run_after_the_rest_are_tried(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    archive = FakeArchive(
+        [{"status": "needs-changes", "reportKey": "reports/x.json"}],
+        [{"type": "checked"}],
+        later=[[{"status": "published", "datasetId": "second"}]],
+    )
+
+    code = _run(archive, _package(tmp_path, "first"), _package(tmp_path, "second"))
+
+    assert code == 1
+    out = capsys.readouterr().out
+    assert "stopped: needs-changes" in out
+    assert "error core.description: no description" in out
+    assert out.splitlines()[-1] == f"https://{DOMAIN}/datasets/second"
+
+
+def test_with_no_package_named_it_publishes_only_the_sample_package(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _package(tmp_path, "sample-package")
+    _package(tmp_path, "another-package")
+    monkeypatch.setattr(seed, "EXAMPLES", tmp_path)
+    monkeypatch.setattr(seed, "SAMPLE", tmp_path / "sample-package")
+    archive = FakeArchive([{"status": "published", "datasetId": DATASET}], [])
+
+    code = _run(archive)
+
+    assert code == 0
+    out = capsys.readouterr().out.splitlines()
+    assert [line for line in out if line.endswith("-package:")] == ["sample-package:"]
+    assert len(archive.sids) == 1
+
+
+def test_the_sample_packages_are_the_six_example_folders_with_a_manifest() -> None:
+    assert [folder.name for folder in seed.sample_packages()] == [
+        "bird-point-counts",
+        "sample-package",
+        "soil-moisture",
+        "stream-invertebrates",
+        "tree-rings",
+        "weather-station",
+    ]
 
 
 def test_the_sample_package_list_leaves_out_its_build_folder() -> None:

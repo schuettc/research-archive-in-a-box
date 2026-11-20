@@ -1,0 +1,88 @@
+{
+  "$schema": "https://datapackage.org/profiles/2.0/datapackage.json",
+  "id": "stream-invertebrates",
+  "name": "stream-invertebrates",
+  "version": "1",
+  "resources": [
+    {
+      "name": "counts",
+      "path": "data/counts.csv",
+      "type": "table",
+      "title": "Invertebrate counts",
+      "description": "One row per family, riffle and visit.",
+      "format": "csv",
+      "mediatype": "text/csv",
+      "encoding": "utf-8",
+      "bytes": 769,
+      "hash": "sha256:7d3f9f83429edd51fe5e138b5251f874e6531e3d008d0ccd87bc590482674ebc",
+      "schema": {
+        "fields": [
+          {
+            "name": "date",
+            "type": "date",
+            "title": "Sampling date",
+            "description": "The day the riffle was sampled.",
+            "archive:measurementScale": "dateTime"
+          },
+          {
+            "name": "site",
+            "type": "string",
+            "title": "Riffle",
+            "description": "Riffle code, R1 or R2.",
+            "archive:measurementScale": "nominal"
+          },
+          {
+            "name": "family",
+            "type": "string",
+            "title": "Family",
+            "description": "Taxonomic family the animals were identified to.",
+            "archive:measurementScale": "nominal"
+          },
+          {
+            "name": "common_group",
+            "type": "string",
+            "title": "Common group",
+            "description": "The everyday name of the family's order.",
+            "archive:measurementScale": "nominal"
+          },
+          {
+            "name": "count",
+            "type": "integer",
+            "title": "Count",
+            "description": "Animals of the family in the 0.25 square metre sample.",
+            "archive:unit": "dimensionless",
+            "archive:measurementScale": "ratio"
+          }
+        ]
+      },
+      "archive:kind": "table"
+    }
+  ],
+  "archive:access": "public",
+  "title": "Stream invertebrate counts, 2023",
+  "description": "Counts of bottom-dwelling invertebrates, by family, from kick-net samples at two invented stream riffles in May and August 2023. Every site and count is invented; a sample package for the research archive.",
+  "keywords": ["stream invertebrates", "benthic macroinvertebrates", "kick-net sampling"],
+  "contributors": [
+    {
+      "title": "Invented Research Cooperative",
+      "organization": "Invented Research Cooperative",
+      "roles": ["creator"]
+    }
+  ],
+  "licenses": [
+    {
+      "name": "CC-BY-4.0",
+      "path": "https://creativecommons.org/licenses/by/4.0/",
+      "title": "Creative Commons Attribution 4.0 International"
+    }
+  ],
+  "archive:temporalCoverage": {
+    "start": "2023-05-16",
+    "end": "2023-08-23"
+  },
+  "archive:spatialCoverage": {
+    "bbox": [-72.74, 44.23, -72.7, 44.27],
+    "description": "Two invented riffles on one invented brook."
+  },
+  "archive:methods": "A 0.25 square metre patch of bed was disturbed for one minute in front of a 500 micrometre kick net; animals were picked in the field and identified to family."
+}

@@ -1,0 +1,32 @@
+[
+  {
+    "scene": "browse",
+    "seconds": 8,
+    "caption": "A research data archive your group runs in its own AWS account."
+  },
+  {
+    "scene": "agent",
+    "seconds": 30,
+    "caption": "Ask your agent to check a dataset, fix it and submit it."
+  },
+  {
+    "scene": "submit",
+    "seconds": 17,
+    "caption": "Or submit in the browser; the archive runs the same checks."
+  },
+  {
+    "scene": "review",
+    "seconds": 15,
+    "caption": "A curator reviews and approves."
+  },
+  {
+    "scene": "dataset",
+    "seconds": 17,
+    "caption": "Published at a stable address, with every column described and a citation to copy."
+  },
+  {
+    "scene": "config",
+    "seconds": 8,
+    "caption": "One config file, deployed by CI. MIT licensed."
+  }
+]

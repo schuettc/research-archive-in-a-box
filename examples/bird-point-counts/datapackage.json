@@ -1,0 +1,96 @@
+{
+  "$schema": "https://datapackage.org/profiles/2.0/datapackage.json",
+  "id": "bird-point-counts",
+  "name": "bird-point-counts",
+  "version": "1",
+  "resources": [
+    {
+      "name": "counts",
+      "path": "data/counts.csv",
+      "type": "table",
+      "title": "Point counts",
+      "description": "One row per species at a point on a morning.",
+      "format": "csv",
+      "mediatype": "text/csv",
+      "encoding": "utf-8",
+      "bytes": 843,
+      "hash": "sha256:f547ad5e1dc0213de0e9bab104b8cbeeaf8fe2916c89f6cf51d1aaf8c9732216",
+      "schema": {
+        "fields": [
+          {
+            "name": "point",
+            "type": "string",
+            "title": "Point",
+            "description": "Point code, B1 to B5.",
+            "archive:measurementScale": "nominal"
+          },
+          {
+            "name": "date",
+            "type": "date",
+            "title": "Count date",
+            "description": "The morning of the count.",
+            "archive:measurementScale": "dateTime"
+          },
+          {
+            "name": "start_time",
+            "type": "time",
+            "title": "Start time",
+            "description": "Local standard time the ten minutes began.",
+            "archive:measurementScale": "dateTime"
+          },
+          {
+            "name": "species",
+            "type": "string",
+            "title": "Species",
+            "description": "The species' English common name.",
+            "archive:measurementScale": "nominal"
+          },
+          {
+            "name": "count",
+            "type": "integer",
+            "title": "Count",
+            "description": "Birds of the species heard or seen in the ten minutes.",
+            "archive:unit": "dimensionless",
+            "archive:measurementScale": "ratio"
+          },
+          {
+            "name": "distance_m",
+            "type": "integer",
+            "title": "Distance (m)",
+            "description": "Estimated distance from the point to the nearest bird of the species, in metres.",
+            "archive:unit": "m",
+            "archive:measurementScale": "ratio"
+          }
+        ]
+      },
+      "archive:kind": "table"
+    }
+  ],
+  "archive:access": "public",
+  "title": "Breeding bird point counts",
+  "description": "Ten-minute point counts of breeding birds at five invented forest points over three mornings in June 2024, with the number of each species heard or seen and its distance. Every point and count is invented.",
+  "keywords": ["birds", "point counts", "breeding season", "forest"],
+  "contributors": [
+    {
+      "title": "Invented Research Cooperative",
+      "organization": "Invented Research Cooperative",
+      "roles": ["creator"]
+    }
+  ],
+  "licenses": [
+    {
+      "name": "CC-BY-4.0",
+      "path": "https://creativecommons.org/licenses/by/4.0/",
+      "title": "Creative Commons Attribution 4.0 International"
+    }
+  ],
+  "archive:temporalCoverage": {
+    "start": "2024-06-04",
+    "end": "2024-06-06"
+  },
+  "archive:spatialCoverage": {
+    "bbox": [-72.76, 44.24, -72.72, 44.28],
+    "description": "Five points 250 m apart in one invented forest block."
+  },
+  "archive:methods": "One observer stood at each point for ten minutes starting within an hour of sunrise, in calm dry weather, and recorded every bird heard or seen within 100 m."
+}

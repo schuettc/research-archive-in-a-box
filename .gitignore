@@ -11,3 +11,6 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# What `just demo-video` records, and the passwords of the two accounts it makes
+demo/out/
