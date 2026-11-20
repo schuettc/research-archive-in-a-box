@@ -6,6 +6,13 @@ research-archive-in-a-box is a kit for running a research data archive: a place 
 
 ![The search page of an example archive, the Invented Research Cooperative: its introduction, a search box, filters by access, licence and format, and two published datasets.](docs/images/reading-room.png)
 
+| If you are                         | Start with                                                                                                         |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Deciding whether to run an archive | [What a dataset looks like here](#what-a-dataset-looks-like-here), then [Running cost](docs/guide/running-cost.md) |
+| Deploying one                      | [Run an archive](#run-an-archive), then [Deploying](docs/guide/deploying.md)                                       |
+
+If you are submitting a dataset to an archive someone else runs, start at [docs/guide/packages.md](docs/guide/packages.md).
+
 ## What a dataset looks like here
 
 A dataset travels as a package. A package is a plain folder holding the data files, a manifest called `datapackage.json` that describes them (title, description, contributors, licence, and every column of every table), and `checksums.sha256`, which records a SHA-256 checksum of each file so that a changed or damaged file is noticed. The folder [`examples/sample-package`](examples/sample-package) is one: hourly stream temperatures from three invented sites. The manifest follows the [Frictionless Data Package](https://datapackage.org/) standard, so other tools that read Frictionless packages can read it too. [docs/guide/packages.md](docs/guide/packages.md) explains how to make one from a CSV file.
@@ -27,24 +34,28 @@ Your first command checks one package folder. In a clone of this repository, try
 cruise diagnose examples/sample-package
 ```
 
-It answers in three groups of questions (can I find it, can I understand each column, can I trust the values), gives each problem a fix, and ends with a score and a verdict. On the sample package the verdict is `publishable, with 4 warnings`; one of them is that the column `battery_v` has no description. `cruise set` writes a fix into the manifest and rewrites `README.md` and `checksums.sha256` to match:
+It groups what it finds under four headings (the package's structure, then three questions: can I find, cite and reuse it, can I understand each column, can I trust the values), showing only those with something to report. It gives each problem a fix, and ends with a score and a verdict. On the sample package the verdict is `publishable, with 4 warnings`; one of them is that the column `battery_v` has no description. `cruise set` writes a fix into the manifest and rewrites `README.md` and `checksums.sha256` to match. Copy the sample package somewhere first, so the fix doesn't change the repository:
 
 ```
-cruise set examples/sample-package description "Logger battery voltage, in volts." --resource logger --column battery_v
+mkdir -p /tmp/guide
+cp -R examples/sample-package /tmp/guide/sample-package
+cruise set /tmp/guide/sample-package description "Logger battery voltage at each reading, in volts." --resource logger --column battery_v
 ```
 
 `cruise audit <folders>` ranks every package under some folders, worst first, so you can see where to start. [docs/guide/packages.md](docs/guide/packages.md) covers all three commands, with their output.
 
 ### Run an archive
 
-An archive is a deployment of this kit: a web site with a search page, a page per dataset, sign-in, a submission form and a review queue, backed by storage and functions in your AWS account. Each copy you deploy is a stage, such as `prod`, or `dev` for trying changes first; every stage gets its own site and its own data. You describe the archive in one file, `archive.yaml`: its name, the licences and access levels it offers, its stages, and any optional modules (DOIs, a custom domain, email through Amazon SES, semantic search).
+An archive is a deployment of this kit: a web site with a search page, a page per dataset, sign-in, a submission form and a review queue, backed by storage and functions in your AWS account. Each copy you deploy is a stage, such as `prod`, or `dev` for trying changes first; every stage gets its own site and its own data. You describe the archive in one file, `archive.yaml`: its name, the profiles and required fields its packages are checked against, its brand (how the site looks), its stages, and any optional modules (DOIs, a custom domain, email through Amazon SES, semantic search).
 
 To run one you need:
 
 - an AWS account the archive will live in, with the AWS CLI signed in to it;
 - a fork of this repository on GitHub, with GitHub Actions turned on, and the GitHub CLI (`gh`) signed in;
-- [Claude Code](https://claude.com/claude-code), which runs the setup with you;
+- [Claude Code](https://claude.com/claude-code), which runs the setup with you, unless you run the same commands by hand, as [docs/guide/deploying.md](docs/guide/deploying.md#doing-it-by-hand) shows;
 - on your machine, [uv](https://docs.astral.sh/uv/), Node 24 or later and [just](https://just.systems/).
+
+Running an archive incurs AWS costs in your own account; [docs/guide/running-cost.md](docs/guide/running-cost.md) lists what it pays for.
 
 Clone your fork, open it in Claude Code and ask it to set up the archive. Its `deploy-archive` skill (in `.claude/skills/deploy-archive/`) checks these prerequisites, writes `archive.yaml` with you, connects GitHub Actions to your AWS account, and pushes to `main`. From then on CI (the repository's GitHub Actions workflow) deploys every stage on each push to `main`; you never deploy the archive from your laptop. The skill also makes the first admin, publishes a seed dataset and checks the site answers. [docs/guide/deploying.md](docs/guide/deploying.md) walks through each step, and [docs/guide/archive-yaml.md](docs/guide/archive-yaml.md) lists every setting in `archive.yaml`.
 
@@ -79,9 +90,11 @@ The guide, for people deploying and using an archive:
 
 - [Packages](docs/guide/packages.md): what a package is, how to make one, and `cruise diagnose`, `audit` and `set`.
 - [archive.yaml](docs/guide/archive-yaml.md): every setting, with its type, default and an example.
-- [Deploying](docs/guide/deploying.md): setting up an archive with the skill and CI, updating it from upstream, and tearing a stage down.
+- [Deploying](docs/guide/deploying.md): setting up an archive with the skill and CI, or with the same commands by hand, updating it from upstream, and tearing a stage down.
 - [Using the archive](docs/guide/using-the-archive.md): the web app for readers, contributors, curators and admins.
 - [Running cost](docs/guide/running-cost.md): what an archive pays for, and what costs almost nothing when idle.
+- [For your archive's users](docs/guide/for-your-users.md): which page to send a reader, a contributor and a curator, and a welcome text for contributors.
+- [Troubleshooting](docs/guide/troubleshooting.md): what to do when the setup, the first deploy or a first submission goes wrong.
 
 The optional modules and curating:
 
@@ -89,40 +102,9 @@ The optional modules and curating:
 - [A custom domain](docs/domain.md): serving a stage on its own name through Route 53.
 - [Email through SES](docs/email.md): sending account emails from the stage's own domain.
 - [Curating published datasets](docs/curating.md): corrections, withdrawal and restore, embargoes and download counts.
+- [Terms](docs/terms.md): the definition of `ancillaryOf`, the one term of its own that the archive's EML metadata export uses.
 
-For people changing the kit: [Architecture](docs/architecture.md), the packages and how a submission becomes a published dataset.
-
-## Layout
-
-```
-packages/
-  contract/   Python: archive-contract, the package and archive.yaml models and their JSON Schema
-  tool/       Python: cruise, the command-line tool that checks and edits packages
-  backend/    Python: the Lambda functions behind the archive's API and pipeline
-  infra/      TypeScript: the CDK construct (ResearchArchive) and the app CI deploys
-  web/        TypeScript: the React and Vite web app
-  agent/      Python: the Claude Code plugin, its MCP server (archive-mcp) and skills
-  client/     Python: browser sign-in to an archive, for the MCP server
-examples/     the sample package, an example brand (logo and favicon), and femc, an example converter
-              that turns an existing data portal's datasets into packages
-docs/         the guide, the architecture page and the module docs
-```
-
-Python packages form a uv workspace (`pyproject.toml`); TypeScript packages form an npm workspace (`package.json`).
-
-## Develop
-
-Needs uv, Node 24 and [just](https://just.systems/).
-
-```
-uv sync --all-packages
-npm ci
-just check
-```
-
-`just check` runs every format check, lint, type check and test in both languages, plus the schema drift check. Inside a clone, `uv run cruise` runs the tool from the source.
-
-To try the web app locally against a deployed stage, run `ARCHIVE_DEV_SITE=https://<stage domain> npm run dev -w packages/web`. Vite then proxies `/api/`, `/auth-config.json` and `/data/` to that stage; without the variable, `npm run dev` is unchanged. Uploads, the findings report and file Preview fail locally, because the stage's storage refuses a localhost origin: check those on the stage itself.
+For people changing the kit: [Architecture](docs/architecture.md), the packages and how a submission becomes a published dataset, and [CONTRIBUTING.md](CONTRIBUTING.md), the repository's layout, setting up a clone, checking a change and opening a pull request.
 
 ## License
 

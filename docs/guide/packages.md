@@ -23,10 +23,13 @@ sample-package/
   README.md
   changes.jsonl
   data/logger.csv
+  data/logger.xlsx
   data/codes/condition-codes.csv
   data/sites/sites.shp (with .dbf, .prj and .shx)
   data/depth.asc
+  data/depth.prj
   docs/methods.md
+  docs/site-photo.png
   original/logger-raw.csv
 ```
 
@@ -34,7 +37,13 @@ Its `_build/` folder holds the script that generated it. `cruise` leaves the top
 
 ## Installing cruise
 
-`cruise` is a Python program. The README's **Install cruise** section gives the one command that installs it with [uv](https://docs.astral.sh/uv/), and `cruise --version` then prints `cruise 0.1.0`. Inside a clone of this repository, `uv run cruise` runs it without installing anything.
+`cruise` is a Python program. Install it with [uv](https://docs.astral.sh/uv/), at a release tag:
+
+```
+uv tool install "git+https://github.com/schuettc/research-archive-in-a-box@v0.1.1#subdirectory=packages/tool"
+```
+
+`cruise --version` then prints `cruise 0.1.0`. Inside a clone of this repository, `uv run cruise` runs it without installing anything.
 
 `cruise` has three commands:
 
@@ -50,9 +59,9 @@ A **finding** is one thing `cruise diagnose` noticed about a package, such as "C
 - a **warning** is worth fixing, but the package can be published with it;
 - a **note** is for information only.
 
-Each finding also names the **rule** that raised it, such as `field.description-missing`, and the part of the package it is about, such as `logger.battery_v` (the `battery_v` column of the `logger` file). The findings are grouped under four questions a reader would ask: the package's structure, whether they can find, cite and reuse it, whether they can understand each column, and whether they can trust the values.
+Each finding also names the **rule** that raised it, such as `field.description-missing`, and the part of the package it is about, such as `logger.battery_v` (the `battery_v` column of the `logger` file). The findings are grouped under four headings: the package's structure, then three questions a reader would ask, which are whether they can find, cite and reuse it, whether they can understand each column, and whether they can trust the values. Only a heading with a finding under it is printed.
 
-The **score** at the end counts how many of the checks under three of those questions passed, and the **verdict** says whether the package can be published.
+The **score** at the end counts how many of the checks under the three questions passed, and the **verdict** says whether the package can be published.
 
 A CSV table that can't be parsed is an error, `values.malformed`, and blocks publishing: a file that is not UTF-8, a row with more or fewer cells than the schema has fields, or a quote that is never closed. Nothing else can check such a table, so fix the file first. A table `cruise` leaves unread on purpose, such as one in a format other than CSV, gets the note `values.unreadable` and does not block.
 
@@ -298,7 +307,7 @@ The six errors are the list of work: record the file's size and hash, write the 
 
 ### 3. Record the file's size and hash
 
-Each resource records its file's size in bytes and its hash, so the archive can tell if a file changed on the way. Read both:
+Each resource records its file's size in bytes and its hash, so the archive can tell if a file changed on the way. You record them by hand here because `cruise set` doesn't: it writes `checksums.sha256`, but a resource's `bytes` and `hash` are not among the manifest fields it can change. Read both:
 
 ```
 wc -c < plot-survey/data/plots.csv

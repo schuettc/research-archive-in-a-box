@@ -1,15 +1,37 @@
 # Contributing
 
-Contributions come as pull requests against `main`. This page says how to set up a clone, check a change and open the pull request.
+Contributions come as pull requests against `main`. This page says how the repository is laid out, and how to set up a clone, check a change and open the pull request.
+
+## Layout
+
+```
+packages/
+  contract/   Python: archive-contract, the package and archive.yaml models and their JSON Schema
+  tool/       Python: cruise, the command-line tool that checks and edits packages
+  backend/    Python: the Lambda functions behind the archive's API and pipeline
+  infra/      TypeScript: the CDK construct (ResearchArchive) and the app CI deploys
+  web/        TypeScript: the React and Vite web app
+  agent/      Python: the Claude Code plugin, its MCP server (archive-mcp) and skills
+  client/     Python: browser sign-in to an archive, for the MCP server
+examples/     the sample package, an example brand (logo and favicon), and femc, an example converter
+              that turns an existing data portal's datasets into packages
+docs/         the guide, the architecture page and the module docs
+```
+
+The Python packages form a uv workspace (`pyproject.toml`), and the TypeScript packages form an npm workspace (`package.json`). [Architecture](docs/architecture.md) explains the packages and how a submission becomes a published dataset.
 
 ## Set up
 
-You need [uv](https://docs.astral.sh/uv/), Node 24 or later and [just](https://just.systems/). In a clone of the repository, install the Python packages (a uv workspace) and the TypeScript packages (an npm workspace):
+You need [uv](https://docs.astral.sh/uv/), Node 24 or later and [just](https://just.systems/). In a clone of the repository, install the packages of both workspaces:
 
 ```
 uv sync --all-packages
 npm ci
 ```
+
+Inside a clone, `uv run cruise` runs the command-line tool from the source.
+
+To try the web app locally against a deployed stage, run `ARCHIVE_DEV_SITE=https://<stage domain> npm run dev -w packages/web`. Vite then proxies `/api/`, `/auth-config.json` and `/data/` to that stage; without the variable, `npm run dev` is unchanged. On a stage that keeps its data, which is every stage unless `archive.yaml` gives it `keepData: false`, uploads, the findings report and file Preview fail locally, because the stage's storage refuses a localhost origin: check those on the stage itself. A stage with `keepData: false` accepts them from `http://localhost:5199` and no other local address, so add `-- --port 5199` to the command to start the local server on that port ([the reference](docs/guide/archive-yaml.md#infrastructurestageskeepdata) has the setting).
 
 ## Check a change
 

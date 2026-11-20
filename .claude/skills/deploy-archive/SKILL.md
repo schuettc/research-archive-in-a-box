@@ -15,10 +15,10 @@ Ground rules:
   deploy from the laptop is `ResearchArchiveDeploy`, the GitHub-to-AWS connection.
 - **✋ means stop.** At a ✋ step, say what will happen and what it costs or changes, then wait for
   the words the step names. Anything else is a no: answer questions, change nothing, and ask again.
-- The recipes you call: `just stages`, `just invite-user`, `just set-roles`, `just set-embargo`,
-  `just seed`, `just smoke`, `just reindex`, `just destroy`, `just check`. Run them from the
-  repo's root. `just set-roles <stage> <email> <roles>` makes a person's roles exactly the
-  comma-separated list given (`contributor`, `curator`, `admin`; `""` removes every role).
+- The recipes you call: `just stages`, `just invite-user`, `just set-roles`, `just add-curator`,
+  `just set-embargo`, `just seed`, `just smoke`, `just reindex`, `just destroy`, `just check`. Run
+  them from the repo's root. `just set-roles <stage> <email> <roles>` makes a person's roles
+  exactly the comma-separated list given (`contributor`, `curator`, `admin`; `""` removes every role).
   `just set-embargo <stage> <dataset id> <YYYY-MM-DD>` moves a dataset's embargo to a date (today
   lifts it), as an admin. It and `just seed` open the archive's own sign-in page in a new browser
   tab: the admin signs in there and presses **Sign in the command line**. Say the tab is coming.
@@ -54,12 +54,10 @@ reaches you with no edit here: `packages/web/src/schema/archive-contract.schema.
 tell the person.
 
 1. Ask about the archive first: the publisher's name, the alert email (budget and failure alerts
-   go there), the monthly budget in US dollars, the profiles, the licenses offered and the access
-   levels offered. The access levels are `public` (anyone downloads the files), `limited` (any
-   signed-in account downloads them), `restricted` (an admin approves each person's request) and
-   `description-only` (the page and its description are published, with no files).
+   go there), the monthly budget in US dollars and the profiles.
 2. Then walk through every other setting, one at a time, with its default, and keep the default
-   unless they want something else. The WAF is on unless they set `waf: false`: say it costs
+   unless they want something else. Leave out `vocabularies`, `themes`, `licenses` and `access`
+   without asking: they are reserved, and nothing reads them yet. The WAF is on unless they set `waf: false`: say it costs
    about $12 a month per stage, and that with `false` every caller of a stage shares one
    allowance of 50 requests a second. The other optional modules (such as object lock) are off
    unless they switch them on; say what each adds.
@@ -164,8 +162,12 @@ stage names, signed in to that account):
    fails, `cd packages/infra && npx cdk bootstrap aws://<account>/us-east-1`. Say this adds a
    second bootstrap stack (and its bucket) in us-east-1.
 
-   When a stage in this account has `email: ses`, run
-   `aws sesv2 get-account --region <region> --query ProductionAccessEnabled` for its region.
+   When a stage in this account has `email: ses`, run this for its region:
+
+   ```
+   aws sesv2 get-account --region <region> --query ProductionAccessEnabled
+   ```
+
    When it is `false`, say that until AWS grants SES production access the archive can only email
    addresses verified in SES, so sign-up codes and invitations reach no one else. Offer either:
    - ✋ requesting production access, a request to AWS under their name and contact address
@@ -292,11 +294,25 @@ Budgets emails the alert email when the month passes `monthlyBudgetUsd`.
 
 Then:
 
-1. `git add archive.yaml && git commit -m "Configure the archive" && git push origin main`
-2. Find the run: `gh run list --commit $(git rev-parse HEAD) --workflow CI --json databaseId --jq '.[0].databaseId'`
-   (wait a few seconds and ask again if it isn't listed yet).
-3. `gh run watch <run-id> --exit-status` until it ends. On a failure, show
-   `gh run view <run-id> --log-failed` and stop.
+1. Commit the config and push it:
+
+   ```
+   git add archive.yaml && git commit -m "Configure the archive" && git push origin main
+   ```
+
+2. Find the run (wait a few seconds and ask again if it isn't listed yet):
+
+   ```
+   gh run list --commit $(git rev-parse HEAD) --workflow CI --json databaseId --jq '.[0].databaseId'
+   ```
+
+3. Watch it until it ends:
+
+   ```
+   gh run watch <run-id> --exit-status
+   ```
+
+   On a failure, show `gh run view <run-id> --log-failed` and stop.
 
 A stage's job that says it has no `AWS_DEPLOY_ROLE_ARN` was skipped: step 3 missed it.
 
@@ -323,7 +339,27 @@ Confirm the email address with them. **Wait for:** "invite <email>" (or a yes na
 With `email: ses` and the account still in SES's sandbox (step 3), the invitation only arrives
 if the address is verified in SES.
 
-Then: `just invite-user <stage> <email> admin,curator,contributor`
+Then:
+
+```
+just invite-user <stage> <email> admin,curator,contributor
+```
+
+Then say that the curator role alone emails nobody about submissions: the archive sends its review
+messages (a submission is waiting, a reminder, a stale review) to the stage's curators' topic,
+which starts with no subscribers. Without a subscription nobody is emailed about a waiting
+submission, and the review queue is the only signal. Offer to subscribe the first admin, and later
+each curator. Read the account's user id, its `sub` in Cognito, in the stage's account and region:
+
+```
+aws cognito-idp admin-get-user --user-pool-id "$(just _user-pool <stage>)" --username <email> --query "UserAttributes[?Name=='sub'].Value" --output text
+```
+
+Then subscribe the address (the recipe needs `jq` installed); they confirm from the email AWS sends:
+
+```
+just add-curator <stage> <email> <userId>
+```
 
 ### 7. ✋ Seed
 
@@ -342,17 +378,30 @@ the deletion runbook in `docs/curating.md` (Deleting data for good).
 
 **Wait for:** "seed it" (or a clear yes).
 
-Then: `just seed <stage>`. It prints the dataset's URL when it is published, or the status and
-its findings when it stops.
+Then:
+
+```
+just seed <stage>
+```
+
+It prints the dataset's URL when it is published, or the status and its findings when it stops.
 
 ### 8. Smoke test
 
-`just smoke <stage>`. Report each check's line: the site, health, search, the dataset page and a
-download whose SHA-256 matches the manifest. Every check should say `ok` after the seed. With DOIs
-on, check that the seeded dataset's page shows its DOI's address as its Identifier. If it doesn't,
-the alerts email says why; once DataCite answers, `just reindex <stage> --dois` registers it. Then give
-them the site's URL:
-`aws cloudformation describe-stacks --stack-name ResearchArchive-<stage> --query "Stacks[0].Outputs[?OutputKey=='SiteDomain'].OutputValue" --output text`.
+```
+just smoke <stage>
+```
+
+Report each check's line: the site, health, search, the dataset page and a download whose SHA-256
+matches the manifest. Every check should say `ok` after the seed. With DOIs on, check that the
+seeded dataset's page shows its DOI's address as its Identifier. If it doesn't, the alerts email
+says why; once DataCite answers, `just reindex <stage> --dois` registers it. Then give them the
+site's URL:
+
+```
+aws cloudformation describe-stacks --stack-name ResearchArchive-<stage> --query "Stacks[0].Outputs[?OutputKey=='SiteDomain'].OutputValue" --output text
+```
+
 With a domain, that is the name: check that `curl -sSI https://<name>/` answers 200.
 
 ## Update
