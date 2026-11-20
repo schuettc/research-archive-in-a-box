@@ -424,6 +424,9 @@ class StepContext:
         self.names.append(name)
         return func(None)
 
+    def wait(self, duration: Any, name: str | None = None) -> None:
+        pass
+
 
 class World:
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
