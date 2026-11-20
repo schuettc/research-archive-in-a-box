@@ -42,6 +42,6 @@ AWS Cost Explorer, in the AWS console, breaks the bill down by service. Every re
 
 ## Lowering it
 
-- Tear down a stage you aren't using with `just destroy <stage>` ([Deploying](deploying.md#tearing-down-a-stage)). A stage named `prod` keeps its buckets, tables and user pool, which go on billing for storage until you delete them by hand.
+- Tear down a stage you aren't using with `just destroy <stage>` ([Deploying](deploying.md#tearing-down-a-stage)). A stage keeps its buckets, tables and user pool unless its `keepData` is `false`, and they go on billing for storage until you delete them by hand.
 - Leave the optional modules off unless you need them: WAF bills monthly while it is on, and semantic search bills per search.
 - Large files cost the most in transfer. A dataset whose files few people need can be `limited` or `restricted`, so only signed-in or approved readers download them.

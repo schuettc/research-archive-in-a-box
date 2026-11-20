@@ -45,7 +45,7 @@ def is_complete(event, context):
 
 export interface EmailProps {
   readonly domain: { readonly name: string; readonly zone: route53.IHostedZone };
-  readonly isProd: boolean;
+  readonly keepData: boolean;
 }
 
 /**
@@ -78,8 +78,13 @@ export class Email extends Construct {
         }),
     );
 
-    const onEvent = this.handler("OnEvent", "on_event", ON_EVENT_SOURCE, props.isProd);
-    const isComplete = this.handler("IsComplete", "is_complete", IS_COMPLETE_SOURCE, props.isProd);
+    const onEvent = this.handler("OnEvent", "on_event", ON_EVENT_SOURCE, props.keepData);
+    const isComplete = this.handler(
+      "IsComplete",
+      "is_complete",
+      IS_COMPLETE_SOURCE,
+      props.keepData,
+    );
     isComplete.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ["ses:GetEmailIdentity"],
@@ -104,10 +109,10 @@ export class Email extends Construct {
   }
 
   /** An inline Python 3.13 handler on the runtime's boto3, with a one-month log group. */
-  private handler(id: string, fn: string, source: string, isProd: boolean): lambda.Function {
+  private handler(id: string, fn: string, source: string, keepData: boolean): lambda.Function {
     const logGroup = new logs.LogGroup(this, `${id}Logs`, {
       retention: logs.RetentionDays.ONE_MONTH,
-      removalPolicy: isProd ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
+      removalPolicy: keepData ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
     });
     return new lambda.Function(this, id, {
       runtime: lambda.Runtime.PYTHON_3_13,

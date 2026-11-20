@@ -128,6 +128,6 @@ which, from your laptop and never from CI:
 - deletes the log groups the stage's functions leave behind, under `/aws/lambda/ResearchArchive-<stage>-`, but not another stage's whose name starts with this one's;
 - for a stage with a domain, deletes its certificate stack in us-east-1 and prints the command that removes ACM's validation record from your hosted zone, which is yours to run.
 
-A stage named `prod` keeps its buckets, tables and user pool when its stack is deleted, with their data, and they keep billing for storage until you delete them by hand. Every other stage is deleted whole, data included.
+A stage keeps its data unless `archive.yaml` gives it `keepData: false`: its buckets, tables, user pool and logs stay when its stack is deleted, with their data, and they keep billing for storage until you delete them by hand. A stage with `keepData: false` is deleted whole, data included. To delete a kept stage whole, set `keepData: false`, let CI deploy it, then tear it down. [The reference](archive-yaml.md#infrastructurestageskeepdata) has the setting.
 
 Once no stage is left in an account, the skill offers to remove the GitHub connection too: ✋ it deletes the `ResearchArchiveDeploy` stack and the stages' GitHub environments, after which CI can't deploy to that account. The CDK bootstrap stack stays, since other CDK apps may use it.

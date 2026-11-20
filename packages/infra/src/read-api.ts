@@ -32,7 +32,7 @@ export class ReadApi extends Construct {
       partitionKey: { name: "datasetId", type: dynamodb.AttributeType.STRING },
       // entry is written as `<YYYY-MM>#<uuid>`.
       sortKey: { name: "entry", type: dynamodb.AttributeType.STRING },
-      ...(archive.isProd
+      ...(archive.keepData
         ? { removalPolicy: RemovalPolicy.RETAIN, deletionProtection: true }
         : { removalPolicy: RemovalPolicy.DESTROY }),
     });

@@ -126,3 +126,16 @@ def test_a_waiting_status_holds_only_once_the_pipeline_waits() -> None:
     assert e2e.holds({"status": "needs-changes", "waiting": True}, "needs-changes") is True
     assert e2e.holds({"status": "published", "waiting": False}, "published") is True
     assert e2e.holds({"status": "checking", "waiting": True}, "in-review") is False
+
+
+def test_the_run_stops_on_a_stage_without_the_e2e_outputs(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("boto3.client", lambda *args, **kwargs: object())
+    monkeypatch.setattr(e2e, "stack_outputs", lambda cloudformation, stage: {"SiteDomain": "d"})
+
+    assert e2e.main(["prod"]) == 2
+    assert capsys.readouterr().out.strip() == (
+        "ResearchArchive-prod has no E2eClientId, UserPoolId output; "
+        "ingest-e2e needs a stage with keepData: false in its config"
+    )

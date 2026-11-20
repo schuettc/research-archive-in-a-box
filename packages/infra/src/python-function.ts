@@ -26,14 +26,14 @@ export interface PythonFunctionProps {
 export function makePythonFunction(
   scope: Construct,
   id: string,
-  props: PythonFunctionProps & { readonly isProd: boolean },
+  props: PythonFunctionProps & { readonly keepData: boolean },
 ): lambda.Function {
   if (!existsSync(PYTHON_ASSETS)) {
     throw new Error("run just lambda-assets first");
   }
   const logGroup = new logs.LogGroup(scope, `${id}Logs`, {
     retention: logs.RetentionDays.ONE_MONTH,
-    removalPolicy: props.isProd ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
+    removalPolicy: props.keepData ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
   });
   return new lambda.Function(scope, id, {
     runtime: lambda.Runtime.PYTHON_3_13,
