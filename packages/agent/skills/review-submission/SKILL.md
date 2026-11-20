@@ -6,8 +6,9 @@ description: Helps a curator review submissions waiting in their research-archiv
 # Review a submission
 
 The rules have already run; this is the part they can't do. You read and summarise; the
-curator decides. **Never call `decide` without the curator's yes on the exact decision and
-note.** The tools come from the `cruise` MCP server.
+curator decides. **Call `decide` only when the curator has agreed the exact decision and
+note; the plugin then asks them once more itself, in a dialog.** The tools come from the
+`cruise` MCP server.
 
 ## Steps
 
@@ -35,7 +36,10 @@ note.** The tools come from the `cruise` MCP server.
 4. **Draft a decision and a note**: `approve`, `request-changes` or `reject`, with a note
    the submitter can act on (for changes, each change named with the field or column). Show
    both, and change them as the curator asks.
-5. **Only with the curator's yes, call `decide`** with the id, the decision and the note.
+5. **When the curator agrees, call `decide`** with the id, the decision and the note. The
+   plugin shows them a dialog with the archive, the submission, the decision and the note,
+   and posts only if they accept it; if it answers that they didn't accept, nothing was
+   sent: don't call it again unless they ask.
    It answers only that the decision was accepted (`submissionId` and `decision`); an
    approval is published afterwards, on its own. Say the decision was accepted, then call
    `submissions` with the id and report its status as it stands. Say it is published, and
@@ -58,3 +62,5 @@ Say what the tool said in plain words, and what to do next:
 - **The submission isn't in review** (from `submission_files`), or another **conflict**:
   someone may have decided it already. Call `submissions` with its id to see where it stands.
 - **Refused** (the archive's message): pass it on.
+- **It needs an interactive session**: `decide` could not show its dialog, so nothing was
+  sent. Say that deciding needs an interactive Claude Code session.

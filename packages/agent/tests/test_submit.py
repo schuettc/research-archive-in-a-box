@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import hashlib
 import json
@@ -7,8 +8,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from mcp import Client, types
+from mcp.server.mcpserver.exceptions import ToolError
 
-from archive_agent import state, submit
+from archive_agent import server, state, submit
 from archive_agent.errors import Conflict, NotAllowed, Refused
 from archive_agent.state import Session
 from archive_client.signin import Tokens
@@ -376,3 +379,226 @@ def test_submit_refuses_a_package_whose_checksums_list_a_hidden_file(
         submit.submit(session, str(package))
 
     assert posts(connected) == []
+
+
+MODES = ["legacy", "auto"]
+"""The protocol the test client speaks: 2025-11-25 (the dialog is a request during the call)
+and 2026-07-28 (the call answers that it needs input, and is made again with the answer)."""
+
+
+def call(
+    session: Session, tool: str, arguments: dict[str, Any], answer: str | None, mode: Any
+) -> tuple[Any, list[str]]:
+    """Call a tool as a client that answers every dialog with `answer` (accept, decline or
+    cancel), or that cannot show one (None). Answers the result and the dialogs' texts."""
+    asked: list[str] = []
+
+    async def dialog(context: Any, params: Any) -> types.ElicitResult:
+        asked.append(params.message)
+        content: dict[str, Any] = {"content": {}} if answer == "accept" else {}
+        return types.ElicitResult.model_validate({"action": answer, **content})
+
+    async def run() -> Any:
+        callback = dialog if answer is not None else None
+        async with Client(
+            server.build(session), mode=mode, elicitation_callback=callback
+        ) as client:
+            return await client.call_tool(tool, arguments)
+
+    return asyncio.run(run()), asked
+
+
+def text(result: Any) -> str:
+    return str(result.content[0].text)
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_submit_asks_with_the_archive_the_files_and_their_size_and_sends_on_accept(
+    connected: Any, package: Path, session: Session, mode: str
+) -> None:
+    answer_uploads(connected, "POST /api/submissions", package, "s1", 1)
+    connected.json(
+        "POST /api/submissions/s1/submit",
+        {"submissionId": "s1", "round": 1, "status": "checking"},
+        202,
+    )
+    paths = listed(package)
+    total = sum((package / p).stat().st_size for p in paths)
+
+    result, asked = call(session, "submit", {"folder": str(package)}, "accept", mode)
+
+    assert asked == [
+        f"Send {len(paths)} files ({total:,} bytes) from {package.resolve()} "
+        f"to {connected.url} for review?"
+    ]
+    assert not result.is_error
+    assert result.structured_content == {
+        "id": "s1",
+        "round": 1,
+        "status": "checking",
+        "archive": connected.url,
+    }
+    assert [s.path for s in posts(connected)] == [
+        "/api/submissions",
+        "/api/submissions/s1/submit",
+    ]
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_submit_names_the_submission_when_it_asks_about_a_next_round(
+    connected: Any, package: Path, session: Session, mode: str
+) -> None:
+    _, asked = call(
+        session, "submit", {"folder": str(package), "submission": "s1"}, "decline", mode
+    )
+
+    assert asked[0].endswith(f"to {connected.url} as the next round of submission s1?")
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("answer", ["decline", "cancel"])
+def test_submit_sends_nothing_when_the_dialog_is_not_accepted(
+    connected: Any, package: Path, session: Session, mode: str, answer: str
+) -> None:
+    answer_uploads(connected, "POST /api/submissions", package, "s1", 1)
+
+    result, asked = call(session, "submit", {"folder": str(package)}, answer, mode)
+
+    assert len(asked) == 1
+    assert result.is_error
+    assert f"nothing was sent to {connected.url}" in text(result)
+    assert {s.method for s in connected.seen} == {"GET"}
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_submit_refuses_when_no_dialog_can_be_shown(
+    connected: Any, package: Path, session: Session, mode: str
+) -> None:
+    result, asked = call(session, "submit", {"folder": str(package)}, None, mode)
+
+    assert asked == []
+    assert result.is_error
+    assert "Submitting and deciding need an interactive session." in text(result)
+    assert connected.seen == []
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_submit_refuses_a_package_with_an_error_finding_before_it_asks(
+    connected: Any, package: Path, session: Session, mode: str
+) -> None:
+    (package / "data" / "logger.csv").write_text("changed\n")
+
+    result, asked = call(session, "submit", {"folder": str(package)}, "accept", mode)
+
+    assert asked == []
+    assert "4 error findings" in text(result)
+    assert posts(connected) == []
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_decide_asks_with_the_archive_the_decision_and_the_note_and_posts_on_accept(
+    connected: Any, curator: Session, mode: str
+) -> None:
+    connected.json(
+        "POST /api/submissions/s1/decision", {"submissionId": "s1", "decision": "approve"}, 202
+    )
+    arguments = {"id": "s1", "decision": "approve", "note": "Looks complete."}
+
+    result, asked = call(curator, "decide", arguments, "accept", mode)
+
+    assert asked == [
+        f"Post this decision on submission s1 at {connected.url}?\n"
+        "Decision: approve\n"
+        "Note: Looks complete.\n"
+        "An approval publishes the dataset."
+    ]
+    assert result.structured_content == {
+        "submissionId": "s1",
+        "decision": "approve",
+        "archive": connected.url,
+    }
+    assert [json.loads(s.body) for s in connected.seen] == [
+        {"decision": "approve", "note": "Looks complete."}
+    ]
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_decide_asks_about_a_rejection_with_no_note(
+    connected: Any, curator: Session, mode: str
+) -> None:
+    arguments = {"id": "s1", "decision": "reject", "note": ""}
+
+    _, asked = call(curator, "decide", arguments, "decline", mode)
+
+    assert asked == [
+        f"Post this decision on submission s1 at {connected.url}?\nDecision: reject\nNote: (none)"
+    ]
+
+
+@pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("answer", ["decline", "cancel", None])
+def test_decide_sends_nothing_unless_the_dialog_is_accepted(
+    connected: Any, curator: Session, mode: str, answer: str | None
+) -> None:
+    arguments = {"id": "s1", "decision": "approve", "note": "Looks complete."}
+
+    result, asked = call(curator, "decide", arguments, answer, mode)
+
+    assert result.is_error
+    assert len(asked) == (0 if answer is None else 1)
+    expected = (
+        "Submitting and deciding need an interactive session."
+        if answer is None
+        else f"nothing was sent to {connected.url}"
+    )
+    assert expected in text(result)
+    assert connected.seen == []
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_decide_refuses_an_unknown_decision_before_it_asks(
+    connected: Any, curator: Session, mode: str
+) -> None:
+    arguments = {"id": "s1", "decision": "maybe", "note": ""}
+
+    result, asked = call(curator, "decide", arguments, "accept", mode)
+
+    assert asked == []
+    assert "approve, reject or request-changes" in text(result)
+    assert connected.seen == []
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_an_answer_in_the_arguments_is_not_the_persons_answer(
+    connected: Any, curator: Session, mode: str
+) -> None:
+    arguments = {
+        "id": "s1",
+        "decision": "approve",
+        "note": "",
+        "answer": {"action": "accept", "data": {}},
+    }
+
+    result, _ = call(curator, "decide", arguments, "decline", mode)
+
+    assert result.is_error
+    assert connected.seen == []
+
+
+def test_the_tools_arguments_do_not_include_the_answer() -> None:
+    tools = {tool.name: tool for tool in asyncio.run(server.build(Session()).list_tools())}
+
+    assert set(tools["submit"].input_schema["properties"]) == {"folder", "submission"}
+    assert set(tools["decide"].input_schema["properties"]) == {"id", "decision", "note"}
+
+
+def test_a_tool_called_outside_a_client_request_is_refused(
+    connected: Any, curator: Session
+) -> None:
+    mcp = server.build(curator)
+    arguments = {"id": "s1", "decision": "approve", "note": ""}
+
+    with pytest.raises(ToolError, match="need an interactive session"):
+        asyncio.run(mcp.call_tool("decide", arguments))
+
+    assert connected.seen == []

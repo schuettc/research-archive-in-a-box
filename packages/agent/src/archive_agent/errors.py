@@ -40,3 +40,7 @@ class SignInFailed(ArchiveError):
 
 class LocalError(ArchiveError):
     """A local folder or file can't be read or written as asked."""
+
+
+class NotConfirmed(ArchiveError):
+    """The person didn't accept the plugin's dialog, or no dialog could be shown."""
