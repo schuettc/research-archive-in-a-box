@@ -165,7 +165,12 @@ export class ResearchArchive extends Construct {
             },
           }
         : props.config;
-    const configJson = JSON.stringify(stageConfig);
+    // The privacy text goes only into the web build, which reads it from archive.yaml; no function
+    // reads it, so it stays out of the parameter and a long policy doesn't use up its 4 KB.
+    const storedConfig: ArchiveConfig = stageConfig.brand
+      ? { ...stageConfig, brand: { ...stageConfig.brand, privacy: undefined } }
+      : stageConfig;
+    const configJson = JSON.stringify(storedConfig);
     const configBytes = Buffer.byteLength(configJson, "utf-8");
     if (configBytes > MAX_CONFIG_BYTES) {
       throw new Error(
