@@ -218,6 +218,8 @@ def _edits(args: argparse.Namespace) -> list[Any]:
         return edits
     if args.target is None or args.value is None:
         raise SelectionError("give a target and a value, or --file EDITS.json")
+    if args.column is not None and args.resource is None:
+        raise SelectionError("give --resource with --column")
     column = args.resource is not None or args.column is not None
     plain = args.target in (TEXT_COLUMN_TARGETS if column else TEXT_TARGETS)
     edit: dict[str, Any] = {"target": args.target, "value": _value(args.value, plain=plain)}

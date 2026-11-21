@@ -564,6 +564,17 @@ def _check_checksums(root: Path) -> list[Finding]:
     return findings
 
 
+def plain_errors(error: ValidationError) -> str:
+    """Each error as `<field path>: <what's wrong>`, joined by semicolons, without pydantic's
+    error types, inputs and links."""
+    # A ValueError raised in a validator reaches pydantic's message with this in front.
+    return "; ".join(
+        f"{'.'.join(str(p) for p in e['loc']) or 'manifest'}: "
+        f"{e['msg'].removeprefix('Value error, ')}"
+        for e in error.errors()
+    )
+
+
 def validate_package(path: Path) -> list[Finding]:
     """Check a package folder's structure. An empty list means structurally valid."""
     manifest_path = path / MANIFEST
@@ -578,7 +589,9 @@ def validate_package(path: Path) -> list[Finding]:
     except ValidationError as exc:
         return [
             _error(
-                "manifest-invalid", f"{MANIFEST} does not fit the contract: {exc}", path=MANIFEST
+                "manifest-invalid",
+                f"{MANIFEST} does not fit the contract: {plain_errors(exc)}",
+                path=MANIFEST,
             )
         ]
     findings = (

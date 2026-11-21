@@ -81,6 +81,21 @@ def test_diagnose_stops_when_the_manifest_cannot_be_read(tmp_path: Path) -> None
     assert result.quality is None
 
 
+def test_diagnose_names_each_field_that_breaks_the_contract_in_a_sentence(
+    tmp_path: Path,
+) -> None:
+    manifest = {"version": "1.0.0", "resources": [{"name": "t", "archive:kind": "sheet"}]}
+    (tmp_path / "datapackage.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    [finding] = diagnose(tmp_path).findings
+
+    assert finding.message == (
+        "datapackage.json does not fit the contract: version: version is a whole number from 1 "
+        "up, written as a string; resources.0.archive:kind: Input should be 'table', 'vector', "
+        "'raster', 'document', 'media', 'file' or 'linked'"
+    )
+
+
 def test_diagnose_reads_no_table_whose_files_failed_the_structure_check(tmp_path: Path) -> None:
     package = tmp_path / "sample"
     shutil.copytree(SAMPLE, package)
