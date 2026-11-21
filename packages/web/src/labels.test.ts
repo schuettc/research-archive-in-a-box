@@ -62,3 +62,9 @@ test("every status and event has a plain label", async () => {
   expect(decisionLabel("request-changes")).toBe("Changes requested");
   expect(eventLabel("entered-review")).toBe("Entered review");
 });
+
+test("an expired submission's line gives the 360 days the archive kept it", async () => {
+  const { statusLine } = await import("./labels");
+
+  expect(statusLine("expired")).toBe("Expired: the submission was kept for 360 days and closed");
+});

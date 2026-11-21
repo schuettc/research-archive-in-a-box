@@ -172,7 +172,7 @@ const STATUS_LINES: Record<Status, string> = {
   published: "Published",
   rejected: "Rejected",
   abandoned: "Abandoned: no resubmission came within 30 days",
-  expired: "Expired: the submission was kept a year and closed",
+  expired: "Expired: the submission was kept for 360 days and closed",
   failed: "Stopped by a fault on the archive's side",
 };
 
