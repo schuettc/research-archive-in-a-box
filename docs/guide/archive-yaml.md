@@ -77,7 +77,7 @@ It prints the config when it is valid, and an error naming the field when it isn
 
 The blocks inside the top level refuse a field they don't know, so a misspelled `infrastructure.alertEmial` is an error rather than a setting silently ignored. The top level itself accepts and ignores a field it doesn't know.
 
-The whole config, as JSON, has to fit in 4 KB, the size of the AWS Systems Manager parameter each stage stores it in; the deploy says so when it doesn't. A long `brand.privacy` is the field most likely to reach that limit.
+The whole config, as JSON, has to fit in 4 KB, the size of the AWS Systems Manager parameter each stage stores it in; the deploy says so when it doesn't. `brand.privacy` doesn't count towards the 4 KB: the parameter leaves it out, since only the web app shows it and the web build reads it from `archive.yaml`.
 
 ## The archive
 

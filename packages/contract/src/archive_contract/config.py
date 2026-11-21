@@ -231,7 +231,7 @@ class Brand(_Strict):
     font: str | None = PydanticField(
         default=None, min_length=1, max_length=300, pattern=r"""^[\w ,'"-]+$"""
     )
-    # Capped well under the 4 KB SSM parameter the whole config is stored in.
+    # The web build reads it from archive.yaml; it is left out of the stage's 4 KB SSM parameter.
     privacy: str | None = PydanticField(
         default=None,
         min_length=1,

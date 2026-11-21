@@ -201,6 +201,21 @@ test("a config whose JSON is over 4096 bytes is refused at synth", () => {
   );
 });
 
+test("the privacy text is left out of the config parameter, so a long one still synthesises", () => {
+  const config: ArchiveConfig = {
+    publisher: "P",
+    // The schema's longest privacy text, 2,500 characters, is 5,000 bytes of JSON in é alone.
+    brand: { name: "Lake Archive", privacy: "é".repeat(2500) },
+    infrastructure: { alertEmail: "a@example.org", stages: [{ name: "prod" }] },
+  };
+
+  const stored = storedConfig(config, "prod");
+
+  expect(stored.brand).toEqual({ name: "Lake Archive" });
+  expect(JSON.stringify(stored)).not.toContain("privacy");
+  expect(config.brand?.privacy).toBeDefined();
+});
+
 const DOMAIN = "data.example.org";
 const ZONE = "Z0123456789ABCDEF";
 
