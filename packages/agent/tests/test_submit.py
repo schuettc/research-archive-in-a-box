@@ -406,6 +406,17 @@ def test_read_submission_file_says_a_binary_file_isnt_text(
         submit.read_submission_file(curator, "s1", "data/photo.png")
 
 
+def test_read_submission_file_reads_a_table_that_isnt_utf8_and_says_so(
+    connected: Any, curator: Session
+) -> None:
+    held(connected, {"data/sites.csv": "site,name\n1,Rivi\u00e8re\n".encode("latin-1")})
+
+    answer = submit.read_submission_file(curator, "s1", "data/sites.csv")
+
+    assert answer["text"] == "site,name\n1,Rivi\ufffdre\n"
+    assert answer["utf8"] is False
+
+
 def test_a_package_over_the_archives_limit_is_refused_before_anything_is_sent(
     connected: Any, session: Session, package: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

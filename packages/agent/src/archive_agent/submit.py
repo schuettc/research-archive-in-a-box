@@ -237,17 +237,22 @@ def submission_files(session: Session, id: str) -> dict[str, Any]:
     return files
 
 
-def _text(data: bytes, cut: bool) -> str | None:
-    """The bytes as UTF-8 text, or None when they aren't text. A sample cut in the middle of a
-    character keeps the whole characters before it."""
+def _text(data: bytes, cut: bool) -> tuple[str, bool] | None:
+    """The bytes as text and whether they were UTF-8, or None when they aren't text (a NUL
+    byte). A sample cut in the middle of a character keeps the whole characters before it;
+    text in another encoding, such as Latin-1, is read with each character UTF-8 can't
+    decode replaced."""
     if b"\x00" in data:
         return None
     try:
-        return data.decode("utf-8")
+        return data.decode("utf-8"), True
     except UnicodeDecodeError as exc:
         if cut and exc.start >= len(data) - 3:
-            return data[: exc.start].decode("utf-8", "replace")
-        return None
+            try:
+                return data[: exc.start].decode("utf-8"), True
+            except UnicodeDecodeError:
+                pass
+        return data.decode("utf-8", "replace"), False
 
 
 def read_submission_file(session: Session, id: str, path: str, rows: int = 20) -> dict[str, Any]:
@@ -281,10 +286,11 @@ def read_submission_file(session: Session, id: str, path: str, rows: int = 20) -
                 raise
     # A storage that ignores the Range answers the whole file; keep only the sample.
     cut = not whole and (len(data) > SAMPLE or size > SAMPLE)
-    text = _text(data[:SAMPLE] if not whole else data, cut)
-    if text is None:
+    read = _text(data[:SAMPLE] if not whole else data, cut)
+    if read is None:
         raise Refused(f"Submission {id}'s {path} isn't text, so it can't be read here.")
-    answer = {"id": id, "round": listing.get("round"), "path": path, "size": size}
+    text, utf8 = read
+    answer = {"id": id, "round": listing.get("round"), "path": path, "size": size, "utf8": utf8}
     if whole:
         return {**answer, "text": text, "cut": False}
     lines = text.splitlines(keepends=True)

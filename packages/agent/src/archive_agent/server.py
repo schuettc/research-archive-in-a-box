@@ -260,7 +260,9 @@ def build(session: Session) -> MCPServer:
         """Read one file of a submission in review, by its path as submission_files lists
         it: datapackage.json whole (up to 1 MiB), any other text file as its first `rows`
         lines, read from at most its first 64 KiB. Answers the text, the round, the file's
-        size and `cut` when there is more than the text. A file that isn't text is refused.
+        size, `cut` when there is more than the text, and `utf8` false when the file isn't
+        UTF-8 (each character it can't decode shows as \ufffd). A file that isn't text is
+        refused.
         Needs sign_in and the curator group."""
         return submit.read_submission_file(session, id, path, rows)
 
