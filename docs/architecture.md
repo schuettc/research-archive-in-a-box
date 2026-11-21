@@ -114,7 +114,7 @@ stateDiagram-v2
 
 A first-round draft that is never submitted has no execution, so it stays a draft. A draft of a later round is different: the execution is still waiting for the resubmission, so a contributor who starts the next round's upload and never submits it ends as **Abandoned** when the 30 days run out, or **Expired** at 360 days. A fault in the pipeline at any other point, such as a callback it can't read, also ends the submission as **Failed**.
 
-After publishing, curators and admins can correct, withdraw, restore and embargo a dataset. Each of those records the change at once and hands the file moves to a separate lifecycle function, as [curating.md](curating.md) describes.
+After publishing, a curator or an admin can correct a dataset's details; only an admin can withdraw it, restore it or move its embargo. Each of those records the change at once and hands the file moves to a separate lifecycle function, as [curating.md](curating.md) describes.
 
 ## What a stage deploys
 
