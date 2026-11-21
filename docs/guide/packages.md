@@ -1,6 +1,6 @@
 # Packages and cruise
 
-This page explains what a package is, how to make one from a CSV file, and how to check and fix it with `cruise`, the kit's command-line tool. Everything here runs on your own computer; nothing is sent anywhere until you submit the package to an archive.
+This page explains what a package is, how to make one from a CSV file, and how to check and fix it with `cruise`, the kit's command-line tool. It shows each step as a typed `cruise` command, so you see what each check means. Everything here runs on your own computer; nothing is sent anywhere until you submit the package to an archive. The [Claude Code plugin](../../README.md#use-the-claude-code-plugin) runs the same checks and fixes for someone who would rather ask for them.
 
 ## What a package is
 
