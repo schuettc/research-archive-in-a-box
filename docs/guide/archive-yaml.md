@@ -719,6 +719,8 @@ On unless it is `false`. It puts one AWS WAF web ACL in front of the stage's API
 
 Write-once locking of the archive bucket, which holds every published file. With it on, each file version is locked in S3's governance mode for the number of days given: it can't be overwritten or deleted in that time except by someone with the `s3:BypassGovernanceRetention` permission, as [deleting data for good](../curating.md#deleting-data-for-good) describes.
 
+You can add it to a stage that is already running: the next deploy turns locking on for the same bucket, and the lock applies to file versions written from then on. A withdrawal and a restore each move a dataset's files by writing a new copy, and a publish that fails hides the copy it had written. The archive bucket keeps every version, so the copy left behind stays stored either way; with locking on, nobody can remove it before its days are up, even by hand, without the bypass permission. Tearing down a stage whose files are still locked takes [an extra step](deploying.md#a-stage-with-object-lock-on).
+
 - **Type:** a block with the one field below.
 - **Default:** none: no locking.
 

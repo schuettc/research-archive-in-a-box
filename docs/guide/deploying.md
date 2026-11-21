@@ -277,4 +277,30 @@ which, from your laptop and never from CI:
 
 A stage keeps its data unless `archive.yaml` gives it `keepData: false`: its buckets, tables, user pool and logs stay when its stack is deleted, with their data, and they keep billing for storage until you delete them by hand. A stage with `keepData: false` is deleted whole, data included. To delete a kept stage whole, set `keepData: false`, let CI deploy it, then tear it down. [The reference](archive-yaml.md#infrastructurestageskeepdata) has the setting.
 
+### A stage with object lock on
+
+With [`objectLock`](archive-yaml.md#infrastructuremodulesobjectlock) on, `just destroy <stage>` stops after about five minutes while any published file version is still locked: the stack reads `DELETE_FAILED`, with "The bucket you tried to delete is not empty" on the archive bucket, and nearly all of the rest of the stage is already deleted. Ignore the recipe's last lines about emptying `logs/`. The versions stay in the bucket after their locks end, so waiting alone doesn't finish it: delete them yourself, in a shell signed in to the stage's account, then destroy again. While any version is still locked this needs the `s3:BypassGovernanceRetention` permission; once every lock has ended, leave `--bypass-governance-retention` out. This deletes every published file of the stage for good.
+
+1. Name the archive bucket and list everything in it, then read the list:
+
+   ```bash
+   stage=<stage>; export AWS_REGION=<the stage's region>
+   archive="$(aws cloudformation list-stack-resources --stack-name "ResearchArchive-$stage" \
+       --query "StackResourceSummaries[?ResourceType=='AWS::S3::Bucket' && contains(LogicalResourceId, 'StorageArchive')].PhysicalResourceId" --output text)"
+   echo "$archive"
+   aws s3api list-object-versions --bucket "$archive" --output json > versions.json
+   jq -r '[(.Versions//[])[], (.DeleteMarkers//[])[]] | .[] | [.Key, .VersionId] | @tsv' versions.json
+   ```
+
+2. Delete what the list names, past the lock. One call takes up to 1,000 versions; for more, save step 1's last command's output as `versions.txt` and use the loop in step 4 of [deleting data for good](../curating.md#deleting-data-for-good).
+
+   ```bash
+   jq -c '{Objects: [(.Versions//[])[], (.DeleteMarkers//[])[] | {Key, VersionId}], Quiet: false}' versions.json > batch.json
+   aws s3api delete-objects --bucket "$archive" --bypass-governance-retention --delete file://batch.json
+   ```
+
+3. Run step 1's listing again; it prints nothing once the bucket is empty.
+
+4. Run `just destroy <stage>` again. It ends with `ResearchArchive-<stage> is gone`.
+
 Once no stage is left in an account, the skill offers to remove the GitHub connection too: ✋ it deletes the `ResearchArchiveDeploy` stack and the stages' GitHub environments, after which CI can't deploy to that account. The CDK bootstrap stack stays, since other CDK apps may use it.

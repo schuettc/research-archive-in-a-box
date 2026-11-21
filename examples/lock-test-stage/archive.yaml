@@ -1,0 +1,15 @@
+# The archive config for the lock-test stage: a disposable stage with Object Lock on for one day.
+# Deploy it with ARCHIVE_CONFIG pointing here, so archive.yaml is never edited for a test.
+# It lists only the test stage, which is disposable (keepData: false), so a deploy can't touch any other.
+publisher: Invented Research Cooperative
+profiles: [core, ecology]
+infrastructure:
+  alertEmail: archive-admin@example.org
+  monthlyBudgetUsd: 50
+  modules:
+    waf: false
+    objectLock:
+      retentionDays: 1
+  stages:
+    - name: lock-test
+      keepData: false
