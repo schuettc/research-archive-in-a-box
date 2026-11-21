@@ -1,3 +1,3 @@
 """The research-archive-in-a-box MCP server: find, fetch, check, fix, submit and review datasets."""
 
-__version__ = "0.1.2"
+__version__ = "0.1.3"

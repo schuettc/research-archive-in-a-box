@@ -1,6 +1,6 @@
 [project]
 name = "cruise"
-version = "0.1.2"
+version = "0.1.3"
 description = "The research-archive-in-a-box local tool."
 requires-python = ">=3.12"
 dependencies = [
