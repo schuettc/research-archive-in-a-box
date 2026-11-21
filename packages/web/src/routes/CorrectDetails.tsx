@@ -118,7 +118,10 @@ interface CreatorRow {
   affiliation: string;
   orcidError: "check-digit" | "shape" | null;
   rorError: boolean;
-  /** A stored creator whose name (a person's family name) was emptied: a creator needs one. */
+  /**
+   * A stored creator left with no name: a creator needs one. A person needs a given or a family
+   * name, not both, as the manifest allows either alone.
+   */
   nameError: boolean;
 }
 
@@ -349,7 +352,8 @@ function CorrectionForm({
       const orcid = row.orcid.trim();
       const result = orcid ? checkOrcid(orcid) : null;
       const orcidError = result && "problem" in result ? result.problem : null;
-      const nameError = row.stored !== null && !(row.person ? row.family : row.name).trim();
+      const named = row.person ? row.given.trim() || row.family.trim() : row.name.trim();
+      const nameError = row.stored !== null && !named;
       return { ...row, orcidError, rorError: badRor(row.affiliation), nameError };
     });
     setCreators(checked);
@@ -457,8 +461,8 @@ function CorrectionForm({
                 onChange={(e) =>
                   setCreator(row.key, {
                     [key]: e.target.value,
-                    // Only the field that needs a name clears its error once one is typed.
-                    nameError: row.nameError && (key === "given" || !e.target.value.trim()),
+                    // A name typed in any of them clears the error: a person needs only one.
+                    nameError: row.nameError && !e.target.value.trim(),
                   })
                 }
               />
@@ -478,7 +482,9 @@ function CorrectionForm({
                   {nameField(
                     "family",
                     "Family name",
-                    row.nameError ? "Give the creator a family name, or remove them." : null,
+                    row.nameError
+                      ? "Give the creator a given or family name, or remove them."
+                      : null,
                   )}
                 </>
               ) : (

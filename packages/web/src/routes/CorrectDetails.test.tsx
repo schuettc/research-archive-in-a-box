@@ -289,15 +289,46 @@ test("a person whose given name is emptied keeps the family name alone", async (
   });
 });
 
-test("a person whose family name is emptied is asked for one, and nothing is sent", async () => {
+test("a stored creator with only a given name does not stop an unrelated correction", async () => {
+  const mononym = { givenName: "Cher", roles: ["creator"] };
+  versionManifest = { ...MANIFEST, contributors: [...MANIFEST.contributors!, mononym] };
+  await form();
+
+  type(screen.getByLabelText("Description"), "Corrected.");
+  note("Fixed the description.");
+  save();
+
+  await screen.findByText("The version's page");
+  expect(sent()).toEqual([{ description: "Corrected.", note: "Fixed the description." }]);
+});
+
+test("a person whose family name is emptied keeps the given name alone", async () => {
+  await form();
+
+  type(within(creator(2)).getByLabelText("Family name"), "");
+  note("Bo has one name.");
+  save();
+
+  await screen.findByText("The version's page");
+  expect((sent()[0]!.contributors as unknown[])[2]).toEqual({
+    givenName: "Bo",
+    organization: "Example Lab",
+    roles: ["creator"],
+  });
+});
+
+test("a person whose two names are both emptied is asked for one, and nothing is sent", async () => {
   await form();
   const family = within(creator(2)).getByLabelText("Family name");
 
-  type(family, "");
+  type(within(creator(2)).getByLabelText("Given name"), "");
+  type(family, " ");
   note("Names.");
   save();
 
-  const error = within(creator(2)).getByText("Give the creator a family name, or remove them.");
+  const error = within(creator(2)).getByText(
+    "Give the creator a given or family name, or remove them.",
+  );
   expect(family.getAttribute("aria-invalid")).toBe("true");
   expect(family.getAttribute("aria-describedby")).toBe(error.id);
   expect(sent()).toEqual([]);
