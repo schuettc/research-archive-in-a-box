@@ -55,13 +55,13 @@ jobs:
           node-version: 24
       - name: pip-audit on the locked Python dependencies
         # The lock pins every package, so pip-audit audits it as is instead of resolving it in a venv.
-        run: uv export --frozen --no-hashes --no-emit-workspace | uvx pip-audit -r /dev/stdin --disable-pip --no-deps
+        run: uv export --frozen --no-hashes --no-emit-workspace | uvx pip-audit==2.10.1 -r /dev/stdin --disable-pip --no-deps
       - name: npm audit on the dependencies the archive ships
         # Build and test tools (vite, vitest, eslint) run only on CI's own inputs, so their
         # advisories don't block; run a full npm audit to see them.
         run: npm audit --omit=dev --audit-level=high
       - name: zizmor on the workflows
-        run: uvx zizmor .github/workflows/
+        run: uvx zizmor@1.32.0 .github/workflows/
 
   stages:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -84,6 +84,10 @@ jobs:
   deploy:
     needs: stages
     runs-on: ubuntu-latest
+    # A later merge waits for the running deploy of a stage and deploys after it, never alongside.
+    concurrency:
+      group: deploy-${{ matrix.stage }}
+      cancel-in-progress: false
     strategy:
       max-parallel: 1
       fail-fast: true

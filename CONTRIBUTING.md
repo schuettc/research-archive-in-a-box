@@ -35,7 +35,7 @@ To try the web app locally against a deployed stage, run `ARCHIVE_DEV_SITE=https
 
 ## Check a change
 
-`just check` runs the format checks, the linters, the type checks and the tests in Python and TypeScript, and the drift check that fails when a committed generated file differs from the code it comes from. CI also runs a security job, which `just check` does not: pip-audit on the locked Python dependencies, npm audit on the npm dependencies the archive ships (not the build and test tools), and zizmor on the workflows.
+`just check` runs the format checks, the linters, the type checks and the tests in Python and TypeScript, and the drift check that fails when a committed generated file differs from the code it comes from. CI also runs a security job, which `just check` does not: pip-audit on the locked Python dependencies, npm audit on the npm dependencies the archive ships (not the build and test tools), and zizmor on the workflows. The job runs pip-audit and zizmor at the versions pinned in `.github/workflows/ci.yml`, so a new release of either can't fail a change on its own; bump them there by hand.
 
 ```
 just check
