@@ -378,7 +378,9 @@ def _header_row(file: Path, resource: Resource) -> list[str] | None:
         return None
     delimiter, quote, _ = table_dialect(resource)
     try:
-        with file.open(encoding="utf-8-sig" if codec == "utf-8" else codec, newline="") as stream:
+        with file.open(encoding=codec, newline="") as stream:
+            if stream.read(1) != "\ufeff":
+                stream.seek(0)
             return next(csv.reader(stream, delimiter=delimiter, quotechar=quote), [])
     except (UnicodeError, csv.Error, TypeError, ValueError, OSError):
         return None

@@ -618,6 +618,23 @@ def test_a_windows_1252_header_matching_the_manifest_has_no_findings(tmp_path: P
     assert validate_package(root) == []
 
 
+@pytest.mark.parametrize("encoding", ["utf-16-le", "utf-16-be", "utf-32-le"])
+def test_a_byte_order_mark_is_not_part_of_the_first_name_in_any_encoding(
+    tmp_path: Path, encoding: str
+) -> None:
+    csv = '\ufeff"a",b\n1,2\n'.encode(encoding)
+
+    assert validate_package(with_table(tmp_path, csv, ["a", "b"], encoding=encoding)) == []
+
+
+def test_a_utf_16_header_that_differs_is_a_mismatch(tmp_path: Path) -> None:
+    csv = '\ufeff"x",b\n1,2\n'.encode("utf-16-le")
+
+    [finding] = validate_package(with_table(tmp_path, csv, ["a", "b"], encoding="utf-16-le"))
+
+    assert finding.rule_id == "structure.header-mismatch"
+
+
 def test_a_windows_1252_header_that_differs_is_a_mismatch(tmp_path: Path) -> None:
     csv = "température,b\n1,2\n".encode("cp1252")
 
