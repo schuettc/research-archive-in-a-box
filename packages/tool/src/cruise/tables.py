@@ -33,26 +33,59 @@ class UnreadableTable(ValueError):
 
 
 class MalformedTable(UnreadableTable):
-    """A CSV table the reader tried to read and could not parse."""
+    """A CSV or TSV table the reader tried to read and could not parse."""
 
 
-NOT_UTF8 = "the file is not UTF-8 text"
-"""Why a table is malformed when its bytes, not its rows, are the cause."""
+ENCODINGS = {
+    "utf-8": ("utf-8", "UTF-8"),
+    "utf-16": ("utf-16", "UTF-16"),
+    "iso8859-1": ("latin-1", "Latin-1"),
+}
+"""The encodings DuckDB reads without an extension, by Python's name for each: DuckDB's name
+for it and the name a message gives it."""
+
+NOT_TEXT = "the file is not "
+NOT_READ_ENCODING = "the reader does not take the encoding "
+ENCODING_REASONS = (NOT_TEXT, NOT_READ_ENCODING)
+"""How the reason begins when a table is malformed because of its bytes, not its rows."""
 
 
-def _is_utf8_text(path: Path) -> bool:
-    """Whether the file decodes as UTF-8 and holds no NUL, which UTF-16 text and binary do."""
-    decoder = codecs.getincrementaldecoder("utf-8")()
+def _encoding(resource: Resource) -> tuple[str, str]:
+    """DuckDB's name for the resource's declared encoding (UTF-8 when it declares none), and
+    the name a message gives it."""
+    declared = resource.encoding or "utf-8"
+    try:
+        found = ENCODINGS.get(codecs.lookup(declared).name)
+    except LookupError:
+        found = None
+    if found is None:
+        readable = ", ".join(label for _, label in ENCODINGS.values())
+        raise MalformedTable(f"{NOT_READ_ENCODING}{declared}; it reads {readable}")
+    return found
+
+
+def _is_text(path: Path, encoding: str) -> bool:
+    """Whether the file decodes in the encoding. Outside UTF-16 it must also hold no NUL,
+    which UTF-16 text and binary do and Latin-1 would otherwise decode."""
+    decoder = codecs.getincrementaldecoder(encoding)()
     try:
         with path.open("rb") as stream:
             while chunk := stream.read(1 << 20):
-                if b"\0" in chunk:
+                if encoding != "utf-16" and b"\0" in chunk:
                     return False
                 decoder.decode(chunk)
             decoder.decode(b"", final=True)
     except (UnicodeDecodeError, OSError):
         return False
     return True
+
+
+def _is_tsv(resource: Resource) -> bool:
+    """Whether the resource is a TSV table: its `format` says tsv, or it states no format and
+    its one path ends in `.tsv`."""
+    if resource.format is not None:
+        return resource.format.lower() == "tsv"
+    return isinstance(resource.path, str) and resource.path.lower().endswith(".tsv")
 
 
 def connect() -> duckdb.DuckDBPyConnection:
@@ -91,11 +124,15 @@ def read_table(
 ) -> duckdb.DuckDBPyRelation:
     """A relation over the resource's file, every column as text, with its row number in `ROW`.
 
-    The columns take the schema's field names in order. Only CSV is read: a resource whose
-    format says csv, or that states no format and has a path ending in `.csv`.
+    The columns take the schema's field names in order. Only CSV and TSV are read: a resource
+    whose format says csv or tsv, or that states no format and has a path ending in `.csv` or
+    `.tsv`. The file is read in the resource's declared encoding, UTF-8 when it declares none.
     """
-    if not is_csv_table(resource):
-        raise UnreadableTable(f"{resource.name} is {resource.format!r}; only csv tables are read")
+    tsv = _is_tsv(resource)
+    if not is_csv_table(resource) and not tsv:
+        raise UnreadableTable(
+            f"{resource.name} is {resource.format!r}; only csv and tsv tables are read"
+        )
     if not isinstance(resource.path, str) or not readable_member(root, resource.path):
         raise UnreadableTable(f"{resource.name} has no single file inside the package to read")
     if GLOB_CHARACTERS & set(resource.path):
@@ -113,9 +150,10 @@ def read_table(
                 f"{RESERVED!r} are kept for the reader"
             )
     dialect = resource.dialect or {}
-    delimiter = str(dialect.get("delimiter", ","))
+    delimiter = str(dialect.get("delimiter", "\t" if tsv else ","))
     quote = str(dialect.get("quoteChar", '"'))
     header = bool(dialect.get("header", True))
+    encoding, label = _encoding(resource)
     missing = [str(v) for v in (schema.missing_values or DEFAULT_MISSING_VALUES)]
     columns = "{" + ", ".join(f"{quote_literal(f.name)}: 'VARCHAR'" for f in schema.fields) + "}"
     path = (root / resource.path).as_posix()
@@ -124,17 +162,17 @@ def read_table(
         f"{quote_literal(path)}, auto_detect = false, header = {str(header).lower()}, "
         f"columns = {columns}, delim = {quote_literal(delimiter)}, "
         f"quote = {quote_literal(quote)}, escape = {quote_literal(quote)}, "
-        f"nullstr = {_literal_list(missing)}, encoding = 'utf-8')"
+        f"nullstr = {_literal_list(missing)}, encoding = {quote_literal(encoding)})"
     )
     con = connection if connection is not None else connect()
     try:
         relation = con.sql(sql)
-        # Read every column once, so a bad file or a cell that is not UTF-8 fails here.
+        # Read every column once, so a bad file or a cell not in the encoding fails here.
         relation.aggregate("count(COLUMNS(*))").fetchall()
         return relation
     except duckdb.Error as exc:
-        if not _is_utf8_text(root / resource.path):
-            raise MalformedTable(NOT_UTF8) from exc
+        if not _is_text(root / resource.path, encoding):
+            raise MalformedTable(f"{NOT_TEXT}{label} text") from exc
         # DuckDB ends its message with advice on reader options, which nobody here can set,
         # and the file's path on this machine.
         reason = " ".join(str(exc).split("\nPossible ", 1)[0].split())

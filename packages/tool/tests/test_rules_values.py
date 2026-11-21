@@ -295,3 +295,71 @@ def test_a_table_that_is_not_utf8_is_malformed_not_a_failed_check(tmp_path: Path
     assert [f.rule_id for f in malformed.findings] == ["values.malformed"]
     assert "UTF-8" in (malformed.findings[0].suggested_fix or "")
     assert not any(f.rule_id.endswith("check-failed") for f in constant.findings)
+
+
+def declared(
+    tmp_path: Path, name: str, data: bytes, fields: list[dict[str, Any]], **resource: Any
+) -> Context:
+    """A context over one table written as `data`, its resource with the given properties."""
+    (tmp_path / name).write_bytes(data)
+    table = {"name": "t", "path": name, "type": "table", "schema": {"fields": fields}} | resource
+    return Context.for_package(tmp_path, Manifest.model_validate({"resources": [table]}))
+
+
+def rows(context: Context) -> list[tuple[Any, ...]]:
+    return [row for _, _, relation in context.tables() for row in relation.fetchall()]
+
+
+def test_a_latin1_table_that_declares_its_encoding_is_read(tmp_path: Path) -> None:
+    fields = [{"name": "a", "type": "integer"}, {"name": "b", "type": "string"}]
+    data = "a,b\n1,ök\n2,café\n".encode("latin-1")
+
+    context = declared(tmp_path, "t.csv", data, fields, format="csv", encoding="latin-1")
+
+    assert REGISTRY.get("values.malformed").run(context).findings == []
+    assert rows(context) == [(1, "1", "ök"), (2, "2", "café")]
+
+
+def test_a_decimal_comma_column_is_read_as_numbers(tmp_path: Path) -> None:
+    bounds = {"minimum": 0, "maximum": 10}
+    fields = [{"name": "x", "type": "number", "decimalChar": ",", "constraints": bounds}]
+    context = declared(
+        tmp_path, "t.csv", b"x\n1,5\n9,75\n12,5\n", fields, format="csv", dialect={"delimiter": ";"}
+    )
+
+    assert REGISTRY.get("values.not-declared-type").run(context).findings == []
+    above = REGISTRY.get("values.above-maximum").run(context)
+    assert only(above)[:3] == ("x", [3], ["12,5"])
+
+
+def test_a_tsv_table_is_read_with_a_tab_delimiter(tmp_path: Path) -> None:
+    fields = [{"name": "a", "type": "integer"}, {"name": "b", "type": "string"}]
+
+    context = declared(tmp_path, "t.tsv", b"a\tb\n1\tx, y\n", fields, format="tsv")
+
+    assert REGISTRY.get("values.unreadable").run(context).findings == []
+    assert rows(context) == [(1, "1", "x, y")]
+
+
+@pytest.mark.parametrize(
+    ("encoding", "data", "reason"),
+    [
+        ("utf-8", "a,b\n1,ök\n".encode("latin-1"), "the file is not UTF-8 text"),
+        ("utf-16", b"a,b\n1,ok\n", "the file is not UTF-16 text"),
+        ("windows-1252", b"a,b\n1,ok\n", "the reader does not take the encoding windows-1252"),
+    ],
+    ids=["latin-1 bytes declared utf-8", "utf-8 bytes declared utf-16", "an encoding not read"],
+)
+def test_a_table_its_declared_encoding_does_not_read_is_malformed(
+    tmp_path: Path, encoding: str, data: bytes, reason: str
+) -> None:
+    fields = [{"name": "a", "type": "string"}, {"name": "b", "type": "string"}]
+    context = declared(tmp_path, "t.csv", data, fields, format="csv", encoding=encoding)
+
+    finding = REGISTRY.get("values.malformed").run(context).findings[0]
+
+    assert reason in finding.message and "Possible" not in finding.message
+    assert finding.suggested_fix == (
+        "Save the file as UTF-8 text and set the resource's encoding to utf-8, or set it to "
+        "the encoding the file is in."
+    )

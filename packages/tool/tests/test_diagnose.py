@@ -320,7 +320,7 @@ def test_a_csv_path_with_another_format_is_still_not_read() -> None:
         }
     )
 
-    with pytest.raises(UnreadableTable, match="only csv tables are read"):
+    with pytest.raises(UnreadableTable, match="only csv and tsv tables are read"):
         read_table(NO_FORMAT, resource)
 
 

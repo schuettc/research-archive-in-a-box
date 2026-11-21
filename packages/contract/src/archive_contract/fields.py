@@ -51,12 +51,13 @@ class Field(ArchiveModel):
     `name` is the column's name in the tidy table. When a rename was accepted, the column's
     name in the source file is kept in `archive:sourceName`. `archive:unit` is free text
     (`degC`, `mg/L`); `archive:ancillaryOf` names another column of the same schema that
-    this one qualifies.
+    this one qualifies. `decimalChar` is a number column's decimal mark when it is not `.`.
     """
 
     name: str
     type: FieldType | None = None
     format: str | None = None
+    decimal_char: str | None = PydanticField(default=None, alias="decimalChar")
     title: str | None = None
     description: str | None = None
     example: Any = None

@@ -6,11 +6,12 @@ failed read. Each value rule applies one check per column it looks at.
 
 | Rule | Catches | Severity |
 | --- | --- | --- |
-| `values.malformed` | A CSV table that can't be parsed (a file that is not UTF-8, a row with \
-the wrong number of cells, an unclosed quote), naming the reason. No value, key or constraint \
+| `values.malformed` | A CSV or TSV table that can't be parsed (a file not in its declared \
+encoding, UTF-8 when it declares none, a row with the wrong number of cells, an unclosed \
+quote), naming the reason. No value, key or constraint \
 check could look at it, so it blocks. | error |
 | `values.unreadable` | A table resource the value rules leave unread (a format other than \
-CSV, a path with glob characters, a column named in the reader's own `cruise:` namespace), \
+CSV or TSV, a path with glob characters, a column named in the reader's own `cruise:` namespace), \
 naming the reason. One failed check per such table, so skipped data never raises the score. \
 A table whose files failed the structure check is not reported again. | note |
 """
@@ -25,7 +26,14 @@ from archive_contract.fields import Field, TableSchema
 from archive_contract.manifest import SpatialCoverage, TemporalCoverage
 from archive_contract.resources import Resource
 from cruise.rules.registry import EVIDENCE_LIMIT, Context, Outcome, Problem, rule
-from cruise.tables import NOT_UTF8, ROW, quote_identifier, quote_literal, select, working
+from cruise.tables import (
+    ENCODING_REASONS,
+    ROW,
+    quote_identifier,
+    quote_literal,
+    select,
+    working,
+)
 
 PLACEHOLDERS = (-9999, -999, -99, 9999, 99999)
 """Numbers that stand for "no value" in legacy data."""
@@ -75,6 +83,13 @@ def _when(value: str, pattern: str, then: str) -> str:
     return f"CASE WHEN regexp_full_match({value}, {quote_literal(pattern)}) THEN {then} END"
 
 
+def _number(column: Field, value: str) -> str:
+    """SQL reading `value` as a number, with the column's declared `decimalChar`."""
+    if column.decimal_char not in (None, "."):
+        value = f"replace({value}, {quote_literal(str(column.decimal_char))}, '.')"
+    return f"TRY_CAST({value} AS DOUBLE)"
+
+
 def _typed(column: Field, value: str) -> str | None:
     """SQL reading `value` as the column's declared type: null when it doesn't fit, and
     None when the type is one these rules don't check."""
@@ -83,7 +98,7 @@ def _typed(column: Field, value: str) -> str | None:
         case "integer":
             return _when(value, r"\s*[+-]?[0-9]+\s*", f"TRY_CAST({value} AS HUGEINT)")
         case "number":
-            return f"TRY_CAST({value} AS DOUBLE)"
+            return _number(column, value)
         case "boolean":
             extra = column.model_extra or {}
             trues = ", ".join(quote_literal(str(v)) for v in extra.get("trueValues", TRUE_VALUES))
@@ -425,11 +440,11 @@ def _coordinate_columns(schema: TableSchema) -> Iterator[tuple[Field, str, str, 
     lat = next((by_name[n] for n in by_name if n in LATITUDE_NAMES), None)
     lon = next((by_name[n] for n in by_name if n in LONGITUDE_NAMES), None)
     if lat is not None:
-        lon_sql = f"TRY_CAST({quote_identifier(lon.name)} AS DOUBLE)" if lon else "NULL"
-        yield lat, f"TRY_CAST({quote_identifier(lat.name)} AS DOUBLE)", lon_sql, lon
+        lon_sql = _number(lon, quote_identifier(lon.name)) if lon else "NULL"
+        yield lat, _number(lat, quote_identifier(lat.name)), lon_sql, lon
     if lon is not None:
-        lat_sql = f"TRY_CAST({quote_identifier(lat.name)} AS DOUBLE)" if lat else "NULL"
-        yield lon, lat_sql, f"TRY_CAST({quote_identifier(lon.name)} AS DOUBLE)", None
+        lat_sql = _number(lat, quote_identifier(lat.name)) if lat else "NULL"
+        yield lon, lat_sql, _number(lon, quote_identifier(lon.name)), None
     for column in schema.fields:
         if column.type == "geopoint" and (column.format or "default") in ("default", "array"):
             bare = f"regexp_replace({quote_identifier(column.name)}, '[\\[\\]\\s]', '', 'g')"
@@ -522,21 +537,30 @@ def duplicate_key(ctx: Context) -> Outcome:
     return Outcome(problems, checks)
 
 
+def _malformed_fix(resource: Resource, reason: str) -> str:
+    if not reason.startswith(ENCODING_REASONS):
+        return (
+            "Write the table as a well-formed CSV file: every row with one cell per field in the "
+            "schema, and every quote closed."
+        )
+    if resource.encoding is None:
+        return "Save the file as UTF-8 text."
+    return (
+        "Save the file as UTF-8 text and set the resource's encoding to utf-8, or set it to the "
+        "encoding the file is in."
+    )
+
+
 @rule("values.malformed", question="trust", scope="table", severity="error")
 def malformed(ctx: Context) -> Outcome:
-    """Each CSV table that can't be parsed is one check, and it fails: nothing checked it."""
+    """Each CSV or TSV table that can't be parsed is one check, and it fails: nothing checked it."""
     problems = [
         Problem(
             f"Table {resource.name} can't be read, so nothing checked its values, keys or "
             f"constraints: {reason}",
             resource=resource.name,
             path=resource.path if isinstance(resource.path, str) else None,
-            fix=(
-                "Save the file as UTF-8 text."
-                if reason == NOT_UTF8
-                else "Write the table as a well-formed CSV file: every row with one cell per "
-                "field in the schema, and every quote closed."
-            ),
+            fix=_malformed_fix(resource, reason),
         )
         for resource, reason in ctx.unreadable(malformed=True)
     ]

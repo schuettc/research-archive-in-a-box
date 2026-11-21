@@ -101,7 +101,7 @@ class Context:
 
     def unreadable(self, *, malformed: bool = False) -> Iterator[tuple[Resource, str]]:
         """Every table resource the value rules don't read, with the reason: those left unread
-        on purpose (not CSV, no single file), or with `malformed` those whose CSV can't be parsed.
+        on purpose (not CSV or TSV, no single file), or with `malformed` those that can't be parsed.
 
         A resource whose files failed the structure check is not listed: its structure
         finding already says why."""

@@ -594,7 +594,7 @@
     },
     "Field": {
       "additionalProperties": true,
-      "description": "One column of a table, described by logical type rather than file format.\n\n`name` is the column's name in the tidy table. When a rename was accepted, the column's\nname in the source file is kept in `archive:sourceName`. `archive:unit` is free text\n(`degC`, `mg/L`); `archive:ancillaryOf` names another column of the same schema that\nthis one qualifies.",
+      "description": "One column of a table, described by logical type rather than file format.\n\n`name` is the column's name in the tidy table. When a rename was accepted, the column's\nname in the source file is kept in `archive:sourceName`. `archive:unit` is free text\n(`degC`, `mg/L`); `archive:ancillaryOf` names another column of the same schema that\nthis one qualifies. `decimalChar` is a number column's decimal mark when it is not `.`.",
       "properties": {
         "archive:ancillaryOf": {
           "anyOf": [
@@ -692,6 +692,18 @@
           ],
           "default": null,
           "title": "Constraints"
+        },
+        "decimalChar": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Decimalchar"
         },
         "description": {
           "anyOf": [
