@@ -102,16 +102,23 @@ function parseRelated(text: string, stored: RelatedIdentifier[]): RelatedIdentif
   return parsed;
 }
 
-/** One creator's row: the stored contributor it edits (null for a new one) and its fields. */
+/**
+ * One creator's row: the stored contributor it edits (null for a new one) and its fields. A
+ * person stored with a given or family name is edited in those two; any other creator, and a new
+ * one, in one whole name.
+ */
 interface CreatorRow {
   key: number;
   stored: Contributor | null;
+  person: boolean;
   name: string;
+  given: string;
+  family: string;
   orcid: string;
   affiliation: string;
   orcidError: "check-digit" | "shape" | null;
   rorError: boolean;
-  /** A stored creator whose name was emptied: refused, since a creator needs a name. */
+  /** A stored creator whose name (a person's family name) was emptied: a creator needs one. */
   nameError: boolean;
 }
 
@@ -130,7 +137,10 @@ let nextKey = 0;
 const creatorRow = (stored: Contributor | null): CreatorRow => ({
   key: nextKey++,
   stored,
+  person: Boolean(stored?.givenName || stored?.familyName),
   name: stored ? (personName(stored) ?? "") : "",
+  given: stored?.givenName ?? "",
+  family: stored?.familyName ?? "",
   orcid: stored?.orcid ?? "",
   affiliation: stored ? affiliationOf(stored) : "",
   orcidError: null,
@@ -153,7 +163,18 @@ const badRor = (value: string) =>
 function creatorOf(row: CreatorRow): Contributor {
   const next: Contributor = row.stored ? { ...row.stored } : { roles: ["creator"] };
   const name = row.name.trim();
-  if (!row.stored || name !== (personName(row.stored) ?? "")) {
+  if (row.person && row.stored) {
+    // A person keeps the name in parts, so BibTeX and RIS still read "Family, Given".
+    const given = row.given.trim();
+    const family = row.family.trim();
+    if (given !== (row.stored.givenName ?? "") || family !== (row.stored.familyName ?? "")) {
+      if (given) next.givenName = given;
+      else delete next.givenName;
+      if (family) next.familyName = family;
+      else delete next.familyName;
+      delete next.title;
+    }
+  } else if (!row.stored || name !== (personName(row.stored) ?? "")) {
     next.title = name;
     delete next.givenName;
     delete next.familyName;
@@ -328,7 +349,7 @@ function CorrectionForm({
       const orcid = row.orcid.trim();
       const result = orcid ? checkOrcid(orcid) : null;
       const orcidError = result && "problem" in result ? result.problem : null;
-      const nameError = row.stored !== null && !row.name.trim();
+      const nameError = row.stored !== null && !(row.person ? row.family : row.name).trim();
       return { ...row, orcidError, rorError: badRor(row.affiliation), nameError };
     });
     setCreators(checked);
@@ -419,29 +440,54 @@ function CorrectionForm({
               : row.orcidError === "shape"
                 ? "An ORCID iD looks like 0000-0002-1825-0097."
                 : null;
+          const nameField = (
+            key: "name" | "given" | "family",
+            label: string,
+            errorText: string | null,
+          ) => (
+            <div className="field-block">
+              <label className="field" htmlFor={`${base}-${key}`}>
+                {label}
+              </label>
+              <input
+                id={`${base}-${key}`}
+                type="text"
+                value={row[key]}
+                {...described(`${base}-${key}-error`, errorText)}
+                onChange={(e) =>
+                  setCreator(row.key, {
+                    [key]: e.target.value,
+                    // Only the field that needs a name clears its error once one is typed.
+                    nameError: row.nameError && (key === "given" || !e.target.value.trim()),
+                  })
+                }
+              />
+              <FieldError id={`${base}-${key}-error`} text={errorText} />
+            </div>
+          );
           return (
-            <div key={row.key} className="creator-row" role="group" aria-label={`Creator ${n}`}>
-              <div className="field-block">
-                <label className="field" htmlFor={`${base}-name`}>
-                  Name
-                </label>
-                <input
-                  id={`${base}-name`}
-                  type="text"
-                  value={row.name}
-                  {...described(`${base}-name-error`, row.nameError)}
-                  onChange={(e) =>
-                    setCreator(row.key, {
-                      name: e.target.value,
-                      nameError: row.nameError && !e.target.value.trim(),
-                    })
-                  }
-                />
-                <FieldError
-                  id={`${base}-name-error`}
-                  text={row.nameError ? "Give the creator a name, or remove them." : null}
-                />
-              </div>
+            <div
+              key={row.key}
+              className={row.person ? "creator-row person" : "creator-row"}
+              role="group"
+              aria-label={`Creator ${n}`}
+            >
+              {row.person ? (
+                <>
+                  {nameField("given", "Given name", null)}
+                  {nameField(
+                    "family",
+                    "Family name",
+                    row.nameError ? "Give the creator a family name, or remove them." : null,
+                  )}
+                </>
+              ) : (
+                nameField(
+                  "name",
+                  "Name",
+                  row.nameError ? "Give the creator a name, or remove them." : null,
+                )
+              )}
               <div className="field-block">
                 <label className="field" htmlFor={`${base}-orcid`}>
                   ORCID iD

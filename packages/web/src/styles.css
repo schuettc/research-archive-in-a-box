@@ -2701,6 +2701,12 @@ button.primary.danger:not(:disabled):hover {
   border-radius: var(--radius);
 }
 
+/* A person's row has a given and a family name where another creator has one name: the two
+   names on one line, the iD and affiliation on the next, so neither field is cut short. */
+.creator-row.person {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
 .creator-row .row-remove {
   grid-column: 1 / -1;
 }
@@ -2815,7 +2821,8 @@ table.downloads .num {
     gap: 0;
   }
 
-  .creator-row {
+  .creator-row,
+  .creator-row.person {
     grid-template-columns: minmax(0, 1fr);
   }
 

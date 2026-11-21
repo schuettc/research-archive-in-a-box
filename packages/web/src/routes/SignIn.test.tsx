@@ -188,6 +188,55 @@ test("too many tries says to wait", async () => {
   expect((await main().findByRole("alert")).textContent).toContain("Too many tries");
 });
 
+test("an account never confirmed gets a new code and the code step, then confirming signs in", async () => {
+  answers.InitiateAuth = { error: "UserNotConfirmedException", message: "User is not confirmed." };
+  answers.ResendConfirmationCode = { body: {} };
+  answers.ConfirmSignUp = { body: {} };
+  renderAt("/sign-in?next=%2Fabout");
+
+  typeEmail();
+  typePassword();
+
+  expect(await main().findByLabelText("Code")).toBeDefined();
+  expect(main().getByRole("status").textContent).toBe(
+    "This account isn't confirmed yet. We've sent a new code to reader@example.org.",
+  );
+  expect(main().queryByRole("alert")).toBeNull();
+  answers.InitiateAuth = { body: TOKENS };
+  fireEvent.change(main().getByLabelText("Code"), { target: { value: "482913" } });
+  fireEvent.click(main().getByRole("button", { name: "Confirm" }));
+
+  expect(await screen.findByRole("heading", { level: 1, name: "About the archive" })).toBeDefined();
+  expect(calls.map((call) => call.action)).toEqual([
+    "InitiateAuth",
+    "ResendConfirmationCode",
+    "ConfirmSignUp",
+    "InitiateAuth",
+  ]);
+  expect(calls[1]?.body).toEqual({ ClientId: "web", Username: "reader@example.org" });
+  expect(calls[2]?.body).toMatchObject({
+    Username: "reader@example.org",
+    ConfirmationCode: "482913",
+  });
+  expect(calls[3]?.body).toMatchObject({
+    AuthParameters: { USERNAME: "reader@example.org", PASSWORD: "correct horse" },
+  });
+});
+
+test("an account never confirmed whose new code is refused for too many tries says to wait", async () => {
+  answers.InitiateAuth = { error: "UserNotConfirmedException", message: "User is not confirmed." };
+  answers.ResendConfirmationCode = { error: "LimitExceededException" };
+  renderAt("/sign-in");
+
+  typeEmail();
+  typePassword();
+
+  expect((await main().findByRole("alert")).textContent).toBe(
+    "Too many tries. Wait a few minutes, then try again.",
+  );
+  expect(main().getByLabelText("Password")).toBeDefined();
+});
+
 test("Use another email goes back to the email step", () => {
   renderAt("/sign-in");
   typeEmail();
