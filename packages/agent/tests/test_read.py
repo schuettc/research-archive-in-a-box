@@ -383,6 +383,35 @@ def test_download_never_writes_a_hidden_name(connected: Any, tmp_path: Path, pat
     assert fetched(connected) == []
 
 
+@pytest.mark.parametrize("folder", [".claude", ".git/hooks", "data/.cache"])
+def test_download_never_writes_into_a_hidden_folder(
+    connected: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, folder: str
+) -> None:
+    version(connected, "open", {"settings.json": b"x"})
+    connected.raw("GET /data/d1/3/settings.json", b"x")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(LocalError, match="hidden folder"):
+        read.download(Session(), "d1", 3, ["settings.json"], str(tmp_path / folder))
+
+    assert not (tmp_path / folder / "settings.json").exists()
+    assert fetched(connected) == []
+
+
+def test_download_writes_into_a_plain_folder_of_a_project_kept_under_a_hidden_one(
+    connected: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / ".worktrees" / "project"
+    project.mkdir(parents=True)
+    version(connected, "open", {"notes.csv": b"x"})
+    connected.raw("GET /data/d1/3/notes.csv", b"x")
+    monkeypatch.chdir(project)
+
+    read.download(Session(), "d1", 3, ["notes.csv"], "data")
+
+    assert (project / "data" / "notes.csv").read_bytes() == b"x"
+
+
 def test_the_agent_instruction_file_names_are_one_list() -> None:
     assert read.AGENT_FILES == ("CLAUDE.md", "CLAUDE.local.md", "AGENTS.md")
 
