@@ -356,6 +356,8 @@ The largest package the archive takes, as the total size of its files in GiB. A 
 - **Type:** a whole number from 1 to 9.
 - **Default:** `9`, the most a package can be.
 
+Nine GiB is the ceiling today because the checking function holds the whole package on its disk. If you need larger packages, say so on [issue #62](https://github.com/schuettc/research-archive-in-a-box/issues/62).
+
 ```yaml
 submissions:
   maxPackageGiB: 4
