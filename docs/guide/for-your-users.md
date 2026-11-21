@@ -35,7 +35,7 @@ Then tell Claude Code the archive's address, <the archive's address>, and ask it
 
 Without Claude Code, cruise is the tool that checks a package on your own computer before you upload anything. It needs uv too. Install cruise with:
 
-uv tool install "git+https://github.com/schuettc/research-archive-in-a-box@v0.1.2#subdirectory=packages/tool"
+uv tool install "git+https://github.com/schuettc/research-archive-in-a-box@v0.1.3#subdirectory=packages/tool"
 
 Then check your package's folder with:
 

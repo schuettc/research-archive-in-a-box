@@ -74,7 +74,7 @@ Once it runs, people use it through the web app by role. A reader searches and d
 These are the same checks without an agent: for a script, for an automated check such as CI, or for someone who prefers a terminal. `cruise` is a command-line tool that runs on your own machine, with no account and no network. Install it with uv, at a release tag:
 
 ```
-uv tool install "git+https://github.com/schuettc/research-archive-in-a-box@v0.1.2#subdirectory=packages/tool"
+uv tool install "git+https://github.com/schuettc/research-archive-in-a-box@v0.1.3#subdirectory=packages/tool"
 cruise --version
 ```
 

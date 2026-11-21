@@ -40,10 +40,10 @@ Its `_build/` folder holds the script that generated it. `cruise` leaves the top
 `cruise` is a Python program. Install it with [uv](https://docs.astral.sh/uv/), at a release tag:
 
 ```
-uv tool install "git+https://github.com/schuettc/research-archive-in-a-box@v0.1.2#subdirectory=packages/tool"
+uv tool install "git+https://github.com/schuettc/research-archive-in-a-box@v0.1.3#subdirectory=packages/tool"
 ```
 
-`cruise --version` then prints `cruise 0.1.2`. Inside a clone of this repository, run `uv sync --all-packages` once, as [Contributing](../../CONTRIBUTING.md#set-up) says, and `uv run cruise` then runs it from the source.
+`cruise --version` then prints `cruise 0.1.3`. Inside a clone of this repository, run `uv sync --all-packages` once, as [Contributing](../../CONTRIBUTING.md#set-up) says, and `uv run cruise` then runs it from the source.
 
 `cruise` has three commands:
 

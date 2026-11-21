@@ -1,7 +1,7 @@
 {
   "name": "cruise",
   "displayName": "cruise",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Find and fetch data in a research-archive-in-a-box archive, check and fix a dataset package with the archive's own checks, submit it, and review submissions as a curator. Nothing is written to a manifest or sent to the archive without your yes.",
   "author": {
     "name": "Court Schuett"

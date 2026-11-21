@@ -777,7 +777,7 @@ def _curation_paths() -> tuple[dict[str, Any], dict[str, Any]]:
 def render() -> str:
     """The read API's spec, with the submissions and access functions' hand-routed paths and the
     curation function's routes beside it."""
-    spec = json.loads(app.get_openapi_json_schema(title="Research archive API", version="0.1.2"))
+    spec = json.loads(app.get_openapi_json_schema(title="Research archive API", version="0.1.3"))
     for name, found in (
         ("submissions", submissions_api.paths()),
         ("access", access_api.paths()),
