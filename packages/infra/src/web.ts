@@ -235,6 +235,16 @@ export class Web extends Construct {
       },
     });
 
+    // API answers are JSON, read by the app and by scripts: HTTPS only, and never sniffed as
+    // another type. A content policy or a referrer policy has nothing to act on there.
+    const apiHeaders = new cloudfront.ResponseHeadersPolicy(this, "ApiHeaders", {
+      comment: "API answers: HTTPS only, no sniffing",
+      securityHeadersBehavior: {
+        contentTypeOptions: { override: true },
+        strictTransportSecurity,
+      },
+    });
+
     this.distribution = new cloudfront.Distribution(this, "Distribution", {
       defaultRootObject: "index.html",
       defaultBehavior: {
@@ -269,6 +279,7 @@ export class Web extends Construct {
           allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
           cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
           originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+          responseHeadersPolicy: apiHeaders,
           ...(props.originKey
             ? { functionAssociations: [viewerRequest("ViewerAddress", VIEWER_ADDRESS)] }
             : {}),
