@@ -11,7 +11,7 @@ import {
 } from "../api";
 import { signedInSub } from "../auth";
 import { History } from "../History";
-import { FINAL_STATUSES, formatSize, type Status } from "../labels";
+import { FAILED_NEXT, FINAL_STATUSES, formatSize, statusLine, type Status } from "../labels";
 import { Modal, PageHeading, useTitle } from "../page";
 import { usePeople } from "../People";
 import { Preview } from "../Preview";
@@ -320,6 +320,14 @@ export function Review({ id }: { id: string }) {
           )}
         </p>
       </div>
+      {submission.status === "failed" && (
+        <>
+          <p className="muted">{statusLine(submission.status)}</p>
+          <div className="callout">
+            <p>{FAILED_NEXT.curator}</p>
+          </div>
+        </>
+      )}
       {done ? (
         <div className="callout done">
           <p>

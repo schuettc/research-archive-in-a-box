@@ -14,7 +14,7 @@ import {
 import { FieldEditor } from "../FieldEditor";
 import { Findings, type Editor } from "../Findings";
 import { History } from "../History";
-import { FINAL_STATUSES, statusLine, type Status } from "../labels";
+import { FAILED_NEXT, FINAL_STATUSES, statusLine, type Status } from "../labels";
 import { editableKind } from "../package";
 import { Modal, PageHeading, useTitle } from "../page";
 import { StatusBadge } from "../StatusBadge";
@@ -304,6 +304,11 @@ export function Submission({ id }: { id: string }) {
       </div>
       {EXPLAINED.includes(submission.status) && (
         <p className="muted">{statusLine(submission.status)}</p>
+      )}
+      {submission.status === "failed" && (
+        <div className="callout">
+          <p>{FAILED_NEXT.contributor}</p>
+        </div>
       )}
       {submission.status === "needs-changes" && (
         <div className="callout">

@@ -287,7 +287,8 @@ class Event(Model):
     scanned: files, threats. checked: errors, warnings, notes, reportKey, blocked. held: files.
     entered-review: rule, outcome, audience. reminded: day, audience. stale: days, audience.
     decided: decision, note, selfReview. rejected: note. published: rule, datasetId, version.
-    abandoned and expired: days. failed: error. edited: changes.
+    abandoned and expired: days. failed: step, reason (one written before them: error).
+    edited: changes.
     """
 
     submission_id: str = Field(alias="submissionId")
@@ -313,7 +314,16 @@ class Event(Model):
     self_review: bool | None = Field(default=None, alias="selfReview")
     dataset_id: str | None = Field(default=None, alias="datasetId")
     version: int | None = None
-    error: str | None = None
+    step: str | None = Field(
+        default=None, description="The step that failed, as the logs name it: publish-1-catalog."
+    )
+    reason: str | None = Field(
+        default=None, description="Why it failed, in plain words for the contributor."
+    )
+    error: str | None = Field(
+        default=None,
+        description="The raw error a failed event held before step and reason; never shown.",
+    )
     changes: list[FieldChange] | None = None
 
 

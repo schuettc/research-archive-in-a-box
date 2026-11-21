@@ -128,6 +128,28 @@ test("the review page shows the title, the submitter's email, the findings, the 
   );
 });
 
+test("a failed submission tells the curator the contributor can submit the package again, and never shows the raw error", async () => {
+  read = {
+    submission: item({ submitter: "con-3", status: "failed", waiting: false }),
+    events: [
+      event("created", { actor: "con-3" }),
+      event("failed", { error: "An error occurred (AccessDeniedException) arn:aws:sts::1:role" }),
+    ],
+    reportUrl: REPORT_URL,
+  };
+  renderReview();
+
+  expect(await screen.findByText("Stopped by a fault on the archive's side")).toBeDefined();
+  expect(
+    screen.getByText(
+      "This submission can't continue. The contributor can submit the package again; it will come back to the queue.",
+    ),
+  ).toBeDefined();
+  const history = screen.getByRole("list", { name: "History" }).textContent;
+  expect(history).toContain("The archive couldn't finish publishing. The admins have been told.");
+  expect(history).not.toContain("AccessDenied");
+});
+
 test("the review is headed by the title, its id under it, a Review queue trail and the badge", async () => {
   renderReview();
 

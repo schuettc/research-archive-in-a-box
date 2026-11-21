@@ -1,6 +1,6 @@
 import type { SubmissionEvent } from "./api";
 import { plural } from "./Findings";
-import { decisionLabel, eventLabel } from "./labels";
+import { decisionLabel, eventLabel, FAILED_BEFORE_REASONS } from "./labels";
 import { usePeople } from "./People";
 
 const DETAIL_KEYS = ["eventKey", "at", "submissionId"];
@@ -50,7 +50,8 @@ function detail(event: SubmissionEvent): string | null {
     case "published":
       return `as ${event.datasetId}, version ${event.version}`;
     case "failed":
-      return event.error ?? null;
+      // The raw error of an older event can name the account, a role and a table: never shown.
+      return event.reason ?? (event.error ? FAILED_BEFORE_REASONS : null);
     case "edited": {
       // The headline already names each field and property; this says what they became.
       const changes = event.changes ?? [];

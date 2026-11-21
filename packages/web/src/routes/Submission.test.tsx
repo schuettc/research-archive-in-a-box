@@ -99,6 +99,31 @@ const reads$ = () =>
     ([url]) => new URL(String(url), "https://site").pathname === "/api/submissions/s-1",
   ).length;
 
+test("a failed submission tells its contributor to submit the package again, with the plain reason in its history", async () => {
+  answer({
+    submission: item({ status: "failed", waiting: false }),
+    events: [
+      event("failed", {
+        step: "publish-1-catalog",
+        reason:
+          "The archive couldn't finish publishing (the catalog step failed). The admins have been told.",
+      }),
+    ],
+    reportUrl: REPORT_URL,
+  });
+  renderPage();
+
+  expect(await screen.findByText("Stopped by a fault on the archive's side")).toBeDefined();
+  expect(
+    screen.getByText(
+      "This submission can't continue. Submit the package again to publish it: it keeps the same dataset id, and nothing you sent is lost from your copy.",
+    ),
+  ).toBeDefined();
+  expect(screen.getByRole("list", { name: "History" }).textContent).toContain(
+    "(the catalog step failed)",
+  );
+});
+
 test("the page says where the submission stands, in one line", async () => {
   renderPage();
 

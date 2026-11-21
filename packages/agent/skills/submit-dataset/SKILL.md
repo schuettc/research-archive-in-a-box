@@ -54,6 +54,11 @@ offline.
    its `report`; if it answers a `report_error` instead, say the findings couldn't be read
    and why, and run `diagnose` on the folder to see them), go back to step 2, and call
    `submit` with the folder and `submission` set to the same id for its next round.
+   When it is `failed`, show the `reason` of its `failed` event (an older event with no
+   `reason`: say the archive couldn't finish publishing, and never show its `error`) and say: "This submission
+   can't continue. Submit the package again to publish it: it keeps the same dataset id, and
+   nothing you sent is lost from your copy." With their go, call `submit` with the folder and
+   no `submission`, which starts a new submission of the same package.
 
 ## When a tool answers an error
 

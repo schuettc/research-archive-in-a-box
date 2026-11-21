@@ -511,7 +511,7 @@ class World:
 
     def fail(self, sid: str, error: str) -> None:
         """The fail and release steps, as `run` calls them when a step has failed for good."""
-        ingest._fail(self.clients, ENV, sid, error)(None)  # type: ignore[arg-type]
+        ingest._fail(self.clients, ENV, sid, "publish-1-copy", error)(None)  # type: ignore[arg-type]
         ingest._released(self.clients, ENV, sid)(None)  # type: ignore[arg-type]
 
     def catalog(self, sid: str, target: dict[str, Any], prefix: str = "open") -> None:
@@ -1626,7 +1626,7 @@ def test_a_takeover_clears_the_public_folder_a_copy_that_died_part_way_left(worl
     assert world.s3.keys(ARCHIVE, "open/stream/2/") == _published_keys("open/stream/2/")
 
 
-def test_a_failed_publish_leaves_its_held_files_and_zips_and_nothing_in_the_archive(
+def test_a_failed_publish_deletes_its_held_files_and_zips_and_leaves_nothing_in_the_archive(
     world: World,
 ) -> None:
     world.hold(SID, _package(), datasetId="stream")
@@ -1638,7 +1638,5 @@ def test_a_failed_publish_leaves_its_held_files_and_zips_and_nothing_in_the_arch
     world.fail(SID, "copy refused")
 
     assert world.s3.keys(ARCHIVE) == []
-    # What a failure leaves of held files stays as it was before the zips were kept there.
-    assert world.s3.keys(STAGING, f"held/{SID}/") == sorted(
-        f"held/{SID}/{path}" for path in (*_package(), *(".zips/" + z for z in ZIPPED))
-    )
+    # Nothing continues a failed submission, so its held files and zips are deleted.
+    assert world.s3.keys(STAGING, f"held/{SID}/") == []
