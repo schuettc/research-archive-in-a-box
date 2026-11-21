@@ -1298,7 +1298,7 @@
         "type": "object"
       },
       "Event": {
-        "description": "One audit event; the details present depend on `type`.\n\nscanned: files, threats. checked: errors, warnings, notes, reportKey, blocked. held: files.\nentered-review: rule, outcome, audience. reminded: day, audience. stale: days, audience.\ndecided: decision, note, selfReview. rejected: note. published: rule, datasetId, version.\nabandoned and expired: days. failed: error. edited: changes.",
+        "description": "One audit event; the details present depend on `type`.\n\nscanned: files, threats. checked: errors, warnings, notes, reportKey, blocked. held: files.\nentered-review: rule, outcome, audience. reminded: day, audience. stale: days, audience.\ndecided: decision, note, selfReview. rejected: note. published: rule, datasetId, version.\nabandoned and expired: days. failed: step, reason (one written before them: error).\nedited: changes.",
         "properties": {
           "actor": {
             "description": "A user id, or `pipeline`.",
@@ -1412,6 +1412,7 @@
               }
             ],
             "default": null,
+            "description": "The raw error a failed event held before step and reason; never shown.",
             "title": "Error"
           },
           "errors": {
@@ -1482,6 +1483,19 @@
             "default": null,
             "title": "Outcome"
           },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Why it failed, in plain words for the contributor.",
+            "title": "Reason"
+          },
           "reportKey": {
             "anyOf": [
               {
@@ -1521,6 +1535,19 @@
             ],
             "default": null,
             "title": "Selfreview"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The step that failed, as the logs name it: publish-1-catalog.",
+            "title": "Step"
           },
           "submissionId": {
             "title": "Submissionid",

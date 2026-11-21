@@ -738,10 +738,10 @@ def test_a_file_that_changes_between_check_and_hold_ends_the_submission_failed(
 
     assert result["status"] == "failed"
     assert world.types() == ["scanned", "checked", "failed"]
-    assert "data/logger.csv" in world.reviews.events[-1]["error"]
     assert world.s3.keys(f"held/{SID}/") == []
     [alert] = world.sns.to(ALERTS)
     assert SID in alert["Subject"]
+    assert "data/logger.csv" in alert["Message"]
 
 
 def test_a_file_with_no_clean_scan_result_at_hold_ends_the_submission_failed(
@@ -750,7 +750,7 @@ def test_a_file_with_no_clean_scan_result_at_hold_ends_the_submission_failed(
     result, _ = world.run([], before={"hold-1": lambda: world.s3.tags.pop(LOGGER)})
 
     assert result["status"] == "failed"
-    assert "scan" in world.reviews.events[-1]["error"]
+    assert "scan" in world.sns.to(ALERTS)[0]["Message"]
     assert world.s3.keys(f"held/{SID}/") == []
 
 
@@ -798,7 +798,6 @@ def test_a_scan_that_never_finishes_ends_failed_after_a_day(world: World) -> Non
     assert sum(context.polls) == DAY
     [alert] = world.sns.to(ALERTS)
     assert "never scanned" in alert["Message"]
-    assert "never scanned" in world.reviews.events[-1]["error"]
 
 
 def test_a_scan_ends_by_the_360th_day(world: World) -> None:
@@ -895,9 +894,50 @@ def test_a_failing_step_ends_failed_with_an_admin_alert(world: World) -> None:
     assert result["status"] == "failed"
     assert world.item["status"] == "failed"
     assert world.types() == ["scanned", "checked", "failed"]
-    assert "copy refused" in world.reviews.events[-1]["error"]
+    failed = world.reviews.events[-1]
+    assert failed["step"] == "hold-1"
+    assert failed["reason"] == (
+        "The archive couldn't finish publishing (the hold step failed). The admins have been told."
+    )
+    assert "error" not in failed
     [alert] = world.sns.to(ALERTS)
     assert SID in alert["Subject"]
+    assert "copy refused" in alert["Message"]
+
+
+DENIED = (
+    "An error occurred (AccessDeniedException) when calling the PutItem operation: User:"
+    " arn:aws:sts::123456789012:assumed-role/Ingest/Ingest is not authorized to perform:"
+    " dynamodb:PutItem on resource: arn:aws:dynamodb:us-east-1:123456789012:table/Catalog"
+)
+
+
+def test_a_failed_catalog_step_names_the_step_in_plain_words_and_keeps_aws_text_for_admins(
+    world: World, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    def denied(**_: Any) -> Any:
+        raise ClientError(
+            {"Error": {"Code": "AccessDeniedException", "Message": DENIED}}, "PutItem"
+        )
+
+    monkeypatch.setattr(world.clients.dynamodb, "put_item", denied)
+    # What the release removes is test_publish's; this fake catalog knows only the claim.
+    monkeypatch.setattr(ingest, "_release", lambda *_: None)
+
+    result, _ = world.run([_decision("approve")])
+
+    assert result["status"] == "failed"
+    failed = world.reviews.events[-1]
+    assert (failed["type"], failed["step"]) == ("failed", "publish-1-catalog")
+    assert failed["reason"] == (
+        "The archive couldn't finish publishing (the catalog step failed)."
+        " The admins have been told."
+    )
+    assert "error" not in failed
+    assert "arn:" not in json.dumps(failed) and "123456789012" not in json.dumps(failed)
+    [alert] = world.sns.to(ALERTS)
+    assert "publish-1-catalog" in alert["Message"] and DENIED in alert["Message"]
+    assert DENIED in caplog.text
 
 
 def test_each_long_step_starts_in_an_invocation_of_its_own(world: World) -> None:

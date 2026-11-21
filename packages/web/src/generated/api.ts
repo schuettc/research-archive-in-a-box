@@ -1091,7 +1091,8 @@ export interface components {
      *     scanned: files, threats. checked: errors, warnings, notes, reportKey, blocked. held: files.
      *     entered-review: rule, outcome, audience. reminded: day, audience. stale: days, audience.
      *     decided: decision, note, selfReview. rejected: note. published: rule, datasetId, version.
-     *     abandoned and expired: days. failed: error. edited: changes.
+     *     abandoned and expired: days. failed: step, reason (one written before them: error).
+     *     edited: changes.
      */
     Event: {
       /**
@@ -1139,6 +1140,7 @@ export interface components {
       decision: ("approve" | "reject" | "request-changes") | null;
       /**
        * Error
+       * @description The raw error a failed event held before step and reason; never shown.
        * @default null
        */
       error: string | null;
@@ -1170,6 +1172,12 @@ export interface components {
        */
       outcome: ("one" | "two") | null;
       /**
+       * Reason
+       * @description Why it failed, in plain words for the contributor.
+       * @default null
+       */
+      reason: string | null;
+      /**
        * Reportkey
        * @default null
        */
@@ -1186,6 +1194,12 @@ export interface components {
        * @default null
        */
       selfReview: boolean | null;
+      /**
+       * Step
+       * @description The step that failed, as the logs name it: publish-1-catalog.
+       * @default null
+       */
+      step: string | null;
       /** Submissionid */
       submissionId: string;
       /**

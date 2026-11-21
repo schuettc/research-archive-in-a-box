@@ -511,7 +511,7 @@ class World:
 
     def fail(self, sid: str, error: str) -> None:
         """The fail and release steps, as `run` calls them when a step has failed for good."""
-        ingest._fail(self.clients, ENV, sid, error)(None)  # type: ignore[arg-type]
+        ingest._fail(self.clients, ENV, sid, "publish-1-copy", error)(None)  # type: ignore[arg-type]
         ingest._released(self.clients, ENV, sid)(None)  # type: ignore[arg-type]
 
     def catalog(self, sid: str, target: dict[str, Any], prefix: str = "open") -> None:

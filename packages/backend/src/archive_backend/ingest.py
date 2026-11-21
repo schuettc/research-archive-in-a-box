@@ -38,6 +38,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 import mimetypes
 import os
 import re
@@ -106,6 +107,8 @@ REFUSED = "ConditionalCheckFailedException"
 SUFFIX = 6
 SLUG_LENGTH = 60
 CHUNK = 1024 * 1024
+
+logger = logging.getLogger(__name__)
 
 
 class S3(Protocol):
@@ -1353,18 +1356,46 @@ def publish(
     return {"datasetId": target["datasetId"], "version": int(target["version"])}
 
 
+# The steps a contributor or curator can be told of by name; any other is "a publishing step".
+STEP_WORDS = {
+    "check": "the check step",
+    "hold": "the hold step",
+    "zips": "the zip step",
+    "copy": "the copy step",
+    "catalog": "the catalog step",
+    "release": "the release step",
+}
+
+
+def _step_words(step: str) -> str:
+    """The failed step in plain words: `publish-1-catalog` and `check-2` lose their round."""
+    part = re.sub(r"(-\d+)+$", "", re.sub(r"^publish-\d+-", "", step))
+    return STEP_WORDS.get(part, "a publishing step")
+
+
+def failed_reason(step: str) -> str:
+    """What a failed event says to the contributor and the curators, with no AWS text."""
+    return (
+        f"The archive couldn't finish publishing ({_step_words(step)} failed)."
+        " The admins have been told."
+    )
+
+
 @durable_step
-def _fail(_: StepContext, c: Clients, env: Env, sid: str, error: str) -> None:
-    """End the submission as `failed` and alert the admins. The release step follows."""
+def _fail(_: StepContext, c: Clients, env: Env, sid: str, step: str, error: str) -> None:
+    """End the submission as `failed` and alert the admins. The release step follows. The event
+    names the step and says so in plain words; the error, which can name the account, a role and
+    a table, goes only to the admins' alert and the log."""
     item = _submission(c, sid)
     round = int(item.get("round") or 1)
+    logger.error("submission %s round %s failed at %s: %s", sid, round, step, error)
     _set(c, sid, {"status": "failed"}, remove=("callbackId",))
-    put_event(c.reviews, sid, "failed", PIPELINE, round, error=error[:1000])
+    put_event(c.reviews, sid, "failed", PIPELINE, round, step=step, reason=failed_reason(step))
     _alert(
         c,
         env,
         f"Ingest failed: submission {sid}",
-        f"Submission {sid} round {round} failed: {error}",
+        f"Submission {sid} round {round} failed at {step}: {error}",
     )
 
 
@@ -1573,15 +1604,49 @@ def _rounds(
         round = next_round
 
 
+class _Named:
+    """The durable context, keeping the name of the operation it began last. The error the SDK
+    raises when an operation fails for good does not name the operation, and it leaves the one
+    begun last, so that name is the failed step's (a bad callback: the wait it came to)."""
+
+    def __init__(self, context: DurableContext) -> None:
+        self.context = context
+        self.last = "start"
+
+    def step(self, func: Callable[[StepContext], Any], name: str | None = None) -> Any:
+        self.last = name or self.last
+        return self.context.step(func, name=name)
+
+    def wait(self, duration: Duration, name: str | None = None) -> None:
+        self.context.wait(duration, name=name)
+
+    def wait_for_callback(
+        self,
+        submitter: Callable[[str, Any], None],
+        name: str | None = None,
+        config: WaitForCallbackConfig | None = None,
+    ) -> Any:
+        self.last = name or self.last
+        return self.context.wait_for_callback(submitter, name=name, config=config)
+
+    def wait_for_condition(
+        self, check: Callable[[Any, Any], Any], config: Any, name: str | None = None
+    ) -> Any:
+        self.last = name or self.last
+        return self.context.wait_for_condition(check, config, name=name)
+
+
 def run(event: dict[str, Any], context: DurableContext) -> dict[str, Any]:
     """The submission's whole path; a failed step or a bad callback ends it as `failed`."""
     sid = str(event["submissionId"])
     env = Env.from_environ()
     c = clients(env)
+    named = _Named(context)
     try:
-        return _ingest(context, c, env, sid)
+        return _ingest(cast(DurableContext, named), c, env, sid)
     except (DurableOperationError, BadCallback) as error:
-        context.step(_fail(c, env, sid, str(error) or type(error).__name__), name="fail")
+        failed = str(error) or type(error).__name__
+        context.step(_fail(c, env, sid, named.last, failed), name="fail")
         context.step(_released(c, env, sid), name="release")
         return {"submissionId": sid, "status": "failed"}
 
