@@ -17,7 +17,7 @@ from archive_contract import checksums_text
 from archive_contract.exports.readme import render_readme
 from archive_contract.manifest import Manifest, bare_orcid
 from archive_contract.project import Project
-from archive_contract.validate import BUILD, CHECKSUMS, MANIFEST
+from archive_contract.validate import BUILD, CHECKSUMS, MANIFEST, plain_errors
 
 README = "README.md"
 PROJECT = "project.json"
@@ -54,6 +54,8 @@ class EditResult:
 
 def _column(document: dict[str, Any], resource: object, column: object) -> dict[str, Any]:
     """The field named `column` in the resource's table schema or vector attributes."""
+    if resource is None:
+        raise ValueError("a column edit names its resource as well as its column")
     found = next(
         (r for r in document.get("resources", []) if r.get("name") == resource and resource),
         None,
@@ -77,6 +79,8 @@ def _apply(document: dict[str, Any], edit: object) -> str:
     if not isinstance(edit, dict) or "target" not in edit or "value" not in edit:
         raise ValueError("an edit is an object with a target and a value")
     target, value = edit["target"], edit["value"]
+    if not isinstance(target, str):
+        raise ValueError(f"a target is one name, such as title, not {target!r}")
     name = str(target)
     if "resource" in edit or "column" in edit:
         if target not in COLUMN_TARGETS:
@@ -105,10 +109,7 @@ def _bare_orcids(document: dict[str, Any]) -> None:
 
 def _reason(error: Exception) -> str:
     if isinstance(error, ValidationError):
-        return "; ".join(
-            f"{'.'.join(str(p) for p in e['loc']) or 'manifest'}: {e['msg']}"
-            for e in error.errors()
-        )
+        return plain_errors(error)
     return str(error)
 
 

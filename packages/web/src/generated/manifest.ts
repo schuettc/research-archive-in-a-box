@@ -79,6 +79,7 @@ export type ArchiveUnit = string | null;
 export type Constraints = {
   [k: string]: unknown;
 } | null;
+export type Decimalchar = string | null;
 export type Description2 = string | null;
 export type Format = string | null;
 export type Name2 = string;
@@ -357,7 +358,7 @@ export interface TableSchema {
  * `name` is the column's name in the tidy table. When a rename was accepted, the column's
  * name in the source file is kept in `archive:sourceName`. `archive:unit` is free text
  * (`degC`, `mg/L`); `archive:ancillaryOf` names another column of the same schema that
- * this one qualifies.
+ * this one qualifies. `decimalChar` is a number column's decimal mark when it is not `.`.
  */
 export interface Field {
   "archive:ancillaryOf"?: AncillaryOf | null;
@@ -367,6 +368,7 @@ export interface Field {
   "archive:sourceName"?: ArchiveSourcename;
   "archive:unit"?: ArchiveUnit;
   constraints?: Constraints;
+  decimalChar?: Decimalchar;
   description?: Description2;
   example?: Example;
   format?: Format;

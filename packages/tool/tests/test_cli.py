@@ -159,6 +159,48 @@ def test_set_file_applies_every_edit_or_none(
     assert "edit 2" in err and "edit 1" not in err
 
 
+def test_set_column_without_resource_says_which_flag_is_missing(
+    package: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    before = snapshot(package)
+
+    assert main(["set", str(package), "description", "Volts.", "--column", "battery_v"]) == 2
+
+    assert snapshot(package) == before
+    assert capsys.readouterr().err == "cruise: give --resource with --column\n"
+
+
+@pytest.mark.parametrize(
+    ("edit", "reason"),
+    [
+        (
+            {"target": ["title"], "value": "A new title"},
+            "edit 1: a target is one name, such as title, not ['title']",
+        ),
+        (
+            {"target": "description", "value": "Volts.", "column": "battery_v"},
+            "edit 1: a column edit names its resource as well as its column",
+        ),
+    ],
+    ids=["a list target", "a column with no resource"],
+)
+def test_set_file_with_a_malformed_edit_says_why_without_a_traceback(
+    package: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    edit: dict[str, Any],
+    reason: str,
+) -> None:
+    edits = tmp_path / "edits.json"
+    edits.write_text(json.dumps([edit]))
+    before = snapshot(package)
+
+    assert main(["set", str(package), "--file", str(edits)]) == 1
+
+    assert snapshot(package) == before
+    assert capsys.readouterr().err == f"cruise: Nothing was written. {reason}\n"
+
+
 def test_set_takes_a_text_targets_value_as_text(package: Path) -> None:
     assert main(["set", str(package), "title", "2027"]) == 0
 

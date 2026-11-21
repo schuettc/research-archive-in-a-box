@@ -1,12 +1,16 @@
 """Each value rule on a tiny table."""
 
+import gc
+import tempfile
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from archive_contract.manifest import Manifest
+from archive_contract.resources import Resource
 from cruise.rules import REGISTRY, Context, RuleResult
+from cruise.tables import MalformedTable, connect, read_table
 
 
 def run(
@@ -295,3 +299,151 @@ def test_a_table_that_is_not_utf8_is_malformed_not_a_failed_check(tmp_path: Path
     assert [f.rule_id for f in malformed.findings] == ["values.malformed"]
     assert "UTF-8" in (malformed.findings[0].suggested_fix or "")
     assert not any(f.rule_id.endswith("check-failed") for f in constant.findings)
+
+
+def declared(
+    tmp_path: Path, name: str, data: bytes, fields: list[dict[str, Any]], **resource: Any
+) -> Context:
+    """A context over one table written as `data`, its resource with the given properties."""
+    (tmp_path / name).write_bytes(data)
+    table = {"name": "t", "path": name, "type": "table", "schema": {"fields": fields}} | resource
+    return Context.for_package(tmp_path, Manifest.model_validate({"resources": [table]}))
+
+
+def rows(context: Context) -> list[tuple[Any, ...]]:
+    return [row for _, _, relation in context.tables() for row in relation.fetchall()]
+
+
+@pytest.mark.parametrize("encoding", ["latin-1", "ISO-8859-15", "utf-16", "utf-16le"])
+def test_a_table_that_declares_its_encoding_is_read(tmp_path: Path, encoding: str) -> None:
+    fields = [{"name": "a", "type": "integer"}, {"name": "b", "type": "string"}]
+    data = "a,b\n1,ök\n2,café\n".encode(encoding)
+
+    context = declared(tmp_path, "t.csv", data, fields, format="csv", encoding=encoding)
+
+    assert REGISTRY.get("values.malformed").run(context).findings == []
+    assert rows(context) == [(1, "1", "ök"), (2, "2", "café")]
+
+
+def test_a_windows_1252_table_is_read_with_its_euro_signs(tmp_path: Path) -> None:
+    fields = [{"name": "a", "type": "integer"}, {"name": "b", "type": "string"}]
+    data = "a,b\n1,5 €\n2,“quoted” – dash\n".encode("cp1252")
+
+    context = declared(tmp_path, "t.csv", data, fields, format="csv", encoding="windows-1252")
+
+    assert REGISTRY.get("values.malformed").run(context).findings == []
+    assert rows(context) == [(1, "1", "5 €"), (2, "2", "“quoted” – dash")]
+
+
+@pytest.mark.parametrize("encoding", ["ascii", "US-ASCII"])
+def test_a_table_declared_ascii_is_read(tmp_path: Path, encoding: str) -> None:
+    fields = [{"name": "a", "type": "integer"}, {"name": "b", "type": "string"}]
+
+    context = declared(tmp_path, "t.csv", b"a,b\n1,ok\n", fields, format="csv", encoding=encoding)
+
+    assert REGISTRY.get("values.malformed").run(context).findings == []
+    assert rows(context) == [(1, "1", "ok")]
+
+
+def test_a_utf8_sig_table_keeps_its_first_name_without_the_mark(tmp_path: Path) -> None:
+    fields = [{"name": "a", "type": "string"}, {"name": "b", "type": "string"}]
+    data = "a,b\n1,ök\n".encode("utf-8-sig")
+
+    context = declared(
+        tmp_path, "t.csv", data, fields, format="csv", encoding="utf-8-sig",
+        dialect={"header": False},
+    )  # fmt: skip
+
+    assert REGISTRY.get("values.malformed").run(context).findings == []
+    assert rows(context) == [(1, "a", "b"), (2, "1", "ök")]
+
+
+def test_a_decimal_comma_column_is_read_as_numbers(tmp_path: Path) -> None:
+    bounds = {"minimum": 0, "maximum": 10}
+    fields = [{"name": "x", "type": "number", "decimalChar": ",", "constraints": bounds}]
+    context = declared(
+        tmp_path, "t.csv", b"x\n1,5\n9,75\n12,5\n", fields, format="csv", dialect={"delimiter": ";"}
+    )
+
+    assert REGISTRY.get("values.not-declared-type").run(context).findings == []
+    above = REGISTRY.get("values.above-maximum").run(context)
+    assert only(above)[:3] == ("x", [3], ["12,5"])
+
+
+def test_a_tsv_table_is_read_with_a_tab_delimiter(tmp_path: Path) -> None:
+    fields = [{"name": "a", "type": "integer"}, {"name": "b", "type": "string"}]
+
+    context = declared(tmp_path, "t.tsv", b"a\tb\n1\tx, y\n", fields, format="tsv")
+
+    assert REGISTRY.get("values.unreadable").run(context).findings == []
+    assert rows(context) == [(1, "1", "x, y")]
+
+
+@pytest.mark.parametrize(
+    ("encoding", "data", "reason"),
+    [
+        ("utf-8", "a,b\n1,ök\n".encode("latin-1"), "the file is not UTF-8 text"),
+        (
+            "utf-16",
+            b"a,b\n1,ok\n",
+            "the file is not utf-16 text (Stream does not start with BOM at byte 0)",
+        ),
+        (
+            "utf-16",
+            "a,b\n1,ok\n".encode("utf-16") + b"x",
+            "the file is not utf-16 text (truncated data at byte 20)",
+        ),
+        (
+            "cp1252",
+            b"a,b\n1,\x81\n",
+            "the file is not cp1252 text (character maps to <undefined> at byte 6)",
+        ),
+        ("no-such-encoding", b"a,b\n1,ok\n", "the reader does not know the encoding no-such"),
+    ],
+    ids=[
+        "latin-1 bytes declared utf-8",
+        "utf-8 bytes declared utf-16",
+        "utf-16 cut short",
+        "a byte cp1252 has no character for",
+        "an encoding name nobody knows",
+    ],
+)
+def test_a_table_its_declared_encoding_does_not_read_is_malformed(
+    tmp_path: Path, encoding: str, data: bytes, reason: str
+) -> None:
+    fields = [{"name": "a", "type": "string"}, {"name": "b", "type": "string"}]
+    context = declared(tmp_path, "t.csv", data, fields, format="csv", encoding=encoding)
+
+    finding = REGISTRY.get("values.malformed").run(context).findings[0]
+
+    assert reason in finding.message and "Possible" not in finding.message
+    assert finding.suggested_fix == (
+        "Save the file as UTF-8 text and set the resource's encoding to utf-8, or set it to "
+        "the encoding the file is in."
+    )
+
+
+def test_a_transcoded_copy_lasts_only_as_long_as_its_connection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
+    fields = [{"name": "a", "type": "string"}, {"name": "b", "type": "string"}]
+    table = {"name": "t", "path": "t.csv", "type": "table", "format": "csv"}
+    good = Resource.model_validate(table | {"encoding": "cp1252", "schema": {"fields": fields}})
+    (tmp_path / "t.csv").write_bytes("a,b\n1,€\n".encode("cp1252"))
+    connection = connect()
+
+    first = read_table(tmp_path, good, connection)
+    second = read_table(tmp_path, good, connection)
+
+    assert len(list(scratch.iterdir())) == 1  # the copy is made once per connection
+    assert first.fetchall() == second.fetchall() == [(1, "1", "€")]
+    del first, second, connection
+    gc.collect()
+    assert list(scratch.iterdir()) == []
+    (tmp_path / "t.csv").write_bytes(b"a,b\n1,\x81\n")
+    with pytest.raises(MalformedTable):
+        read_table(tmp_path, good, connect())
+    assert list(scratch.iterdir()) == []
