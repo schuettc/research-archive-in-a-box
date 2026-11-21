@@ -182,3 +182,33 @@ def test_curators_is_refused_to_anyone_but_an_admin(cognito: FakeCognito, groups
 
     assert status == 403, body
     assert cognito.calls == []
+
+
+class _Pool:
+    """A user pool with one account, in the curator group."""
+
+    def __init__(self, enabled: bool) -> None:
+        self.enabled = enabled
+
+    def list_users(self, **kwargs: Any) -> Any:
+        sub = "11111111-2222-3333-4444-555555555555"
+        attributes = [{"Name": "sub", "Value": sub}]
+        return {"Users": [{"Username": "carol", "Enabled": self.enabled, "Attributes": attributes}]}
+
+    def admin_list_groups_for_user(self, **kwargs: Any) -> Any:
+        return {"Groups": [{"GroupName": "curator"}]}
+
+
+def test_an_account_disabled_in_cognito_itself_is_refused_though_it_keeps_its_group() -> None:
+    from archive_backend import people
+
+    sub = "11111111-2222-3333-4444-555555555555"
+
+    def ask(pool: _Pool) -> set[str]:
+        return people.require_live(
+            cast(Any, pool), "pool", sub, disabled=False, roles={"curator"}, refusal="no"
+        )
+
+    assert ask(_Pool(True)) == {"curator"}
+    with pytest.raises(people.NotAllowed, match="disabled"):
+        ask(_Pool(False))

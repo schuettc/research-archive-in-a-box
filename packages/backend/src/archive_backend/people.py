@@ -78,14 +78,16 @@ def require_live(
     cognito: Groups, pool: str, sub: str, *, disabled: bool, roles: set[str], refusal: str
 ) -> set[str]:
     """Refuse a token older than a disable or a demotion: it stays valid until it expires, so
-    take the UserProfiles `disabled` mark as read by the caller, and read the account's groups
-    live; one of `roles` must be among them. Raise NotAllowed with the reason. Returns every
-    group the account is in now."""
+    take the UserProfiles `disabled` mark as read by the caller, refuse an account disabled in
+    the user pool itself, and read the account's groups live; one of `roles` must be among
+    them. Raise NotAllowed with the reason. Returns every group the account is in now."""
     if disabled:
         raise NotAllowed("your account is disabled")
     user = find(cognito, pool, sub) if SUB.fullmatch(sub) else None
     if user is None:
         raise NotAllowed(refusal)
+    if user.get("Enabled") is False:
+        raise NotAllowed("your account is disabled")
     live = set(groups(cognito, pool, user["Username"]))
     if not roles & live:
         raise NotAllowed(refusal)
