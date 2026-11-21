@@ -47,6 +47,41 @@ cd packages/infra && npx cdk bootstrap aws://<account>/us-east-1
 
 Then run the failed run again with `gh run rerun <run-id>`. [A custom domain](../domain.md) lists what else a domain needs first.
 
+## The first deploy of a stage failed
+
+**What you see:** the first deploy of a stage fails, and CloudFormation rolls the new stack back. The stack `ResearchArchive-<stage>` stays behind in the state `ROLLBACK_COMPLETE`:
+
+```
+aws cloudformation describe-stacks --region <region> --stack-name ResearchArchive-<stage> --query "Stacks[0].StackStatus"
+```
+
+**Why:** a stack whose first deploy failed can't be updated, only deleted and made again. A stage that keeps its data, which is every stage unless `archive.yaml` gives it `keepData: false`, also keeps its data resources through the rollback, as it would through a teardown: its ten DynamoDB tables, its three S3 buckets (staging, archive and derived), its Cognito user pool and its functions' log groups. The rollback leaves them in the account, empty or nearly so, with the tables and the user pool protected from deletion. They don't stop the next deploy, which makes new ones under new names, but they go on billing for storage until you delete them.
+
+**What to do:** list what the rollback kept, with each resource's type and name, before anything deletes the stack, since the list goes with it. The next deploy deletes the failed stack itself before it makes a new one, so read the list before you run the deploy again:
+
+```
+aws cloudformation list-stack-resources --region <region> --stack-name ResearchArchive-<stage> --query "StackResourceSummaries[?ResourceStatus=='DELETE_SKIPPED'].[ResourceType,PhysicalResourceId]" --output text
+```
+
+Delete each data resource it names, turning off the protection first on the tables and the user pool:
+
+```
+aws dynamodb update-table --region <region> --table-name <table> --no-deletion-protection-enabled
+aws dynamodb delete-table --region <region> --table-name <table>
+aws cognito-idp update-user-pool --region <region> --user-pool-id <pool id> --deletion-protection INACTIVE
+aws cognito-idp delete-user-pool --region <region> --user-pool-id <pool id>
+aws s3 rb s3://<bucket>
+aws logs delete-log-group --region <region> --log-group-name <log group>
+```
+
+`aws s3 rb` refuses a bucket that holds files. The archive bucket keeps every version of a file, so empty a bucket that holds any with the **Empty** button on its page in the S3 console, which deletes the versions too, then remove it. The list can also name the API Gateway account setting, the role it uses to write logs to CloudWatch, and a version of the ingest function. They cost nothing and don't stop the next deploy: the setting is the Region's and the version went with its function, and the role can stay or be deleted in the IAM console. Once the failed deploy's cause is fixed, run it again with `gh run rerun <run-id>`, which deletes the failed stack and makes the stage afresh. To remove the stage instead, delete the stack yourself:
+
+```
+aws cloudformation delete-stack --region <region> --stack-name ResearchArchive-<stage>
+```
+
+While you are still setting a stage up, give it `keepData: false` in `archive.yaml` and a failed deploy leaves nothing behind. Take it out, or set it to `true`, before the stage holds data you want to keep ([the reference](archive-yaml.md#infrastructurestageskeepdata) has the setting).
+
 ## An email from the archive never arrives
 
 Three kinds of email go through Amazon SNS, the AWS service that sends a message to every address subscribed to a topic: the alerts to `infrastructure.alertEmail`, the admins' notices of new access requests, and the curators' review messages. Account emails (invitations, sign-up codes, password resets) go another way, covered in the next entry.

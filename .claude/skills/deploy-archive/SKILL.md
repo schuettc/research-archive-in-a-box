@@ -286,7 +286,8 @@ to 55; after that it fails and rolls back), and then the stage's account emails 
 **What it costs.** Say what bills while the archive sits idle: storage in S3 and DynamoDB, the
 CloudWatch alarms and dashboard, retained logs, and the WAF web ACL unless they set `waf: false`
 (about $12 a month per stage). Say what bills per use: Lambda, API Gateway, CloudFront, DynamoDB
-reads and writes, and Cognito past its free tier. Give no other dollar figure; none has been
+reads and writes, Cognito past its free tier, and GuardDuty Malware Protection for S3, which
+scans every uploaded file per gigabyte and per object scanned and is the main cost of each upload. Give no other dollar figure; none has been
 measured. Point to the budget alarm: AWS
 Budgets emails the alert email when the month passes `monthlyBudgetUsd`.
 
