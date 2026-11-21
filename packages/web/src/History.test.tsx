@@ -95,3 +95,25 @@ test("other events keep their label and the person who acted", async () => {
     ),
   );
 });
+
+const REASON =
+  "The archive couldn't finish publishing (the catalog step failed). The admins have been told.";
+const RAW =
+  "An error occurred (AccessDeniedException) when calling the PutItem operation: User: arn:aws:sts::123456789012:assumed-role/Ingest";
+
+test("a failed event shows its plain reason", () => {
+  render(<History events={[event("failed", { step: "publish-1-catalog", reason: REASON })]} />);
+
+  expect(screen.getByRole("list", { name: "History" }).textContent).toContain(`Failed · ${REASON}`);
+});
+
+test("an older failed event with only the raw error says it plainly and never shows the error", () => {
+  render(<History events={[event("failed", { error: RAW })]} />);
+
+  const history = screen.getByRole("list", { name: "History" }).textContent;
+  expect(history).toContain(
+    "Failed · The archive couldn't finish publishing. The admins have been told.",
+  );
+  expect(history).not.toContain("AccessDenied");
+  expect(history).not.toContain("123456789012");
+});

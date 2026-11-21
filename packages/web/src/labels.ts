@@ -181,6 +181,21 @@ export function statusLine(status: Status): string {
   return STATUS_LINES[status] ?? status;
 }
 
+/**
+ * What a failed submission's page says to do next. Nothing continues a failed submission; a new
+ * one with the same package, under the same dataset id, publishes it.
+ */
+export const FAILED_NEXT = {
+  contributor:
+    "This submission can't continue. Submit the package again to publish it: it keeps the same dataset id, and nothing you sent is lost from your copy.",
+  curator:
+    "This submission can't continue. The contributor can submit the package again; it will come back to the queue.",
+};
+
+/** A failed event's reason when it was written before reasons were: its raw error is never shown. */
+export const FAILED_BEFORE_REASONS =
+  "The archive couldn't finish publishing. The admins have been told.";
+
 const EVENT_LABELS: Record<EventType, string> = {
   created: "Created",
   submitted: "Submitted",

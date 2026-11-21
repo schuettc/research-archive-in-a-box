@@ -45,7 +45,10 @@ note; the plugin then asks them once more itself, in a dialog.** The tools come 
    approval is published afterwards, on its own. Say the decision was accepted, then call
    `submissions` with the id and report its status as it stands. Say it is published, and
    give `/datasets/<id>` on the archive, only once that status is `published`. `decide`
-   answers the `archive` it went to; say it with the decision.
+   answers the `archive` it went to; say it with the decision. When the status is
+   `failed`, show the `reason` of its `failed` event and say: "This submission can't
+   continue. The contributor can submit the package again; it will come back to the queue."
+   Nothing can approve it again.
 
 ## When a tool answers an error
 
