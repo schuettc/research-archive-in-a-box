@@ -946,8 +946,8 @@ def _root(filled: dict[str, Any], target: dict[str, Any]) -> str:
 # folder of `held/<id>/` whose name starts with a dot. A package never holds a hidden file or
 # folder (the API refuses one in a round's file list and the check refuses one in a package),
 # so no file of a submission can be under it and nothing that reads `held/<id>/` can take a
-# zip for one. The hold step, a closing decision and the finish step empty `held/<id>/` whole,
-# zips included.
+# zip for one. The hold step, a closing decision, the finish step and the release after a failure
+# empty `held/<id>/` whole, zips included.
 HELD_ZIPS = ".zips/"
 
 
@@ -1402,10 +1402,12 @@ def _fail(_: StepContext, c: Clients, env: Env, sid: str, step: str, error: str)
 @durable_step
 def _released(_: StepContext, c: Clients, env: Env, sid: str) -> None:
     """Release the failed submission's claim on a version that never went live, removing what
-    it wrote of that version. Its own step, after the fail step: the admins have been told of
-    the failure even when this cannot finish, and a later publish may take over the claim of a
-    submission that is already `failed`."""
+    it wrote of that version, then empty its `held/<id>/`, zips and all: nothing continues a
+    failed submission, so nothing reads them again. Its own step, after the fail step: the
+    admins have been told of the failure even when this cannot finish, and a later publish may
+    take over the claim of a submission that is already `failed`."""
     _release(c, env, sid, _submission(c, sid))
+    _delete_prefix(c, env, _held(sid))
 
 
 def _store_callback(c: Clients, sid: str) -> Any:
