@@ -367,10 +367,12 @@ just add-curator <stage> <email> <userId>
 **What it does.** Publishes the committed sample package (`examples/sample-package`, invented
 stream temperature data under CC-BY-4.0, access `public`) through the archive's own submit and
 publish path. It becomes **public data on their archive**. Before it submits, a browser tab
-opens by itself on the archive's own sign-in page, because the seed submits and approves as the
-admin and the terminal never sees their password: the admin signs in there, setting their own
-password from the invite email, and presses **Sign in the command line**. Say the tab is coming
-and why before running it; it waits five minutes for the sign-in.
+opens by itself on the archive's own sign-in page, because the seed submits as a contributor and
+approves as a curator and the terminal never sees the password: the first admin, who holds both
+roles from step 6, signs in there, setting their own password from the invite email, and presses
+**Sign in the command line**. Say the tab is coming and why before running it; it waits five
+minutes for the sign-in. An account without both roles is told so and nothing is submitted: the
+admin role alone does not submit or approve.
 
 **What it costs.** A few requests and a few kilobytes of storage. To take it down later, an
 admin withdraws it from its page (**Withdraw…** in the curators' bar): its files stop being

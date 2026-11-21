@@ -1,11 +1,16 @@
-"""Publish the sample package on a deployed archive as its admin: `just seed <stage>`.
+"""Publish the sample package on a deployed archive as its first admin: `just seed <stage>`.
+
+The account that signs in needs the contributor role, to submit, and the curator role, to
+approve; the admin role stands in for neither. The first admin is invited with all three. An
+account without both is told so before anything is submitted.
 
 It publishes `examples/sample-package`; `--package <folder>`, which may be given several times,
 publishes those folders instead. The other folders under `examples/` that hold a
 `datapackage.json` are sample packages too (`sample_packages()` lists them all), published only
 when named, so a new archive starts with one invented dataset.
 
-It signs in once on the archive's own sign-in page in the browser with `archive_client`. Then,
+It signs in once on the archive's own sign-in page in the browser with `archive_client`, and
+reads the account's roles from `/api/whoami`. Then,
 for each package in turn, it creates a submission for the package's files, uploads each to its
 presigned URL, submits it, approves it if it goes to review, and waits for it to publish. It
 prints each new status once, then the dataset's URL, or the status with its findings and events
@@ -38,6 +43,7 @@ TIMEOUT_SECONDS = 15 * 60.0
 STOPPED = ("needs-changes", "rejected", "failed", "expired", "abandoned")
 HTTP_SECONDS = 60
 UPLOAD_SECONDS = 300
+NEEDED = ("contributor", "curator")
 
 Send = Callable[[str, str, dict[str, str], bytes | None], tuple[int, bytes]]
 
@@ -118,6 +124,20 @@ class Seed:
         if status != expect:
             raise Failed(f"{method} /api/submissions{path} answered {status}: {raw[:300]!r}")
         return json.loads(raw) if raw else None
+
+    def roles(self) -> None:
+        """Refuse an account that lacks a role the seed uses, before anything is submitted."""
+        url = f"https://{self.domain}/api/whoami"
+        status, raw = self.send("GET", url, {"Authorization": self.token}, None)
+        if status != 200:
+            raise Failed(f"GET /api/whoami answered {status}: {raw[:300]!r}")
+        held = [str(group) for group in json.loads(raw).get("groups", [])]
+        if not set(NEEDED) <= set(held):
+            raise Failed(
+                "the seed submits as a contributor and approves as a curator, and this account "
+                f"holds {', '.join(sorted(held)) or 'no role'}: give it both roles with "
+                "just set-roles <stage> <email> admin,curator,contributor, then run the seed again"
+            )
 
     def submit(self, folder: Path) -> str:
         created = self.call("POST", body={"files": file_list(folder)}, expect=201)
@@ -213,6 +233,11 @@ def main(
         print(f"sign-in failed: {error}")
         return 1
     seed = Seed(args.domain, tokens.id_token, send, sleep, clock, poll_seconds, timeout_seconds)
+    try:
+        seed.roles()
+    except (Failed, OSError) as error:
+        print(error)
+        return 1
     stopped = False
     for folder in args.package or [SAMPLE]:
         print(f"{folder.name}:")
