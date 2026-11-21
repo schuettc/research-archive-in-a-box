@@ -4,7 +4,7 @@
 
 research-archive-in-a-box is a kit for running a research data archive: a place where a research group publishes its datasets so that other people can find, cite and download them. A field station, for example, can use it to check its plot data on a laptop, submit it to its own archive in its own AWS account, have a curator review it, and publish it at a stable address with a search page, a citation and, if it wants, a DOI (a Digital Object Identifier, a permanent link such as `https://doi.org/10.1234/abcd` that keeps resolving even if the archive moves).
 
-![The search page of an example archive, the Invented Research Cooperative: its introduction, a search box, filters by access, licence and format, and two published datasets.](docs/images/reading-room.png)
+![The search page of an example archive, the Invented Research Cooperative: its introduction, a search box, filters by access, licence and format, and the first of its six published datasets.](docs/images/demo-browse.png)
 
 This 95-second video, with captions and no sound, follows one dataset from a laptop to a published page: an agent checks, fixes and submits it, a curator approves it, and it is published with a citation.
 
@@ -22,6 +22,14 @@ If you are submitting a dataset to an archive someone else runs, start with [the
 A dataset travels as a package. A package is a plain folder holding the data files, a manifest called `datapackage.json` that describes them (title, description, contributors, licence, and every column of every table), and `checksums.sha256`, which records a SHA-256 checksum of each file so that a changed or damaged file is noticed. The folder [`examples/sample-package`](examples/sample-package) is one: hourly stream temperatures from three invented sites. The manifest follows the [Frictionless Data Package](https://datapackage.org/) standard, so other tools that read Frictionless packages can read it too. [docs/guide/packages.md](docs/guide/packages.md) explains how to make one from a CSV file.
 
 ## Three ways in
+
+A dataset's path, in four pictures:
+
+| 1. Claude Code checks a package and drafts a fix                                                                                                                                                                                           | 2. The archive checks it again before upload                                                                                                                                                                                                |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ![A Claude Code session with the cruise plugin: it has checked the plot-survey package, reports one error, a missing title, with a drafted title, and one warning, and asks before changing anything.](docs/images/demo-agent-session.png) | ![The Submit a package page: the dataset, its files matching their checksums, Checks before upload with one warning, and the Upload and submit button.](docs/images/demo-submit-checks.png)                                                 |
+| **3. A curator reviews it**                                                                                                                                                                                                                | **4. It is published, with every column described and a citation**                                                                                                                                                                          |
+| ![The review queue: tabs for Needs a decision, Being checked, Changes requested, Publishing and Finished, with two submissions waiting for a curator.](docs/images/demo-review-queue.png)                                                  | ![A published dataset's page, signed out: the title, description, files, a citation to copy, each column with its type, unit and description, and the dataset's creators, methods, rights and coverage.](docs/images/demo-dataset-page.png) |
 
 ### Use the Claude Code plugin
 
@@ -59,13 +67,7 @@ Running an archive incurs AWS costs in your own account; [docs/guide/running-cos
 
 Clone your fork, open it in Claude Code and ask it to set up the archive. Its `deploy-archive` skill (in `.claude/skills/deploy-archive/`) checks these prerequisites, writes `archive.yaml` with you, connects GitHub Actions to your AWS account, and pushes to `main`. From then on CI (the repository's GitHub Actions workflow) deploys every stage on each push to `main`; you never deploy the archive from your laptop. The skill also makes the first admin, publishes a seed dataset and checks the site answers. [docs/guide/deploying.md](docs/guide/deploying.md) walks through each step, and [docs/guide/archive-yaml.md](docs/guide/archive-yaml.md) lists every setting in `archive.yaml`.
 
-![A dataset's page on the example archive: the title, the creator, the publish date and version, a curator's Correct details and Withdraw buttons, the description, and Download all.](docs/images/dataset-page.png)
-
 Once it runs, people use it through the web app by role. A reader searches and downloads; a contributor submits packages; a curator reviews submissions in the review queue and publishes them; an admin gives people roles and decides who may see restricted data. Anyone can create an account, unless the archive is set to invitation only, and a new account has no role until an admin gives it one. [docs/guide/using-the-archive.md](docs/guide/using-the-archive.md) describes each role's screens, and [docs/guide/running-cost.md](docs/guide/running-cost.md) explains what costs money while it runs.
-
-![The review queue: tabs for Needs a decision, Being checked, Changes requested, Publishing and Finished, with one submission waiting for a curator.](docs/images/review-queue.png)
-
-![An admin's Settings, on the Review policy tab: whether review is required, the rules, and the named reviewers.](docs/images/settings.png)
 
 ### Check a package with cruise
 
