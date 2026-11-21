@@ -3,7 +3,8 @@
 Structure only: the manifest parses, every reference points at something that exists, every
 listed file has its size and hash recorded and they match, and `checksums.sha256` matches the
 files. A vector resource's `archive:attributes` must name the columns of its `.dbf`, read
-from the header alone. A CSV table's header row must hold its schema's field names, in order.
+from the header alone. A CSV or TSV table's header row must hold its schema's field names, in
+order, read in the encoding and with the delimiter and quote character its manifest declares.
 Quality is the audit's business, not this module's.
 
 Symlinks are refused wherever they appear and never followed, so nothing outside the package
@@ -12,13 +13,13 @@ package: they are not walked, listed or read, and a manifest or `checksums.sha25
 one is refused.
 """
 
+import codecs
 import csv
 import hashlib
 import json
 import os
 import struct
 from pathlib import Path, PurePosixPath
-from typing import Any
 
 from pydantic import ValidationError
 
@@ -137,6 +138,36 @@ def is_csv_table(resource: Resource) -> bool:
     if resource.format is not None:
         return resource.format.lower() == "csv"
     return isinstance(resource.path, str) and resource.path.lower().endswith(".csv")
+
+
+def is_tsv_table(resource: Resource) -> bool:
+    """Whether the resource is read as a TSV table: its `format` says tsv, or it states no
+    format and its one path ends in `.tsv`."""
+    if resource.format is not None:
+        return resource.format.lower() == "tsv"
+    return isinstance(resource.path, str) and resource.path.lower().endswith(".tsv")
+
+
+def table_codec(resource: Resource) -> str | None:
+    """Python's name for the encoding the resource declares, UTF-8 when it declares none; None
+    when Python knows no text encoding by that name."""
+    try:
+        info = codecs.lookup(resource.encoding or "utf-8")
+    except LookupError:
+        return None
+    # A codec such as rot13 or base64 transforms text or bytes; it is not a text encoding.
+    if not getattr(info, "_is_text_encoding", True):
+        return None
+    return info.name
+
+
+def table_dialect(resource: Resource) -> tuple[str, str, bool]:
+    """How a CSV or TSV table's rows are split: its delimiter (a tab for a TSV table and a
+    comma otherwise, unless its dialect names one), its quote character, and whether its first
+    row is a header."""
+    dialect = resource.dialect or {}
+    delimiter = str(dialect.get("delimiter", "\t" if is_tsv_table(resource) else ","))
+    return delimiter, str(dialect.get("quoteChar", '"')), bool(dialect.get("header", True))
 
 
 def _digest(path: Path, algorithm: str) -> str:
@@ -335,26 +366,28 @@ def _check_attributes(root: Path, manifest: Manifest) -> list[Finding]:
     return findings
 
 
-def _header_row(file: Path, dialect: dict[str, Any]) -> list[str] | None:
+def _header_row(file: Path, resource: Resource) -> list[str] | None:
     """The file's first row, or None when it can't be read here.
 
-    A file that is not UTF-8, or a delimiter or quote character the `csv` module refuses (it
-    takes exactly one character), is left to the table reader, which reports what it can't read.
+    A file that is not in its declared encoding, an encoding Python does not know, or a
+    delimiter or quote character the `csv` module refuses (it takes exactly one character), is
+    left to the table reader, which reports what it can't read.
     """
+    codec = table_codec(resource)
+    if codec is None:
+        return None
+    delimiter, quote, _ = table_dialect(resource)
     try:
-        with file.open(encoding="utf-8-sig", newline="") as stream:
-            reader = csv.reader(
-                stream,
-                delimiter=str(dialect.get("delimiter", ",")),
-                quotechar=str(dialect.get("quoteChar", '"')),
-            )
-            return next(reader, [])
-    except (UnicodeDecodeError, csv.Error, TypeError, ValueError, OSError):
+        with file.open(encoding=codec, newline="") as stream:
+            if stream.read(1) != "\ufeff":
+                stream.seek(0)
+            return next(csv.reader(stream, delimiter=delimiter, quotechar=quote), [])
+    except (UnicodeError, csv.Error, TypeError, ValueError, OSError):
         return None
 
 
 def _check_headers(root: Path, manifest: Manifest) -> list[Finding]:
-    """A CSV table's header row against its schema's field names, exactly and in order.
+    """A CSV or TSV table's header row against its schema's field names, exactly and in order.
 
     One finding per resource, for the first difference. A table whose dialect says it has no
     header row is not compared. A byte order mark before the first name is not part of it.
@@ -363,16 +396,17 @@ def _check_headers(root: Path, manifest: Manifest) -> list[Finding]:
     for resource in manifest.resources:
         schema = resource.table_schema
         path = resource.path
-        if schema is None or not schema.fields or not is_csv_table(resource):
+        if schema is None or not schema.fields:
+            continue
+        if not is_csv_table(resource) and not is_tsv_table(resource):
             continue
         if not isinstance(path, str) or not readable_member(root, path):
             continue
         if not (root / path).is_file():
             continue
-        dialect = resource.dialect or {}
-        if not bool(dialect.get("header", True)):
+        if not table_dialect(resource)[2]:
             continue
-        header = _header_row(root / path, dialect)
+        header = _header_row(root / path, resource)
         if header is None:
             continue
         declared = schema.field_names()

@@ -16,7 +16,13 @@ from typing import Any
 import duckdb
 
 from archive_contract.resources import Resource
-from archive_contract.validate import is_csv_table, readable_member
+from archive_contract.validate import (
+    is_csv_table,
+    is_tsv_table,
+    readable_member,
+    table_codec,
+    table_dialect,
+)
 
 RESERVED = "cruise:"
 """The prefix of every name the reader and the rules give a column of their own. No column of
@@ -63,16 +69,12 @@ def _codec(resource: Resource) -> tuple[str, str]:
     """Python's name for the resource's declared encoding (UTF-8 when it declares none), and the
     name a message gives it."""
     declared = resource.encoding or "utf-8"
-    try:
-        info = codecs.lookup(declared)
-    except LookupError:
-        info = None
-    # A codec such as rot13 or base64 transforms text or bytes; it is not a text encoding.
-    if info is None or not getattr(info, "_is_text_encoding", True):
+    name = table_codec(resource)
+    if name is None:
         raise MalformedTable(
             f"{NOT_KNOWN_ENCODING}{declared}; name one such as utf-8, latin-1 or cp1252"
         )
-    return info.name, "UTF-8" if info.name == "utf-8" else declared
+    return name, "UTF-8" if name == "utf-8" else declared
 
 
 def _is_utf8_text(path: Path) -> bool:
@@ -134,14 +136,6 @@ def _utf8_copy(path: Path, codec: str, label: str, connection: duckdb.DuckDBPyCo
     return name
 
 
-def _is_tsv(resource: Resource) -> bool:
-    """Whether the resource is a TSV table: its `format` says tsv, or it states no format and
-    its one path ends in `.tsv`."""
-    if resource.format is not None:
-        return resource.format.lower() == "tsv"
-    return isinstance(resource.path, str) and resource.path.lower().endswith(".tsv")
-
-
 def connect() -> duckdb.DuckDBPyConnection:
     """An in-memory DuckDB that never installs or loads an extension, so never fetches one."""
     return duckdb.connect(
@@ -183,8 +177,7 @@ def read_table(
     `.tsv`. The file is read in the resource's declared encoding, UTF-8 when it declares none:
     DuckDB reads UTF-8 and ASCII from the file itself, and any other encoding from a UTF-8 copy.
     """
-    tsv = _is_tsv(resource)
-    if not is_csv_table(resource) and not tsv:
+    if not is_csv_table(resource) and not is_tsv_table(resource):
         raise UnreadableTable(
             f"{resource.name} is {resource.format!r}; only csv and tsv tables are read"
         )
@@ -204,10 +197,7 @@ def read_table(
                 f"{resource.name} has a column named {name!r}; names that start with "
                 f"{RESERVED!r} are kept for the reader"
             )
-    dialect = resource.dialect or {}
-    delimiter = str(dialect.get("delimiter", "\t" if tsv else ","))
-    quote = str(dialect.get("quoteChar", '"'))
-    header = bool(dialect.get("header", True))
+    delimiter, quote, header = table_dialect(resource)
     codec, label = _codec(resource)
     missing = [str(v) for v in (schema.missing_values or DEFAULT_MISSING_VALUES)]
     columns = "{" + ", ".join(f"{quote_literal(f.name)}: 'VARCHAR'" for f in schema.fields) + "}"

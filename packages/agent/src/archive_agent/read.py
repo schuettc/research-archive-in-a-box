@@ -98,6 +98,22 @@ AGENT_FILE = (
 EXISTS = "a file is already there; call download again with overwrite set to true to replace it"
 
 
+def _folder(to: str) -> Path:
+    """The folder to write under. One inside a hidden folder (`.claude`, `.git/hooks`) is refused,
+    since a plain name such as `settings.json` would become that tool's own file there. The
+    parts are judged below the working folder when `to` is inside it, so a project kept under a
+    hidden folder can still be downloaded into."""
+    root = Path(to).expanduser().resolve()
+    here = Path.cwd().resolve()
+    below = root.relative_to(here) if root.is_relative_to(here) else root
+    if any(part.startswith(".") for part in below.parts):
+        raise LocalError(
+            f"{root} is, or is inside, a hidden folder (one whose name starts with a dot), and "
+            "download never writes there, so nothing was downloaded. Choose another folder."
+        )
+    return root
+
+
 def _target(root: Path, path: str) -> Path:
     pure = PurePosixPath(path)
     target = (root / Path(*pure.parts)).resolve() if pure.parts else root
@@ -125,7 +141,7 @@ def download(
     file already there are not fetched and are listed under `skipped` with the reason; a file
     that was there and was written over is listed under `replaced`.
     """
-    root = Path(to).expanduser().resolve()
+    root = _folder(to)
     targets = {path: _target(root, path) for path in paths}
     archive = session.archive()
     found: dict[str, Any] = archive.get(f"/api/datasets/{_quote(id)}/versions/{version}")

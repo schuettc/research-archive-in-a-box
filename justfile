@@ -193,7 +193,7 @@ smoke stage domain="":
     fi
     python3 scripts/smoke.py "$domain"
 
-# Publish the sample package on the stage as its admin, signed in in the browser, and wait for it
+# Publish the sample package on the stage, signed in in the browser as a contributor and curator, and wait for it
 seed stage:
     #!/usr/bin/env bash
     set -euo pipefail

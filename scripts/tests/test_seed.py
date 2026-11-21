@@ -44,11 +44,17 @@ class FakeArchive:
         self.sids: list[str] = []
         self.reads: dict[str, int] = {}
         self.unreachable_report = False
+        self.groups = ["admin", "contributor", "curator"]
         self.calls: list[tuple[str, str, dict[str, str], Any]] = []
 
     def __call__(
         self, method: str, url: str, headers: dict[str, str], data: bytes | None
     ) -> tuple[int, bytes]:
+        if (method, url) == ("GET", f"https://{DOMAIN}/api/whoami"):
+            assert headers.get("Authorization") == ID_TOKEN
+            return 200, json.dumps(
+                {"sub": "s", "email": "a@b.example", "groups": self.groups}
+            ).encode()
         body: Any = json.loads(data) if data and url.startswith(BASE) else data
         self.calls.append((method, url, headers, body))
         if url.startswith("https://uploads.example/"):
@@ -172,6 +178,23 @@ def test_a_policy_that_skips_review_publishes_with_no_decision(
     ]
     assert all(c[2]["x-amz-checksum-sha256"].startswith("b64-") for c in puts)
     assert puts[0][3] == b"t,v\n1,2\n"
+
+
+def test_an_admin_with_no_contributor_role_is_told_which_roles_the_seed_needs(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    archive = FakeArchive([{"status": "published", "datasetId": DATASET}], [])
+    archive.groups = ["admin"]
+
+    code = _run(archive, _package(tmp_path))
+
+    assert code == 1
+    assert archive.calls == []
+    assert capsys.readouterr().out.splitlines()[-1] == (
+        "the seed submits as a contributor and approves as a curator, and this account holds "
+        "admin: give it both roles with just set-roles <stage> <email> "
+        "admin,curator,contributor, then run the seed again"
+    )
 
 
 def test_in_review_is_approved_once_its_wait_is_open_then_published(

@@ -295,16 +295,28 @@ test("/data sends HSTS for a year and a strict-origin referrer too", () => {
   expect(headers.ReferrerPolicy).toEqual(REFERRER);
 });
 
-test("the site's behaviour carries the policy; /api doesn't", () => {
+test("the site's behaviour carries the site's policy", () => {
   const { archive: a, stack, template } = archive();
   const config = distributionConfig(a, stack, template);
-  const behaviour = (path: string) =>
-    (config.CacheBehaviors as Json[]).find((b) => b.PathPattern === path);
 
   expect((config.DefaultCacheBehavior as Json).ResponseHeadersPolicyId).toEqual({
     Ref: siteHeaders(template).id,
   });
-  expect(behaviour("/api/*")?.ResponseHeadersPolicyId).toBeUndefined();
+});
+
+// API answers are JSON, so they need no content policy, only HTTPS and no sniffing.
+test("/api sends HSTS for a year and nosniff, in a policy of its own", () => {
+  const { archive: a, stack, template } = archive();
+  const config = distributionConfig(a, stack, template);
+  const api = (config.CacheBehaviors as Json[]).find((b) => b.PathPattern === "/api/*");
+  const id = (api?.ResponseHeadersPolicyId as Json | undefined)?.Ref as string;
+
+  expect(id).toBeDefined();
+  expect(id).not.toBe(siteHeaders(template).id);
+  expect(securityHeaders(template, id)).toEqual({
+    StrictTransportSecurity: HSTS,
+    ContentTypeOptions: { Override: true },
+  });
 });
 
 test("with no domain the distribution has no aliases and no viewer certificate", () => {
