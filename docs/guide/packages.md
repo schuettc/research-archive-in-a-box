@@ -43,7 +43,7 @@ Its `_build/` folder holds the script that generated it. `cruise` leaves the top
 uv tool install "git+https://github.com/schuettc/research-archive-in-a-box@v0.1.2#subdirectory=packages/tool"
 ```
 
-`cruise --version` then prints `cruise 0.1.2`. Inside a clone of this repository, `uv run cruise` runs it without installing anything.
+`cruise --version` then prints `cruise 0.1.2`. Inside a clone of this repository, run `uv sync --all-packages` once, as [Contributing](../../CONTRIBUTING.md#set-up) says, and `uv run cruise` then runs it from the source.
 
 `cruise` has three commands:
 
