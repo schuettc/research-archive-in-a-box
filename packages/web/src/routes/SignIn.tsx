@@ -304,6 +304,12 @@ export function SignIn() {
       send(async () => {
         const answer = await signInWithPassword(email, password);
         if (answer.next === "new-password") go({ name: "new-password", session: answer.session });
+        // Keep the password: confirming the code signs in with it, as after Create an account.
+        if (answer.next === "confirm")
+          setStep({
+            name: "code",
+            notice: `This account isn't confirmed yet. We've sent a new code to ${email}.`,
+          });
       });
     } else if (step.name === "new-password") {
       if (matching()) send(() => setFirstPassword({ email, session: step.session }, password));

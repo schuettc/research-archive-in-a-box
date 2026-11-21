@@ -27,9 +27,12 @@ export interface AuthAnswer {
   Session?: string;
 }
 
-/** Where a password sign-in stands: signed in, or an invited person must choose a password. */
+/**
+ * Where a password sign-in stands: signed in, an invited person must choose a password, or an
+ * account never confirmed has been sent a new code to confirm it with.
+ */
 export type SignInStep =
-  { next: "done" } | { next: "new-password"; email: string; session: string };
+  { next: "done" } | { next: "new-password"; email: string; session: string } | { next: "confirm" };
 
 const SESSION_KEY = "archive-sign-in";
 // Renew this long before the tokens run out, so a request never carries one that just did.
@@ -202,12 +205,23 @@ document.addEventListener("visibilitychange", () => {
 
 const live = (): Session | null => (session && session.expiresAt > Date.now() ? session : null);
 
-/** Sign in with an email and password through Cognito's choice-based sign-in. */
+/**
+ * Sign in with an email and password through Cognito's choice-based sign-in. An account created
+ * but never confirmed is sent a new code, which `confirmSignUp` takes before signing in again.
+ */
 export async function signInWithPassword(email: string, password: string): Promise<SignInStep> {
-  const answer = (await asWebClient("InitiateAuth", {
-    AuthFlow: "USER_AUTH",
-    AuthParameters: { USERNAME: email, PREFERRED_CHALLENGE: "PASSWORD", PASSWORD: password },
-  })) as AuthAnswer;
+  let answer: AuthAnswer;
+  try {
+    answer = (await asWebClient("InitiateAuth", {
+      AuthFlow: "USER_AUTH",
+      AuthParameters: { USERNAME: email, PREFERRED_CHALLENGE: "PASSWORD", PASSWORD: password },
+    })) as AuthAnswer;
+  } catch (error) {
+    if (!(error instanceof CognitoRefused && error.type === "UserNotConfirmedException"))
+      throw error;
+    await resendCode(email);
+    return { next: "confirm" };
+  }
   return step(email, answer);
 }
 
