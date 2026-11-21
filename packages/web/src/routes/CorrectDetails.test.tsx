@@ -5,6 +5,7 @@ import axe from "axe-core";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, expect, test, vi, type Mock } from "vitest";
 import type { DatasetAnswer, VersionAnswer } from "../api";
+import { bibtex } from "../citation";
 import type { Manifest } from "../generated/manifest";
 import { CorrectDetails } from "./CorrectDetails";
 
@@ -152,7 +153,14 @@ test("the form holds the stored values, a row per creator and per grant", async 
   expect((within(creator(1)).getByLabelText(/^Affiliation/) as HTMLInputElement).value).toBe(
     "https://ror.org/03yrm5c26",
   );
-  expect((within(creator(2)).getByLabelText("Name") as HTMLInputElement).value).toBe("Bo Example");
+  expect((within(creator(1)).getByLabelText("Name") as HTMLInputElement).value).toBe(
+    "Ada Invented",
+  );
+  expect(within(creator(2)).queryByLabelText("Name")).toBeNull();
+  expect((within(creator(2)).getByLabelText("Given name") as HTMLInputElement).value).toBe("Bo");
+  expect((within(creator(2)).getByLabelText("Family name") as HTMLInputElement).value).toBe(
+    "Example",
+  );
   expect(
     (screen.getByLabelText(/^Related publications and data/) as HTMLTextAreaElement).value,
   ).toBe("Is cited by doi:10.5072/example.paper");
@@ -230,21 +238,69 @@ test("a creator's iD added sends the whole contributors list, the non-creator ke
   ]);
 });
 
-test("a renamed creator loses the given and family names; a plain affiliation drops the ROR id", async () => {
+test("a whole-name creator renamed keeps one name; a plain affiliation drops the ROR id", async () => {
   await form();
 
   type(within(creator(1)).getByLabelText(/^Affiliation/), "Another Lab");
-  type(within(creator(2)).getByLabelText("Name"), "Bo Examplé");
+  type(within(creator(1)).getByLabelText("Name"), "Ada Invented-Smith");
   type(within(creator(1)).getByLabelText("ORCID iD"), "");
   note("Names.");
   save();
 
   await screen.findByText("The version's page");
   expect(sent()[0]!.contributors).toEqual([
-    { title: "Ada Invented", organization: "Another Lab", roles: ["creator"] },
+    { title: "Ada Invented-Smith", organization: "Another Lab", roles: ["creator"] },
     MANIFEST.contributors![1],
-    { organization: "Example Lab", roles: ["creator"], title: "Bo Examplé" },
+    MANIFEST.contributors![2],
   ]);
+});
+
+test("a person's family name corrected keeps the name in parts, so BibTeX reads Family, Given", async () => {
+  await form();
+
+  type(within(creator(2)).getByLabelText("Family name"), "Examplé");
+  note("Fixed Bo's family name.");
+  save();
+
+  await screen.findByText("The version's page");
+  const contributors = sent()[0]!.contributors as Manifest["contributors"];
+  expect(contributors).toEqual([
+    MANIFEST.contributors![0],
+    MANIFEST.contributors![1],
+    { givenName: "Bo", familyName: "Examplé", organization: "Example Lab", roles: ["creator"] },
+  ]);
+  expect(bibtex({ ...MANIFEST, contributors }, "https://site/v2")).toContain(
+    "author = {{Ada Invented} and Examplé, Bo}",
+  );
+});
+
+test("a person whose given name is emptied keeps the family name alone", async () => {
+  await form();
+
+  type(within(creator(2)).getByLabelText("Given name"), " ");
+  note("Bo has one name.");
+  save();
+
+  await screen.findByText("The version's page");
+  expect((sent()[0]!.contributors as unknown[])[2]).toEqual({
+    familyName: "Example",
+    organization: "Example Lab",
+    roles: ["creator"],
+  });
+});
+
+test("a person whose family name is emptied is asked for one, and nothing is sent", async () => {
+  await form();
+  const family = within(creator(2)).getByLabelText("Family name");
+
+  type(family, "");
+  note("Names.");
+  save();
+
+  const error = within(creator(2)).getByText("Give the creator a family name, or remove them.");
+  expect(family.getAttribute("aria-invalid")).toBe("true");
+  expect(family.getAttribute("aria-describedby")).toBe(error.id);
+  expect(sent()).toEqual([]);
 });
 
 test("a ROR-looking affiliation that isn't one says what one looks like", async () => {
@@ -394,7 +450,7 @@ test("a 422 shows against the field it names", async () => {
   );
   await form();
 
-  type(within(creator(2)).getByLabelText("Name"), "Bo E.");
+  type(within(creator(2)).getByLabelText("Family name"), "E.");
   note("Name.");
   save();
 
