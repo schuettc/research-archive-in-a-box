@@ -472,6 +472,7 @@ def with_table(
     primary_key: Any = None,
     table_format: str | None = "csv",
     path: str = "data/t.csv",
+    encoding: str | None = None,
 ) -> Path:
     """The valid fixture with one more table `t`, its file holding the bytes given."""
 
@@ -493,6 +494,8 @@ def with_table(
             resource["format"] = table_format
         if dialect is not None:
             resource["dialect"] = dialect
+        if encoding is not None:
+            resource["encoding"] = encoding
         manifest["resources"].append(resource)
 
     return edited(tmp_path, edit)
@@ -583,6 +586,54 @@ def test_comment_line_before_the_header_is_a_mismatch(tmp_path: Path) -> None:
     root = with_table(tmp_path, b"# Monthly means\na,b\n1,2\n", ["a", "b"])
 
     assert rule_ids(validate_package(root)) == ["structure.header-mismatch"]
+
+
+@pytest.mark.parametrize("table_format", ["tsv", None])
+def test_a_tsv_header_in_another_order_is_a_mismatch(
+    tmp_path: Path, table_format: str | None
+) -> None:
+    root = with_table(
+        tmp_path, b"b\ta\n1\t2\n", ["a", "b"], table_format=table_format, path="data/t.tsv"
+    )
+
+    [finding] = validate_package(root)
+
+    assert finding.rule_id == "structure.header-mismatch"
+    assert finding.message == (
+        "data/t.tsv: column 1 is named 'b' in the file's header row, but the manifest names it 'a'"
+    )
+
+
+def test_a_tsv_header_matching_the_manifest_has_no_findings(tmp_path: Path) -> None:
+    root = with_table(tmp_path, b"a\tb\n1\t2\n", ["a", "b"], table_format="tsv")
+
+    assert validate_package(root) == []
+
+
+def test_a_windows_1252_header_matching_the_manifest_has_no_findings(tmp_path: Path) -> None:
+    csv = "température,b\n1,2\n".encode("cp1252")
+
+    root = with_table(tmp_path, csv, ["température", "b"], encoding="windows-1252")
+
+    assert validate_package(root) == []
+
+
+def test_a_windows_1252_header_that_differs_is_a_mismatch(tmp_path: Path) -> None:
+    csv = "température,b\n1,2\n".encode("cp1252")
+
+    [finding] = validate_package(
+        with_table(tmp_path, csv, ["temperature", "b"], encoding="windows-1252")
+    )
+
+    assert finding.rule_id == "structure.header-mismatch"
+    assert finding.evidence is not None
+    assert finding.evidence.values == ["température", "temperature"]
+
+
+def test_a_table_in_an_encoding_nobody_knows_is_left_to_the_reader(tmp_path: Path) -> None:
+    root = with_table(tmp_path, b"b,a\n1,2\n", ["a", "b"], encoding="klingon")
+
+    assert validate_package(root) == []
 
 
 def test_a_table_that_is_not_utf8_is_left_to_the_reader(tmp_path: Path) -> None:
