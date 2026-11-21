@@ -398,6 +398,19 @@ def test_download_never_writes_into_a_hidden_folder(
     assert fetched(connected) == []
 
 
+@pytest.mark.parametrize("to", [".", "absolute"])
+def test_download_writes_into_the_working_folder_itself(
+    connected: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, to: str
+) -> None:
+    version(connected, "open", {"notes.csv": b"x"})
+    connected.raw("GET /data/d1/3/notes.csv", b"x")
+    monkeypatch.chdir(tmp_path)
+
+    read.download(Session(), "d1", 3, ["notes.csv"], str(tmp_path) if to == "absolute" else to)
+
+    assert (tmp_path / "notes.csv").read_bytes() == b"x"
+
+
 def test_download_writes_into_a_plain_folder_of_a_project_kept_under_a_hidden_one(
     connected: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

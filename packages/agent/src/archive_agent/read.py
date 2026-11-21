@@ -106,7 +106,7 @@ def _folder(to: str) -> Path:
     root = Path(to).expanduser().resolve()
     here = Path.cwd().resolve()
     below = root.relative_to(here) if root.is_relative_to(here) else root
-    if is_hidden(below.as_posix()):
+    if any(part.startswith(".") for part in below.parts):
         raise LocalError(
             f"{root} is, or is inside, a hidden folder (one whose name starts with a dot), and "
             "download never writes there, so nothing was downloaded. Choose another folder."
