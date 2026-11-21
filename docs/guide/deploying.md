@@ -279,7 +279,7 @@ A stage keeps its data unless `archive.yaml` gives it `keepData: false`: its buc
 
 ### A stage with object lock on
 
-With [`objectLock`](archive-yaml.md#infrastructuremodulesobjectlock) on, `just destroy <stage>` stops after about five minutes while any published file version is still locked: the stack reads `DELETE_FAILED`, with "The bucket you tried to delete is not empty" on the archive bucket, and the rest of the stage is already deleted. Ignore the recipe's last lines about emptying `logs/`. Either wait until the lock on every version has ended and run `just destroy <stage>` again, or delete the locked versions yourself, in a shell signed in to the stage's account with the `s3:BypassGovernanceRetention` permission. This deletes every published file of the stage for good.
+With [`objectLock`](archive-yaml.md#infrastructuremodulesobjectlock) on, `just destroy <stage>` stops after about five minutes while any published file version is still locked: the stack reads `DELETE_FAILED`, with "The bucket you tried to delete is not empty" on the archive bucket, and nearly all of the rest of the stage is already deleted. Ignore the recipe's last lines about emptying `logs/`. The versions stay in the bucket after their locks end, so waiting alone doesn't finish it: delete them yourself, in a shell signed in to the stage's account, then destroy again. While any version is still locked this needs the `s3:BypassGovernanceRetention` permission; once every lock has ended, leave `--bypass-governance-retention` out. This deletes every published file of the stage for good.
 
 1. Name the archive bucket and list everything in it, then read the list:
 
@@ -292,7 +292,7 @@ With [`objectLock`](archive-yaml.md#infrastructuremodulesobjectlock) on, `just d
    jq -r '[(.Versions//[])[], (.DeleteMarkers//[])[]] | .[] | [.Key, .VersionId] | @tsv' versions.json
    ```
 
-2. Delete what the list names, past the lock. One call takes up to 1,000 versions; for more, use the loop in [deleting data for good](../curating.md#deleting-data-for-good).
+2. Delete what the list names, past the lock. One call takes up to 1,000 versions; for more, save step 1's last command's output as `versions.txt` and use the loop in step 4 of [deleting data for good](../curating.md#deleting-data-for-good).
 
    ```bash
    jq -c '{Objects: [(.Versions//[])[], (.DeleteMarkers//[])[] | {Key, VersionId}], Quiet: false}' versions.json > batch.json
