@@ -79,13 +79,34 @@ def _files(root: Path) -> list[dict[str, Any]]:
 
 @dataclass(frozen=True)
 class Package:
-    """A package folder checked and ready to send: its files, their total size in bytes and
-    the archive it goes to."""
+    """A package folder checked and ready to send: its files, their total size in bytes, the
+    archive it goes to and the published dataset it versions, if any."""
 
     root: Path
     files: list[dict[str, Any]]
     total: int
     archive: str
+    version_of: str | None = None
+
+
+def _dataset_id(root: Path) -> str | None:
+    """The manifest's id when the archive takes it as a dataset id, else None."""
+    dataset_id = json.loads((root / MANIFEST).read_text(encoding="utf-8")).get("id")
+    if isinstance(dataset_id, str) and DATASET_ID.fullmatch(dataset_id):
+        return dataset_id
+    return None
+
+
+def _published(session: Session, dataset_id: str | None) -> str | None:
+    """The dataset id when the archive has published it, so the submit is its new version."""
+    if dataset_id is None:
+        return None
+    try:
+        session.archive().get(f"/api/datasets/{_quote(dataset_id)}")
+    except ArchiveError:
+        # Not published (404), or not readable now: the dialog says no more than before.
+        return None
+    return dataset_id
 
 
 def prepare(session: Session, folder: str) -> Package:
@@ -109,7 +130,10 @@ def prepare(session: Session, folder: str) -> Package:
             f"The package's files total {total:,} bytes, more than the {limit // 1024**3} GiB "
             "this archive takes, so nothing was sent."
         )
-    return Package(root=root, files=files, total=total, archive=session.url())
+    version_of = _published(session, _dataset_id(root))
+    return Package(
+        root=root, files=files, total=total, archive=session.url(), version_of=version_of
+    )
 
 
 def send(session: Session, package: Package, submission: str | None = None) -> dict[str, Any]:
@@ -124,8 +148,8 @@ def send(session: Session, package: Package, submission: str | None = None) -> d
         # The manifest's id names the dataset: a published one gets its next version. An id
         # the archive doesn't take as a dataset id is left out; the archive assigns one.
         body: dict[str, Any] = {"files": files}
-        dataset_id = json.loads((root / "datapackage.json").read_text(encoding="utf-8")).get("id")
-        if isinstance(dataset_id, str) and DATASET_ID.fullmatch(dataset_id):
+        dataset_id = _dataset_id(root)
+        if dataset_id is not None:
             body["datasetId"] = dataset_id
         started = archive.post("/api/submissions", body, group=CONTRIBUTOR)
     else:

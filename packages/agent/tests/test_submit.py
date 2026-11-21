@@ -200,6 +200,18 @@ def test_submit_names_the_contributor_group_on_a_403(
         submit.submit(session, str(package))
 
 
+def test_submit_leads_with_the_archives_reason_on_a_403(
+    connected: Any, package: Path, session: Session
+) -> None:
+    reason = "only stream-temperature-sample's submitter or a curator may version it"
+    connected.json("POST /api/submissions", {"error": reason}, 403)
+
+    with pytest.raises(NotAllowed) as refused:
+        submit.submit(session, str(package))
+
+    assert str(refused.value) == f"{connected.url} refused this: {reason}."
+
+
 def test_submissions_with_queue_reads_the_curator_queue_stale_first(
     connected: Any, curator: Session
 ) -> None:
@@ -501,6 +513,22 @@ def test_submit_asks_with_the_archive_the_files_and_their_size_and_sends_on_acce
         "/api/submissions",
         "/api/submissions/s1/submit",
     ]
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_submit_says_it_is_a_new_version_when_the_manifests_id_is_published(
+    connected: Any, package: Path, session: Session, mode: str
+) -> None:
+    connected.json(
+        "GET /api/datasets/stream-temperature-sample",
+        {"id": "stream-temperature-sample", "currentVersion": 1},
+    )
+
+    _, asked = call(session, "submit", {"folder": str(package)}, "decline", mode)
+
+    assert asked[0].endswith(
+        f"to {connected.url} as a new version of stream-temperature-sample for review?"
+    )
 
 
 @pytest.mark.parametrize("mode", MODES)
