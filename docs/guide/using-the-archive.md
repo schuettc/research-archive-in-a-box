@@ -24,7 +24,7 @@ One person can hold any of them; the archive's first admin holds all three. The 
 
 The front page, **Browse**, lists the archive's datasets, with the archive's introduction above them when it has one.
 
-![The Browse page of an example archive: its introduction, the search box, the Access, Licence and Format filters on the left, and two datasets in the results.](../images/reading-room.png)
+![The Browse page of an example archive, signed out: its introduction, the search box, the Access, Licence and Format filters on the left, and the first of six datasets in the results.](../images/demo-browse.png)
 
 The search box takes a title, a keyword, a creator or a column name. Beside the results, filters narrow them by:
 
@@ -42,7 +42,7 @@ A newly published dataset can take a few minutes to appear on Browse and in sear
 
 A dataset's page, at `/datasets/<id>`, shows:
 
-![The top of a dataset's page, seen by a curator: the title, the creator, the publish date and version, the Correct details and Withdraw buttons, the description, and a summary line with Download all.](../images/dataset-page.png)
+![A dataset's page, signed out: the title, the creator, the publish date, version and licence, the description, a summary line with Download all, the files, Cite this dataset, the columns with their types, units and descriptions, and the About section.](../images/demo-dataset-page.png)
 
 
 - the title, the version shown, and the total downloads once there are any;
@@ -142,7 +142,7 @@ A new version of a published dataset is submitted the same way, from the folder 
 - **Publishing**: approved and being published;
 - **Finished**: published, rejected, abandoned, expired or failed.
 
-![The review queue's Needs a decision tab with one submission: its dataset and id, who submitted it, how long it has waited, its round, its kind, its approvals and who it is assigned to.](../images/review-queue.png)
+![The review queue's Needs a decision tab with two submissions: each one's dataset and id, who submitted it, how long it has waited, its round, its kind, its approvals and who it is assigned to.](../images/demo-review-queue.png)
 
 Above the list, **Search** finds a submission by its dataset's title or id, or its submitter, and the **Show** filters narrow the tab to submissions **Assigned to me** (where you are a named reviewer for the dataset's theme), **New datasets**, **New versions**, or **Stale** ones, waiting longer than the review policy allows. The list can be sorted by dataset, submitter or how long it has waited. The queue reads itself again every 10 seconds while the tab is open, and marks a submission that just arrived. The tab, the search, the filters and the sort are kept in the page's address, so a link to a filtered queue opens it the same way.
 
