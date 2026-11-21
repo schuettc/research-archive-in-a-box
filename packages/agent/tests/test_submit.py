@@ -335,6 +335,65 @@ def test_submission_files_names_the_curator_group_on_a_403(
         submit.submission_files(session, "s1")
 
 
+def held(stub: Any, files: dict[str, bytes]) -> None:
+    """Answer s1's files route as submissions.py does, each file behind a link on the stub."""
+    listing = []
+    for path, data in files.items():
+        link = f"/held/s1/2/{path}"
+        stub.raw(f"GET {link}", data)
+        listing.append(
+            {"path": path, "size": len(data), "sha256": "ab" * 32, "url": stub.url + link}
+        )
+    stub.json("GET /api/submissions/s1/files", {"round": 2, "files": listing})
+
+
+def test_read_submission_file_answers_the_manifest_whole(connected: Any, curator: Session) -> None:
+    manifest = json.dumps({"id": "x", "title": "A dataset"}, indent=2) + "\n" * 40
+    held(connected, {"datapackage.json": manifest.encode()})
+
+    answer = submit.read_submission_file(curator, "s1", "datapackage.json")
+
+    assert answer["text"] == manifest
+    assert answer["round"] == 2
+    fetched = connected.seen[-1]
+    assert fetched.path == "/held/s1/2/datapackage.json"
+    assert "range" not in fetched.headers
+    assert "authorization" not in fetched.headers
+
+
+def test_read_submission_file_cuts_a_table_to_its_first_rows_asking_for_a_range(
+    connected: Any, curator: Session
+) -> None:
+    table = "".join(f"{n},{n * 2}\n" for n in range(1000))
+    held(connected, {"data/logger.csv": table.encode()})
+
+    answer = submit.read_submission_file(curator, "s1", "data/logger.csv", rows=3)
+
+    assert answer["text"] == "0,0\n1,2\n2,4\n"
+    assert answer["cut"] is True
+    assert connected.seen[-1].headers["range"] == "bytes=0-65535"
+
+
+def test_read_submission_file_refuses_a_manifest_over_the_cap_without_fetching_it(
+    connected: Any, curator: Session
+) -> None:
+    held(connected, {"datapackage.json": b" " * (submit.MANIFEST_CAP + 1)})
+
+    with pytest.raises(Refused, match="more than the 1 MiB"):
+        submit.read_submission_file(curator, "s1", "datapackage.json")
+
+    assert [s.path for s in connected.seen] == ["/api/submissions/s1/files"]
+
+
+def test_read_submission_file_says_a_binary_file_isnt_text(
+    connected: Any, curator: Session
+) -> None:
+    held(connected, {"data/photo.png": b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"})
+
+    with pytest.raises(Refused, match="isn't text"):
+        submit.read_submission_file(curator, "s1", "data/photo.png")
+
+
 def test_a_package_over_the_archives_limit_is_refused_before_anything_is_sent(
     connected: Any, session: Session, package: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

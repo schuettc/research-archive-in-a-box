@@ -1,4 +1,5 @@
-"""Submitting and reviewing: submit, submissions, submission_files and decide.
+"""Submitting and reviewing: submit, submissions, submission_files, read_submission_file and
+decide.
 
 The request and answer shapes are those of `archive_backend.submissions` (Plan 7).
 """
@@ -24,6 +25,11 @@ DECISIONS = ("approve", "reject", "request-changes")
 DATASET_ID = re.compile(r"[A-Za-z0-9_-]{1,200}")
 """The dataset ids the archive's create takes (`archive_backend.submissions.create`)."""
 CHUNK = 1024 * 1024
+MANIFEST = "datapackage.json"
+MANIFEST_CAP = 1024 * 1024
+"""The largest manifest read_submission_file answers whole."""
+SAMPLE = 64 * 1024
+"""How much of any other file read_submission_file asks for: the first 64 KiB."""
 
 
 def _quote(segment: str) -> str:
@@ -205,6 +211,60 @@ def submission_files(session: Session, id: str) -> dict[str, Any]:
             f"with its id to see where it stands. ({exc})"
         ) from exc
     return files
+
+
+def _text(data: bytes, cut: bool) -> str | None:
+    """The bytes as UTF-8 text, or None when they aren't text. A sample cut in the middle of a
+    character keeps the whole characters before it."""
+    if b"\x00" in data:
+        return None
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        if cut and exc.start >= len(data) - 3:
+            return data[: exc.start].decode("utf-8", "replace")
+        return None
+
+
+def read_submission_file(session: Session, id: str, path: str, rows: int = 20) -> dict[str, Any]:
+    """One file of a submission in review: datapackage.json whole, any other file as its first
+    `rows` lines, read from at most its first 64 KiB."""
+    if rows < 1:
+        raise Refused(f"rows is {rows}; give 1 or more.")
+    archive = session.archive()
+    for attempt in (1, 2):
+        listing = submission_files(session, id)
+        entry = next((f for f in listing.get("files", []) if f.get("path") == path), None)
+        if entry is None:
+            raise Refused(
+                f"Submission {id}'s current round has no file {path}. Call submission_files "
+                "for its paths."
+            )
+        size = int(entry.get("size", 0))
+        whole = path == MANIFEST
+        if whole and size > MANIFEST_CAP:
+            raise Refused(
+                f"Submission {id}'s {MANIFEST} is {size:,} bytes, more than the 1 MiB this tool "
+                "reads, so it wasn't read."
+            )
+        headers = {} if whole else {"Range": f"bytes=0-{SAMPLE - 1}"}
+        try:
+            data = archive.fetch(str(entry["url"]), headers)
+            break
+        except NotAllowed:
+            # The link lasts five minutes; an expired one gets a fresh list, once.
+            if attempt == 2:
+                raise
+    # A storage that ignores the Range answers the whole file; keep only the sample.
+    cut = not whole and (len(data) > SAMPLE or size > SAMPLE)
+    text = _text(data[:SAMPLE] if not whole else data, cut)
+    if text is None:
+        raise Refused(f"Submission {id}'s {path} isn't text, so it can't be read here.")
+    answer = {"id": id, "round": listing.get("round"), "path": path, "size": size}
+    if whole:
+        return {**answer, "text": text, "cut": False}
+    lines = text.splitlines(keepends=True)
+    return {**answer, "text": "".join(lines[:rows]), "cut": cut or len(lines) > rows}
 
 
 def decide(session: Session, id: str, decision: str, note: str) -> dict[str, Any]:

@@ -184,7 +184,9 @@ class Archive:
         }
         self._open(urllib.request.Request(link, data=data, headers=sent, method="PUT"), None)
 
-    def fetch(self, link: str) -> bytes:
-        """The bytes at an archive path (`/data/...`) or an absolute link, sent with no token."""
+    def fetch(self, link: str, headers: Mapping[str, str] | None = None) -> bytes:
+        """The bytes at an archive path (`/data/...`) or an absolute link, sent with no token
+        and with `headers` (such as a `Range`)."""
         address = link if link.startswith(("https://", "http://")) else self.url + link
-        return self._open(urllib.request.Request(address, method="GET"), None)
+        request = urllib.request.Request(address, headers=dict(headers or {}), method="GET")
+        return self._open(request, None)

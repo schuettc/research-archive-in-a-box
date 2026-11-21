@@ -255,6 +255,15 @@ def build(session: Session) -> MCPServer:
         sign_in and the curator group."""
         return submit.submission_files(session, id)
 
+    @mcp.tool(name="read_submission_file")
+    def read_submission_file_tool(id: str, path: str, rows: int = 20) -> dict[str, Any]:
+        """Read one file of a submission in review, by its path as submission_files lists
+        it: datapackage.json whole (up to 1 MiB), any other text file as its first `rows`
+        lines, read from at most its first 64 KiB. Answers the text, the round, the file's
+        size and `cut` when there is more than the text. A file that isn't text is refused.
+        Needs sign_in and the curator group."""
+        return submit.read_submission_file(session, id, path, rows)
+
     @mcp.tool(name="decide")
     def decide_tool(
         id: str,
