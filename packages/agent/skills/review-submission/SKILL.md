@@ -46,7 +46,8 @@ note; the plugin then asks them once more itself, in a dialog.** The tools come 
    `submissions` with the id and report its status as it stands. Say it is published, and
    give `/datasets/<id>` on the archive, only once that status is `published`. `decide`
    answers the `archive` it went to; say it with the decision. When the status is
-   `failed`, show the `reason` of its `failed` event and say: "This submission can't
+   `failed`, show the `reason` of its `failed` event (an older event with no `reason`: say the
+   archive couldn't finish publishing, and never show its `error`) and say: "This submission can't
    continue. The contributor can submit the package again; it will come back to the queue."
    Nothing can approve it again.
 
