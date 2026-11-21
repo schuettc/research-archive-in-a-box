@@ -1,4 +1,5 @@
-"""Submitting and reviewing: submit, submissions, submission_files and decide.
+"""Submitting and reviewing: submit, submissions, submission_files, read_submission_file and
+decide.
 
 The request and answer shapes are those of `archive_backend.submissions` (Plan 7).
 """
@@ -24,6 +25,11 @@ DECISIONS = ("approve", "reject", "request-changes")
 DATASET_ID = re.compile(r"[A-Za-z0-9_-]{1,200}")
 """The dataset ids the archive's create takes (`archive_backend.submissions.create`)."""
 CHUNK = 1024 * 1024
+MANIFEST = "datapackage.json"
+MANIFEST_CAP = 1024 * 1024
+"""The largest manifest read_submission_file answers whole."""
+SAMPLE = 64 * 1024
+"""How much of any other file read_submission_file asks for: the first 64 KiB."""
 
 
 def _quote(segment: str) -> str:
@@ -73,13 +79,34 @@ def _files(root: Path) -> list[dict[str, Any]]:
 
 @dataclass(frozen=True)
 class Package:
-    """A package folder checked and ready to send: its files, their total size in bytes and
-    the archive it goes to."""
+    """A package folder checked and ready to send: its files, their total size in bytes, the
+    archive it goes to and the published dataset it versions, if any."""
 
     root: Path
     files: list[dict[str, Any]]
     total: int
     archive: str
+    version_of: str | None = None
+
+
+def _dataset_id(root: Path) -> str | None:
+    """The manifest's id when the archive takes it as a dataset id, else None."""
+    dataset_id = json.loads((root / MANIFEST).read_text(encoding="utf-8")).get("id")
+    if isinstance(dataset_id, str) and DATASET_ID.fullmatch(dataset_id):
+        return dataset_id
+    return None
+
+
+def _published(session: Session, dataset_id: str | None) -> str | None:
+    """The dataset id when the archive has published it, so the submit is its new version."""
+    if dataset_id is None:
+        return None
+    try:
+        session.archive().get(f"/api/datasets/{_quote(dataset_id)}")
+    except ArchiveError:
+        # Not published (404), or not readable now: the dialog says no more than before.
+        return None
+    return dataset_id
 
 
 def prepare(session: Session, folder: str) -> Package:
@@ -103,7 +130,10 @@ def prepare(session: Session, folder: str) -> Package:
             f"The package's files total {total:,} bytes, more than the {limit // 1024**3} GiB "
             "this archive takes, so nothing was sent."
         )
-    return Package(root=root, files=files, total=total, archive=session.url())
+    version_of = _published(session, _dataset_id(root))
+    return Package(
+        root=root, files=files, total=total, archive=session.url(), version_of=version_of
+    )
 
 
 def send(session: Session, package: Package, submission: str | None = None) -> dict[str, Any]:
@@ -118,8 +148,8 @@ def send(session: Session, package: Package, submission: str | None = None) -> d
         # The manifest's id names the dataset: a published one gets its next version. An id
         # the archive doesn't take as a dataset id is left out; the archive assigns one.
         body: dict[str, Any] = {"files": files}
-        dataset_id = json.loads((root / "datapackage.json").read_text(encoding="utf-8")).get("id")
-        if isinstance(dataset_id, str) and DATASET_ID.fullmatch(dataset_id):
+        dataset_id = _dataset_id(root)
+        if dataset_id is not None:
             body["datasetId"] = dataset_id
         started = archive.post("/api/submissions", body, group=CONTRIBUTOR)
     else:
@@ -205,6 +235,66 @@ def submission_files(session: Session, id: str) -> dict[str, Any]:
             f"with its id to see where it stands. ({exc})"
         ) from exc
     return files
+
+
+def _text(data: bytes, cut: bool) -> tuple[str, bool] | None:
+    """The bytes as text and whether they were UTF-8, or None when they aren't text (a NUL
+    byte). A sample cut in the middle of a character keeps the whole characters before it;
+    text in another encoding, such as Latin-1, is read with each character UTF-8 can't
+    decode replaced."""
+    if b"\x00" in data:
+        return None
+    try:
+        return data.decode("utf-8"), True
+    except UnicodeDecodeError as exc:
+        if cut and exc.start >= len(data) - 3:
+            try:
+                return data[: exc.start].decode("utf-8"), True
+            except UnicodeDecodeError:
+                pass
+        return data.decode("utf-8", "replace"), False
+
+
+def read_submission_file(session: Session, id: str, path: str, rows: int = 20) -> dict[str, Any]:
+    """One file of a submission in review: datapackage.json whole, any other file as its first
+    `rows` lines, read from at most its first 64 KiB."""
+    if rows < 1:
+        raise Refused(f"rows is {rows}; give 1 or more.")
+    archive = session.archive()
+    for attempt in (1, 2):
+        listing = submission_files(session, id)
+        entry = next((f for f in listing.get("files", []) if f.get("path") == path), None)
+        if entry is None:
+            raise Refused(
+                f"Submission {id}'s current round has no file {path}. Call submission_files "
+                "for its paths."
+            )
+        size = int(entry.get("size", 0))
+        whole = path == MANIFEST
+        if whole and size > MANIFEST_CAP:
+            raise Refused(
+                f"Submission {id}'s {MANIFEST} is {size:,} bytes, more than the 1 MiB this tool "
+                "reads, so it wasn't read."
+            )
+        headers = {} if whole else {"Range": f"bytes=0-{SAMPLE - 1}"}
+        try:
+            data = archive.fetch(str(entry["url"]), headers)
+            break
+        except NotAllowed:
+            # The link lasts five minutes; an expired one gets a fresh list, once.
+            if attempt == 2:
+                raise
+    # A storage that ignores the Range answers the whole file; keep only the sample.
+    cut = not whole and (len(data) > SAMPLE or size > SAMPLE)
+    read = _text(data[:SAMPLE] if not whole else data, cut)
+    if read is None:
+        raise Refused(f"Submission {id}'s {path} isn't text, so it can't be read here.")
+    text, utf8 = read
+    answer = {"id": id, "round": listing.get("round"), "path": path, "size": size, "utf8": utf8}
+    if whole:
+        return {**answer, "text": text, "cut": False}
+    lines = text.splitlines(keepends=True)
+    return {**answer, "text": "".join(lines[:rows]), "cut": cut or len(lines) > rows}
 
 
 def decide(session: Session, id: str, decision: str, note: str) -> dict[str, Any]:

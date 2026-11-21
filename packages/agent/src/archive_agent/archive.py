@@ -16,19 +16,33 @@ Params = Mapping[str, str | int | float | Sequence[str] | None]
 SIGN_IN_AGAIN = "Call sign_in to sign in again, then retry."
 
 
-def _message(body: bytes) -> str:
-    """The archive's own message from an error answer, else its text."""
-    text = body.decode("utf-8", "replace").strip()
+def _reason(text: str) -> str | None:
+    """The archive's own message in an error answer's JSON, or None when it has none."""
     try:
         document = json.loads(text)
     except json.JSONDecodeError:
-        return text[:500]
+        return None
     if isinstance(document, dict):
         for key in ("message", "detail", "error"):
             value = document.get(key)
             if isinstance(value, str) and value:
                 return value
-    return text[:500]
+    return None
+
+
+def _message(body: bytes) -> str:
+    """The archive's own message from an error answer, else its text."""
+    text = body.decode("utf-8", "replace").strip()
+    return _reason(text) or text[:500]
+
+
+def _refusal(body: bytes, group: str | None) -> str | None:
+    """A 403's own reason, to lead with, or None when the group hint says it better: the
+    answer has no message, only the gateway's bare `Forbidden`, or one saying a group is missing."""
+    reason = _reason(body.decode("utf-8", "replace").strip())
+    if reason is None or reason == "Forbidden" or (group and " group" in reason):
+        return None
+    return reason
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -97,12 +111,18 @@ class Archive:
                     f"{exc.headers.get('Location')}, so it wasn't followed: your sign-in goes "
                     "only to the archive that issued it."
                 ) from exc
-            message = _message(exc.read())
+            body = exc.read()
+            message = _message(body)
             if exc.code == 401:
                 raise SignedOut(
                     f"{self.url} says you're signed out or your sign-in expired. {SIGN_IN_AGAIN}"
                 ) from exc
             if exc.code == 403:
+                # Such as a new version of a dataset someone else submitted: the archive says
+                # why, and the group hint would send the person to the admin for nothing.
+                refusal = _refusal(body, group)
+                if refusal is not None:
+                    raise NotAllowed(f"{self.url} refused this: {refusal}.") from exc
                 need = (
                     f"it needs an account in the `{group}` group"
                     if group
@@ -184,7 +204,9 @@ class Archive:
         }
         self._open(urllib.request.Request(link, data=data, headers=sent, method="PUT"), None)
 
-    def fetch(self, link: str) -> bytes:
-        """The bytes at an archive path (`/data/...`) or an absolute link, sent with no token."""
+    def fetch(self, link: str, headers: Mapping[str, str] | None = None) -> bytes:
+        """The bytes at an archive path (`/data/...`) or an absolute link, sent with no token
+        and with `headers` (such as a `Range`)."""
         address = link if link.startswith(("https://", "http://")) else self.url + link
-        return self._open(urllib.request.Request(address, method="GET"), None)
+        request = urllib.request.Request(address, headers=dict(headers or {}), method="GET")
+        return self._open(request, None)

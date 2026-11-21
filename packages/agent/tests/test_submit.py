@@ -200,6 +200,18 @@ def test_submit_names_the_contributor_group_on_a_403(
         submit.submit(session, str(package))
 
 
+def test_submit_leads_with_the_archives_reason_on_a_403(
+    connected: Any, package: Path, session: Session
+) -> None:
+    reason = "only stream-temperature-sample's submitter or a curator may version it"
+    connected.json("POST /api/submissions", {"error": reason}, 403)
+
+    with pytest.raises(NotAllowed) as refused:
+        submit.submit(session, str(package))
+
+    assert str(refused.value) == f"{connected.url} refused this: {reason}."
+
+
 def test_submissions_with_queue_reads_the_curator_queue_stale_first(
     connected: Any, curator: Session
 ) -> None:
@@ -335,6 +347,76 @@ def test_submission_files_names_the_curator_group_on_a_403(
         submit.submission_files(session, "s1")
 
 
+def held(stub: Any, files: dict[str, bytes]) -> None:
+    """Answer s1's files route as submissions.py does, each file behind a link on the stub."""
+    listing = []
+    for path, data in files.items():
+        link = f"/held/s1/2/{path}"
+        stub.raw(f"GET {link}", data)
+        listing.append(
+            {"path": path, "size": len(data), "sha256": "ab" * 32, "url": stub.url + link}
+        )
+    stub.json("GET /api/submissions/s1/files", {"round": 2, "files": listing})
+
+
+def test_read_submission_file_answers_the_manifest_whole(connected: Any, curator: Session) -> None:
+    manifest = json.dumps({"id": "x", "title": "A dataset"}, indent=2) + "\n" * 40
+    held(connected, {"datapackage.json": manifest.encode()})
+
+    answer = submit.read_submission_file(curator, "s1", "datapackage.json")
+
+    assert answer["text"] == manifest
+    assert answer["round"] == 2
+    fetched = connected.seen[-1]
+    assert fetched.path == "/held/s1/2/datapackage.json"
+    assert "range" not in fetched.headers
+    assert "authorization" not in fetched.headers
+
+
+def test_read_submission_file_cuts_a_table_to_its_first_rows_asking_for_a_range(
+    connected: Any, curator: Session
+) -> None:
+    table = "".join(f"{n},{n * 2}\n" for n in range(1000))
+    held(connected, {"data/logger.csv": table.encode()})
+
+    answer = submit.read_submission_file(curator, "s1", "data/logger.csv", rows=3)
+
+    assert answer["text"] == "0,0\n1,2\n2,4\n"
+    assert answer["cut"] is True
+    assert connected.seen[-1].headers["range"] == "bytes=0-65535"
+
+
+def test_read_submission_file_refuses_a_manifest_over_the_cap_without_fetching_it(
+    connected: Any, curator: Session
+) -> None:
+    held(connected, {"datapackage.json": b" " * (submit.MANIFEST_CAP + 1)})
+
+    with pytest.raises(Refused, match="more than the 1 MiB"):
+        submit.read_submission_file(curator, "s1", "datapackage.json")
+
+    assert [s.path for s in connected.seen] == ["/api/submissions/s1/files"]
+
+
+def test_read_submission_file_says_a_binary_file_isnt_text(
+    connected: Any, curator: Session
+) -> None:
+    held(connected, {"data/photo.png": b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"})
+
+    with pytest.raises(Refused, match="isn't text"):
+        submit.read_submission_file(curator, "s1", "data/photo.png")
+
+
+def test_read_submission_file_reads_a_table_that_isnt_utf8_and_says_so(
+    connected: Any, curator: Session
+) -> None:
+    held(connected, {"data/sites.csv": "site,name\n1,Rivi\u00e8re\n".encode("latin-1")})
+
+    answer = submit.read_submission_file(curator, "s1", "data/sites.csv")
+
+    assert answer["text"] == "site,name\n1,Rivi\ufffdre\n"
+    assert answer["utf8"] is False
+
+
 def test_a_package_over_the_archives_limit_is_refused_before_anything_is_sent(
     connected: Any, session: Session, package: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -442,6 +524,22 @@ def test_submit_asks_with_the_archive_the_files_and_their_size_and_sends_on_acce
         "/api/submissions",
         "/api/submissions/s1/submit",
     ]
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_submit_says_it_is_a_new_version_when_the_manifests_id_is_published(
+    connected: Any, package: Path, session: Session, mode: str
+) -> None:
+    connected.json(
+        "GET /api/datasets/stream-temperature-sample",
+        {"id": "stream-temperature-sample", "currentVersion": 1},
+    )
+
+    _, asked = call(session, "submit", {"folder": str(package)}, "decline", mode)
+
+    assert asked[0].endswith(
+        f"to {connected.url} as a new version of stream-temperature-sample for review?"
+    )
 
 
 @pytest.mark.parametrize("mode", MODES)

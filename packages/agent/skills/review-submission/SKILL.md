@@ -18,13 +18,14 @@ note; the plugin then asks them once more itself, in a dialog.** The tools come 
    it, the dataset it versions (if any) and how long it has waited. The title comes from
    its `datapackage.json`, read in step 2.
 2. **For the one the curator picks, read it.** Call `submissions` with its id for its status,
-   events and findings `report`, then `submission_files` for short-lived links to its
-   current files. If it answers a `report_error` instead of a `report`, tell the curator
+   events and findings `report`, then `submission_files` for its current files with their
+   sizes and SHA-256. If it answers a `report_error` instead of a `report`, tell the curator
    the findings couldn't be read and why (the `report_error` text), and say the summary
    below rests on the files alone.
-   Read its `datapackage.json` and a sample of each table (the first rows of each CSV) from
-   those links. The links expire after a few minutes: call `submission_files` again if one
-   has.
+   Call `read_submission_file` for its `datapackage.json`, then for a sample of each table
+   (its path as `submission_files` lists it; the first 20 rows unless you need more). It
+   answers `cut` when the file holds more than the text it gave. Don't open the files' links
+   yourself.
 3. **Summarise it**, each point citing the field, column or row it rests on:
    - what the data is: its subject, place, period and size;
    - how complete the metadata is: the score, and what is missing;

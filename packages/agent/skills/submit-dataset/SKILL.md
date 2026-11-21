@@ -68,8 +68,10 @@ need no network), and say what to run again:
 - **Signed out or the sign-in expired**: sign-in lasts an hour and only while this session
   runs. Call `sign_in` again (with their go) and retry. A sign-in is for one archive; after
   `connect` to another, sign in again.
-- **Not allowed** (it names the group): submitting needs the `contributor` group; the
-  archive's admin can add it.
+- **Not allowed**: pass on the archive's reason, which the error leads with. When it names
+  the `contributor` group, the archive's admin can add it; when it says only the dataset's
+  submitter or a curator may version it, the manifest's `id` belongs to someone else's
+  published dataset: give the package its own `id`, or ask that dataset's submitter.
 - **Conflict** (the archive's message): the submission isn't in a state that takes this step,
   such as one already in review. Call `submissions` to see where it stands.
 - **Refused** (the archive's message): pass it on, and fix what it names with the person.

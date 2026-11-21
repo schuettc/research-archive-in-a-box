@@ -42,8 +42,11 @@ def accepted(answer: ElicitationResult[Yes], archive: str) -> None:
 
 
 def submit_question(package: submit.Package, submission: str | None) -> str:
-    """What submit's dialog says: the files, their size, the folder and the archive."""
+    """What submit's dialog says: the files, their size, the folder, the archive and the
+    published dataset it versions, if any."""
     what = f"Send {len(package.files)} files ({package.total:,} bytes) from {package.root}"
+    if submission is None and package.version_of is not None:
+        return f"{what} to {package.archive} as a new version of {package.version_of} for review?"
     if submission is None:
         return f"{what} to {package.archive} for review?"
     return f"{what} to {package.archive} as the next round of submission {submission}?"
